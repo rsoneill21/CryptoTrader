@@ -1,0 +1,48 @@
+# CryptoTrader Backend Requirements
+
+# FastAPI Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.25
+alembic>=1.13.1
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# HTTP Client
+httpx>=0.26.0
+websockets>=12.0
+
+# AI/ML
+openai>=1.9.0
+anthropic>=0.15.0
+
+# Task Queue
+celery>=5.3.6
+redis>=5.0.1
+
+# Data Processing
+pandas>=2.2.0
+numpy>=1.26.3
+ta>=0.11.0  # Technical Analysis library
+
+# Validation
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+email-validator>=2.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+pytz>=2024.1
+
+# Testing
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+httpx>=0.26.0
+
+# Kraken API
+krakenex>=2.2.1

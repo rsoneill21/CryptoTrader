@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+backend/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+features.db*
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Agent files
+.agent.lock
+.claude_settings.json
+
+# Prompts (managed separately)
+prompts/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
