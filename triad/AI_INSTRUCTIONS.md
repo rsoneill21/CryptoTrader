@@ -257,6 +257,42 @@ Phases 2 and 6 can run in parallel. Everything else is sequential through the ch
 
 ---
 
+---
+
+## Fully Autonomous Mode (Driver Script)
+
+Instead of following the manual steps above, a human operator can launch you automatically with:
+
+```bash
+./triad/run_worker.sh claude          # Continuous loop
+./triad/run_worker.sh codex           # Continuous loop
+./triad/run_worker.sh gemini          # Continuous loop
+./triad/run_worker.sh claude --once   # One task only
+```
+
+The driver script handles:
+- Startup (cleanup, register, dashboard)
+- Finding the next task or review
+- Building a focused prompt and invoking your CLI
+- Detecting if you submitted/failed the task
+- Looping until no work remains or usage limit is hit
+- Auto-approving stale reviews each iteration
+
+**To run all 3 models in parallel**, open 3 terminals:
+
+```bash
+# Terminal 1
+./triad/run_worker.sh claude
+
+# Terminal 2
+./triad/run_worker.sh codex
+
+# Terminal 3
+./triad/run_worker.sh gemini
+```
+
+---
+
 ## Begin
 
-Start your session now. Run the three startup commands from Step 2 and begin the work loop from Step 3.
+If you're reading this directly (not launched by the driver), start your session now. Run the three startup commands from Step 2 and begin the work loop from Step 3.
