@@ -1,91 +1,58 @@
-# AGENTS STATE — CryptoTrader
+# Triad Agents State
 
-> Shared state file for Triad workflow coordination.
+> **Coordination system: Parallel Triad (triad/triad.db)**
+>
+> This file is a human-readable summary. The source of truth is `triad/triad.db`.
+> Run `python3 triad/bin/dashboard.py` for live system state.
 
----
+## Current System
 
-## Goal
-Build an AI-powered cryptocurrency trading platform with 230 features across 11 phases. Multi-agent architecture with Market Analyst, Strategy Optimizer, Sentiment/News, Risk Monitor, Trade Executor, and Orchestrator agents.
+The Triad Parallel Coordination System replaces the old sequential handoff (Claude→Codex→Gemini) with parallel independent work. All three models can work simultaneously on non-conflicting tasks.
 
-## Constraints
-- Follow PLAN.md exactly
-- No changes outside specified files without approval
-- Flag blockers immediately
-- Dark theme UI, TailwindCSS styling
-- Async Python with type hints
-- React functional components with hooks
+### How It Works
 
-## Next
-- **Claude**: Address review findings from `REVIEW_PHASE1.md`. High priority: lack of tests.
-- **Codex**: Continue implementing Phase 2, but be prepared to pause to address review findings.
+1. **Database coordination**: `triad/triad.db` (SQLite WAL) manages tasks, file locks, and worker state
+2. **File-level locking**: Models declare files before starting; conflicts are prevented atomically
+3. **Round-robin reviews**: Every completed task is reviewed by a different model before approval
+4. **Usage-aware rotation**: Models rotate when approaching API usage limits
+5. **Dependency cascade**: Completing a task automatically unblocks dependent tasks
 
----
+### Worker Instructions
 
-## In Progress
-- **Codex**: Implementing Phase 2 (Tasks 2.1-2.7) - Exchange Integration
+All models follow the unified instructions in `triad/WORKER_PROMPT.md`.
 
-## Completed
-- [x] Project analysis (2026-01-29)
-- [x] PLAN.md populated with 11 phases, 50+ tasks
-- [x] Phase 1: Foundation & Infrastructure (20 tasks) - 2026-01-29
-- [x] Phase 1 Code Review (Gemini) - 2026-01-29
+### Quick Reference
 
-## How to Run
-
-**Backend:**
 ```bash
-cd backend
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+# Startup
+python3 triad/bin/cleanup_stale.py
+python3 triad/bin/worker_register.py <MODEL>
+python3 triad/bin/dashboard.py
+
+# Work loop
+python3 triad/bin/find_work.py <MODEL>
+python3 triad/bin/claim_task.py <MODEL> <TASK_ID>
+# ... implement ...
+python3 triad/bin/submit_work.py <MODEL> <TASK_ID> --commit-hash <SHA>
+
+# Review
+python3 triad/bin/claim_review.py <MODEL> <TASK_ID>
+python3 triad/bin/submit_review.py <MODEL> <TASK_ID> approve|request_changes
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm start  # Runs on port 3000
-```
+## Project Status
 
-**Full Stack (via init.sh):**
-```bash
-./init.sh
-```
-
----
+- **Phase 1**: Foundation & Infrastructure — 20/20 tasks DONE
+- **Phase 2**: Exchange Integration — available for work
+- **Phase 6**: Risk Monitor — available for work (parallel with Phase 2)
+- **Phases 3-5, 7-11**: Blocked (waiting on dependencies)
 
 ## Known Issues
-- **High**: No automated tests for backend or frontend.
-- **Medium**: Password reset service uses in-memory storage.
-- **Low**: Hardcoded CORS origin, mismatched frontend/backend validation.
-- See `REVIEW_PHASE1.md` for full details.
 
----
+- Phase 1 review found: missing auth tests (HIGH priority)
+- Password reset uses in-memory storage
+- Hardcoded CORS origins
 
-## Section Ownership
+## Architecture Decisions
 
-| Section | Owner |
-|---------|-------|
-| Goal, Constraints, Next | Claude |
-| In Progress, Completed, How to Run | Codex |
-| Known Issues | Gemini |
-
----
-
-## Current State Summary
-
-### What Exists
-- Database models: 15 tables defined in `backend/db/models.py`
-- FastAPI entry point with health check endpoint
-- React app with routing skeleton (7 placeholder pages)
-- TailwindCSS configured
-- Project structure with empty directories
-
-### What's Needed Next (Phase 1)
-1. API router structure and authentication endpoints
-2. React auth context, login/register pages
-3. Protected route wrapper
-4. Main app layout (sidebar, header, content area)
-5. API client service with auth interceptors
-6. Celery/Redis setup for background tasks
-7. Base agent class and message queue interface
+See `triad/DECISIONS.md` for the full decision log.
