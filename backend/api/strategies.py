@@ -85,6 +85,14 @@ class StrategyResponse(BaseModel):
     updated_at: datetime
 
 
+class StrategyPromoteRequest(BaseModel):
+    """Payload required to promote a strategy to live."""
+
+    confirm: bool = Field(
+        ..., description="Explicit confirmation is required to promote a strategy to live."
+    )
+
+
 def _serialize_strategy(strategy: Strategy) -> StrategyResponse:
     return StrategyResponse(
         id=strategy.id,
@@ -161,6 +169,59 @@ async def get_strategy(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found",
+        )
+
+    return _serialize_strategy(strategy)
+
+
+@router.post("/{strategy_id}/promote", response_model=StrategyResponse)
+async def promote_strategy(
+    strategy_id: int,
+    payload: StrategyPromoteRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StrategyResponse:
+    """Mark a strategy as live after explicit confirmation."""
+    try:
+        strategy = db.get(Strategy, strategy_id)
+    except Exception as exc:
+        logger.error("Failed loading strategy for promotion %s: %s", strategy_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load strategy",
+        )
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Promotion requires explicit confirmation",
+        )
+
+    if strategy.status == "live":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Strategy is already live",
+        )
+
+    strategy.status = "live"
+    strategy.promoted_at = datetime.utcnow()
+    strategy.promoted_by_recommendation = False
+
+    try:
+        db.commit()
+        db.refresh(strategy)
+    except Exception as exc:  # pragma: no cover
+        db.rollback()
+        logger.error("Failed to persist strategy promotion %s: %s", strategy_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to promote strategy",
         )
 
     return _serialize_strategy(strategy)
