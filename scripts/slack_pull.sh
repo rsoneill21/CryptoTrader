@@ -47,23 +47,23 @@ get_channel_id() {
   resp="$(curl --fail -sS "https://slack.com/api/conversations.list?exclude_archived=true&limit=1000" \
     -H "Authorization: Bearer $SLACK_BOT_TOKEN")"
 
-  python3 - <<'PY' "$TRIAD_SLACK_CHANNEL" "$CACHE_FILE" <<< "$resp"
+  echo "$resp" | python3 -c "
 import json, sys
 name = sys.argv[1]
 cache = sys.argv[2]
 data = json.load(sys.stdin)
-if not data.get("ok"):
-  raise SystemExit(f"Slack error: {data.get('error')}")
+if not data.get('ok'):
+  raise SystemExit('Slack error: ' + str(data.get('error')))
 cid = None
-for ch in data.get("channels", []):
-  if ch.get("name") == name:
-    cid = ch.get("id")
+for ch in data.get('channels', []):
+  if ch.get('name') == name:
+    cid = ch.get('id')
     break
 if not cid:
-  raise SystemExit(f"Channel not found: {name}")
-open(cache, "w").write(cid)
+  raise SystemExit('Channel not found: ' + name)
+open(cache, 'w').write(cid)
 print(cid)
-PY
+" "$TRIAD_SLACK_CHANNEL" "$CACHE_FILE"
 }
 
 CHANNEL_ID="$(get_channel_id)"
@@ -75,46 +75,45 @@ history="$(curl --fail -sS "https://slack.com/api/conversations.history?channel=
   -H "Authorization: Bearer $SLACK_BOT_TOKEN")"
 
 # Write triad_inbox.md + triad_handoff.json
-python3 - <<'PY' "$TRIAD_SLACK_CHANNEL" "$PROJECT_ROOT" "$history"
+echo "$history" | python3 -c "
 import json, sys, datetime, re, os
 channel_name = sys.argv[1]
 out_dir = sys.argv[2]
-history_json = sys.argv[3]
-data = json.loads(history_json)
-if not data.get("ok"):
-  raise SystemExit(f"Slack error: {data.get('error')}")
+data = json.load(sys.stdin)
+if not data.get('ok'):
+  raise SystemExit('Slack error: ' + str(data.get('error')))
 
-msgs = data.get("messages", [])
+msgs = data.get('messages', [])
 
 # Slack returns newest-first; reverse for readability
 msgs = list(reversed(msgs))
 
-def ts_to_str(ts: str) -> str:
+def ts_to_str(ts):
   try:
     dt = datetime.datetime.fromtimestamp(float(ts))
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
   except Exception:
     return ts
 
 # Basic rendering: keep it readable for agents
 lines = []
-lines.append(f"# triad_inbox.md — Slack Pull")
-lines.append(f"- Channel: #{channel_name}")
-lines.append(f"- Pulled: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-lines.append("")
-lines.append("## Recent messages")
-lines.append("")
+lines.append('# triad_inbox.md — Slack Pull')
+lines.append('- Channel: #' + channel_name)
+lines.append('- Pulled: ' + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+lines.append('')
+lines.append('## Recent messages')
+lines.append('')
 
 handoff = {
-  "next": None,
-  "raw": None,
-  "ts": None,
+  'next': None,
+  'raw': None,
+  'ts': None,
 }
 
-handoff_re = re.compile(r"^\s*HANDOFF:\s*(CLAUDE|CODEX|GEMINI)\s*$", re.IGNORECASE)
+handoff_re = re.compile(r'^\s*HANDOFF:\s*(CLAUDE|CODEX|GEMINI)\s*$', re.IGNORECASE)
 
 for m in msgs:
-  text = (m.get("text") or "").strip()
+  text = (m.get('text') or '').strip()
   if not text:
     continue
 
@@ -122,31 +121,31 @@ for m in msgs:
   for line in text.splitlines():
     match = handoff_re.match(line.strip())
     if match:
-      handoff["next"] = match.group(1).upper()
-      handoff["raw"] = line.strip()
-      handoff["ts"] = m.get("ts")
+      handoff['next'] = match.group(1).upper()
+      handoff['raw'] = line.strip()
+      handoff['ts'] = m.get('ts')
 
-  user = m.get("user") or m.get("username") or "unknown"
-  ts = ts_to_str(m.get("ts", ""))
-  lines.append(f"### {ts} — {user}")
+  user = m.get('user') or m.get('username') or 'unknown'
+  ts = ts_to_str(m.get('ts', ''))
+  lines.append('### ' + ts + ' — ' + user)
   lines.append(text)
-  lines.append("")
+  lines.append('')
 
 # Write the gathered inbox once after iterating.
-open(os.path.join(out_dir, "triad_inbox.md"), "w", encoding="utf-8").write("\n".join(lines))
+open(os.path.join(out_dir, 'triad_inbox.md'), 'w', encoding='utf-8').write('\n'.join(lines))
 
 # Also emit handoff JSON (useful for tooling)
-if handoff["next"]:
+if handoff['next']:
   out = {
-    "channel": channel_name,
-    "next": handoff["next"],
-    "ts": handoff["ts"],
-    "note": "Derived from latest HANDOFF: line in channel history",
+    'channel': channel_name,
+    'next': handoff['next'],
+    'ts': handoff['ts'],
+    'note': 'Derived from latest HANDOFF: line in channel history',
   }
-  open(os.path.join(out_dir, "triad_handoff.json"), "w", encoding="utf-8").write(json.dumps(out, indent=2))
+  open(os.path.join(out_dir, 'triad_handoff.json'), 'w', encoding='utf-8').write(json.dumps(out, indent=2))
 else:
-  # Write an empty file so scripts don't fail
-  open(os.path.join(out_dir, "triad_handoff.json"), "w", encoding="utf-8").write(json.dumps({"channel": channel_name, "next": None}, indent=2))
+  # Write an empty file so scripts do not fail
+  open(os.path.join(out_dir, 'triad_handoff.json'), 'w', encoding='utf-8').write(json.dumps({'channel': channel_name, 'next': None}, indent=2))
 
-print("Wrote triad_inbox.md and triad_handoff.json")
-PY
+print('Wrote triad_inbox.md and triad_handoff.json')
+" "$TRIAD_SLACK_CHANNEL" "$PROJECT_ROOT"
