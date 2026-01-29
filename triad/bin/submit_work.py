@@ -6,11 +6,12 @@ Releases file locks and moves task to review_pending status.
 Usage: python submit_work.py <model_name> <task_id> [--commit-hash <sha>]
 """
 
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_helpers import get_connection, validate_model, log_event, now_sqlite
+from db_helpers import get_connection, validate_model, load_config, log_event, now_sqlite
 
 
 def main():
@@ -67,9 +68,38 @@ def main():
         log_event(conn, "work_submitted", model_name=model, task_id=task_id,
                   details=f"commit={commit_hash}, locks_released={released}")
 
+        # Check if we should auto-approve (solo mode)
+        config = load_config()
+        auto_approved = False
+        if config.get("auto_approve_when_solo", False):
+            # Count other active workers (not offline, not this model)
+            other_active = conn.execute(
+                "SELECT COUNT(*) as cnt FROM workers WHERE model_name != ? AND status != 'offline'",
+                (model,),
+            ).fetchone()["cnt"]
+
+            if other_active == 0:
+                # No other models active — auto-approve to avoid bottleneck
+                conn.execute(
+                    "UPDATE tasks SET status='done', reviewer=?, completed_at=? WHERE id=?",
+                    (model + "/auto", now, task_id),
+                )
+                log_event(conn, "auto_approved", model_name=model, task_id=task_id,
+                          details="No other active workers, auto-approved per config")
+
+                # Dependency cascade
+                from submit_review import unblock_dependents
+                unblocked = unblock_dependents(conn, task_id)
+                auto_approved = True
+
         conn.commit()
 
-        print(f"SUBMITTED: Task {task_id} moved to review_pending")
+        if auto_approved:
+            print(f"AUTO-APPROVED: Task {task_id} marked as done (solo mode, no other workers active)")
+            if unblocked:
+                print(f"  Unblocked {len(unblocked)} task(s): {', '.join(unblocked)}")
+        else:
+            print(f"SUBMITTED: Task {task_id} moved to review_pending")
         print(f"  {released} file lock(s) released")
         if commit_hash:
             print(f"  Commit: {commit_hash}")

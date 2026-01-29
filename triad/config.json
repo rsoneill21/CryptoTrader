@@ -4,6 +4,8 @@
   "heartbeat_interval_minutes": 5,
   "stale_heartbeat_minutes": 10,
   "review_assignment": "round_robin",
+  "auto_approve_when_solo": true,
+  "auto_approve_timeout_minutes": 15,
   "usage_limits": {
     "claude": {
       "max_tokens_per_hour": 100000,

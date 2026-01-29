@@ -119,6 +119,52 @@ def find_pending_review(model):
     return task["id"] if task else None
 
 
+def auto_approve_stale_reviews():
+    """Auto-approve review_pending tasks that have sat unclaimed past the timeout.
+
+    This prevents bottlenecks when no other model is available to review.
+    Controlled by auto_approve_timeout_minutes in config.json.
+    """
+    sys.path.insert(0, str(TRIAD_BIN))
+    from db_helpers import get_connection, load_config, log_event, now_sqlite
+    from datetime import datetime, timezone, timedelta
+
+    config = load_config()
+    timeout = config.get("auto_approve_timeout_minutes", 15)
+    if timeout <= 0:
+        return []
+
+    conn = get_connection()
+    now = now_sqlite()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout)).strftime("%Y-%m-%d %H:%M:%S")
+
+    stale = conn.execute(
+        "SELECT id, assigned_to FROM tasks WHERE status='review_pending' AND reviewer IS NULL AND review_submitted_at <= ?",
+        (cutoff,),
+    ).fetchall()
+
+    approved = []
+    if stale:
+        for task in stale:
+            conn.execute(
+                "UPDATE tasks SET status='done', reviewer='auto/timeout', completed_at=? WHERE id=?",
+                (now, task["id"]),
+            )
+            log_event(conn, "auto_approved_timeout", task_id=task["id"],
+                      details=f"Review unclaimed for >{timeout}min, auto-approved")
+            approved.append(task["id"])
+
+        # Dependency cascade for each approved task
+        from submit_review import unblock_dependents
+        for task_id in approved:
+            unblock_dependents(conn, task_id)
+
+        conn.commit()
+
+    conn.close()
+    return approved
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 auto_loop.py <model_name> [--impl-cmd \"command\"] [--max-tasks N] [--review-cmd \"command\"]")
@@ -172,6 +218,11 @@ def main():
             break
         if usage == "WARNING":
             print(f"\n[WARNING] Approaching usage limit. Will complete current iteration then stop.")
+
+        # Priority 0: Auto-approve stale reviews to prevent bottlenecks
+        stale_approved = auto_approve_stale_reviews()
+        if stale_approved:
+            print(f"\n[AUTO-APPROVE] {len(stale_approved)} stale review(s) auto-approved: {', '.join(stale_approved)}")
 
         # Priority 1: Pending reviews
         review_task = find_pending_review(model)
