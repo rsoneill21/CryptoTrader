@@ -1,0 +1,319 @@
+"""
+Authentication API routes.
+"""
+
+from fastapi import APIRouter, HTTPException, Depends, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+from db.database import get_db
+from db.models import User, Session as UserSession
+from core.security import (
+    hash_password,
+    verify_password,
+    validate_password_strength,
+    generate_session_token,
+    get_session_expiry,
+)
+from core.auth import get_current_user, get_current_session
+from services.email import email_service
+from services.password_reset import password_reset_service
+from datetime import datetime
+
+router = APIRouter()
+
+
+# --- Request/Response Models ---
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RegisterResponse(BaseModel):
+    id: int
+    email: str
+    message: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    expires_at: str
+    user_id: int
+
+
+class SessionResponse(BaseModel):
+    user_id: int
+    email: str
+    mfa_enabled: bool
+    session_timeout_minutes: int
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class MFASetupResponse(BaseModel):
+    secret: str
+    message: str
+
+
+class MFAVerifyRequest(BaseModel):
+    code: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+# --- Routes ---
+
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """
+    Register a new user account.
+
+    - Validates email format and password strength
+    - Hashes password with bcrypt
+    - Creates user in database
+    - Returns user ID
+    """
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(request.password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
+
+    # Check if email already exists
+    existing_user = db.query(User).filter(User.email == request.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered"
+        )
+
+    # Create new user
+    hashed = hash_password(request.password)
+    user = User(
+        email=request.email,
+        password_hash=hashed,
+    )
+
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered"
+        )
+
+    return RegisterResponse(
+        id=user.id,
+        email=user.email,
+        message="Registration successful"
+    )
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """
+    Authenticate user and create session.
+
+    - Validates credentials
+    - Creates session token (UUID)
+    - Stores session with expiry in database
+    - Returns token for subsequent requests
+    """
+    # Find user by email
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+
+    # Verify password
+    if not verify_password(request.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+
+    # Generate session token
+    token = generate_session_token()
+    expires_at = get_session_expiry(user.session_timeout_minutes)
+
+    # Create session record
+    session = UserSession(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at,
+    )
+    db.add(session)
+
+    # Update last login
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    return LoginResponse(
+        token=token,
+        expires_at=expires_at.isoformat(),
+        user_id=user.id
+    )
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    session: UserSession = Depends(get_current_session),
+    db: Session = Depends(get_db)
+):
+    """
+    Logout current user.
+
+    - Invalidates session token
+    - Removes session from database
+    """
+    db.delete(session)
+    db.commit()
+    return MessageResponse(message="Logged out successfully")
+
+
+@router.get("/session", response_model=SessionResponse)
+async def get_session(user: User = Depends(get_current_user)):
+    """
+    Get current session information.
+
+    - Validates session token from Authorization header
+    - Returns current user info if valid
+    - Returns 401 if expired or invalid
+    """
+    return SessionResponse(
+        user_id=user.id,
+        email=user.email,
+        mfa_enabled=user.mfa_enabled,
+        session_timeout_minutes=user.session_timeout_minutes
+    )
+
+
+@router.post("/password/reset", response_model=MessageResponse)
+async def request_password_reset(
+    request: PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Request password reset.
+
+    - Generates reset token
+    - Stores token with expiry
+    - Sends reset email (mock for now)
+
+    Always returns success to prevent email enumeration.
+    """
+    # Find user by email
+    user = db.query(User).filter(User.email == request.email).first()
+
+    if user:
+        # Generate reset token
+        token = password_reset_service.create_token(user.id, user.email)
+
+        # Send reset email
+        await email_service.send_password_reset_email(
+            to_email=user.email,
+            reset_token=token
+        )
+
+    # Always return success to prevent email enumeration
+    return MessageResponse(
+        message="If an account with that email exists, a password reset link has been sent."
+    )
+
+
+@router.post("/password/reset/confirm", response_model=MessageResponse)
+async def confirm_password_reset(
+    request: PasswordResetConfirmRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm password reset with token.
+
+    - Validates reset token
+    - Updates password hash
+    - Invalidates all existing sessions
+    """
+    # Validate token
+    reset_token = password_reset_service.validate_token(request.token)
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    # Validate new password strength
+    is_valid, error_msg = validate_password_strength(request.new_password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
+
+    # Find user
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token"
+        )
+
+    # Update password
+    user.password_hash = hash_password(request.new_password)
+
+    # Invalidate all existing sessions for this user
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+
+    # Mark token as used
+    password_reset_service.mark_used(request.token)
+
+    db.commit()
+
+    return MessageResponse(message="Password has been reset successfully. Please log in with your new password.")
+
+
+@router.post("/mfa/setup", response_model=MFASetupResponse)
+async def setup_mfa():
+    """
+    Setup MFA for current user.
+
+    - Generates MFA secret
+    - Returns secret for authenticator app setup
+    - MFA not enabled until verified
+    """
+    # TODO: Implement later (not in Phase 1 scope)
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@router.post("/mfa/verify", response_model=MessageResponse)
+async def verify_mfa(request: MFAVerifyRequest):
+    """
+    Verify MFA code and enable MFA.
+
+    - Validates code against secret
+    - Enables MFA on user account if valid
+    """
+    # TODO: Implement later (not in Phase 1 scope)
+    raise HTTPException(status_code=501, detail="Not implemented")
