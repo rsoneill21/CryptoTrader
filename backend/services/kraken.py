@@ -12,11 +12,11 @@ import logging
 import os
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 import krakenex
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,7 @@ class OrderStatus(str, Enum):
     EXPIRED = "expired"
 
 
-@dataclass
-class Ticker:
+class Ticker(BaseModel):
     """Ticker data."""
     symbol: str
     ask: Decimal
@@ -61,9 +60,11 @@ class Ticker:
     trades_24h: int
     timestamp: datetime
 
+    class Config:
+        arbitrary_types_allowed = True
 
-@dataclass
-class OHLC:
+
+class OHLC(BaseModel):
     """OHLC candle data."""
     timestamp: datetime
     open: Decimal
@@ -74,18 +75,22 @@ class OHLC:
     vwap: Decimal
     trades: int
 
+    class Config:
+        arbitrary_types_allowed = True
 
-@dataclass
-class Balance:
+
+class Balance(BaseModel):
     """Account balance for an asset."""
     asset: str
     total: Decimal
     available: Decimal
     reserved: Decimal
 
+    class Config:
+        arbitrary_types_allowed = True
 
-@dataclass
-class OrderInfo:
+
+class OrderInfo(BaseModel):
     """Order information."""
     order_id: str
     symbol: str
@@ -99,6 +104,9 @@ class OrderInfo:
     closed_at: Optional[datetime]
     fee: Decimal
     cost: Decimal
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class KrakenAPIError(Exception):
