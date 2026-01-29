@@ -1,1 +1,4 @@
 .env
+.triad/
+triad_handoff.json
+triad_inbox.md
