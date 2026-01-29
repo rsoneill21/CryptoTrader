@@ -1,8 +1,4 @@
-Traceback (most recent call last): File "<stdin>", line 2, in <module> File "/usr/lib/python3.12/json/__init__.py", line 293, in load return 
-    loads(fp.read(),
-           ^^^^^^^^^^^^^^^^ File "/usr/lib/python3.12/json/__init__.py", line 346, in loads return _default_decoder.decode(s) ^^^^^^^^^^^^^^^^^^^^^^^^^^ 
-  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end()) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/lib/python3.12/json/decoder.py", line 355, in 
-  raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+Traceback (most recent call last): File "<stdin>", line 3, in <module> IndexError: list index out of range ./slack_post.sh: line 63: 🛠 [CODEX]: command not 
+found ./slack_post.sh: line 81: warning: here-document at line 64 delimited by end-of-file (wanted `PY')
+  File "<stdin>", line 16 PY <<< "$RESP" ^
+SyntaxError: invalid syntax
