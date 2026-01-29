@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# triad_slack_post.sh
 # Usage:
-#   ./scripts/triad_slack_post.sh CODEX "message text"
-#   ./scripts/triad_slack_post.sh CLAUDE "message text"
-#   ./scripts/triad_slack_post.sh GEMINI "message text"
+#   ./slack_post.sh CODEX "message"
+#   ./slack_post.sh CLAUDE "message"
+#   ./slack_post.sh GEMINI "message"
 #
-# Requires env:
+# Requires in environment or .env:
 #   SLACK_BOT_TOKEN
-#   TRIAD_SLACK_CHANNEL  (e.g., triad-cryptotrader)
+#   TRIAD_SLACK_CHANNEL
 
 ROLE="${1:-}"
-MESSAGE="${2:-}"
+shift || true
+MESSAGE="${*:-}"
+
+# Auto-load .env if present (project root)
+if [[ -f ".env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
 
 if [[ -z "$ROLE" || -z "$MESSAGE" ]]; then
   echo "Usage: $0 <CLAUDE|CODEX|GEMINI> \"message\""
@@ -20,62 +28,54 @@ if [[ -z "$ROLE" || -z "$MESSAGE" ]]; then
 fi
 
 if [[ -z "${SLACK_BOT_TOKEN:-}" ]]; then
-  echo "SLACK_BOT_TOKEN is not set. Load .env first:"
-  echo "  set -a; source .env; set +a"
+  echo "ERROR: SLACK_BOT_TOKEN not set. Put it in .env and re-run."
   exit 1
 fi
 
 if [[ -z "${TRIAD_SLACK_CHANNEL:-}" ]]; then
-  echo "TRIAD_SLACK_CHANNEL is not set (e.g., triad-cryptotrader)."
-  echo "Add it to your project's .env:"
-  echo "  TRIAD_SLACK_CHANNEL=triad-cryptotrader"
+  echo "ERROR: TRIAD_SLACK_CHANNEL not set (e.g., triad-cryptotrader). Put it in .env and re-run."
   exit 1
 fi
 
-# Role prefix
-PREFIX="[TRIAD]"
+PREFIX=""
 case "${ROLE^^}" in
   CLAUDE) PREFIX="🧠 [CLAUDE]" ;;
-  CODEX)  PREFIX="🛠️ [CODEX]" ;;
+  CODEX)  PREFIX="🛠 [CODEX]" ;;
   GEMINI) PREFIX="🔍 [GEMINI]" ;;
-  *) echo "Unknown role: $ROLE (use CLAUDE, CODEX, or GEMINI)"; exit 1 ;;
+  *) echo "ERROR: Unknown role '$ROLE' (use CLAUDE, CODEX, or GEMINI)"; exit 1 ;;
 esac
 
-# Post
-RESP="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  --data "$(python3 - <<'PY'
-import json, os, sys
-channel = os.environ["TRIAD_SLACK_CHANNEL"]
-prefix = sys.argv[1]
-message = sys.argv[2]
-print(json.dumps({"channel": channel, "text": f"{prefix}\n{message}"}))
-PY
-"$PREFIX" "$MESSAGE")" )"
+# Build JSON payload safely using python (no heredocs, no argv assumptions)
+PAYLOAD="$(python3 -c 'import json,os,sys
+channel=os.environ["TRIAD_SLACK_CHANNEL"]
+prefix=sys.argv[1]
+msg=sys.argv[2]
+print(json.dumps({"channel":channel,"text":prefix + "\n" + msg}))
+' "$PREFIX" "$MESSAGE")"
 
-# Debug: if empty, curl didn't return anything usable
+# Post to Slack
+RESP="$(curl -sS -X POST "https://slack.com/api/chat.postMessage" \
+  -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data "$PAYLOAD" || true)"
+
 if [[ -z "$RESP" ]]; then
-  echo "ERROR: Empty response from Slack. This is usually DNS/network/proxy."
-  echo "Try: curl -sS https://slack.com/api/api.test"
+  echo "ERROR: Empty response from Slack (likely DNS/network/proxy)."
+  echo "Try: curl -sS https://slack.com/api/api.test ; echo"
   exit 1
 fi
 
-python3 - <<'PY'
-import json, sys
-resp_text = sys.stdin.read()
+# Parse Slack response
+python3 -c 'import json,sys
+resp_text=sys.stdin.read()
 try:
-  resp = json.loads(resp_text)
-except Exception as e:
-  print("ERROR: Slack response was not JSON.")
-  print("Raw response:")
+  resp=json.loads(resp_text)
+except Exception:
+  print("ERROR: Slack response not JSON. Raw:")
   print(resp_text[:1000])
   raise
-
 if not resp.get("ok"):
   print("Slack error:", resp.get("error"))
   sys.exit(1)
-
 print("Posted ✅")
-PY <<< "$RESP"
-
+' <<< "$RESP"
