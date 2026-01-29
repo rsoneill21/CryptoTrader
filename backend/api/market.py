@@ -64,12 +64,82 @@ class PairsResponse(BaseModel):
     pairs: List[PairSummary]
 
 
+DEFAULT_PRICE_SYMBOLS = sorted(KrakenService.PAIR_MAPPINGS.keys())
+
+
+class PricesResponse(BaseModel):
+    prices: List[TickerResponse]
+
+
+class OrderbookEntry(BaseModel):
+    price: Decimal
+    volume: Decimal
+    timestamp: int
+
+
+class OrderbookResponse(BaseModel):
+    symbol: str
+    bids: List[OrderbookEntry]
+    asks: List[OrderbookEntry]
+
 def _handle_kraken_error(exc: KrakenAPIError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail=exc.message or "Failed to reach Kraken",
     )
 
+
+def _safe_decimal(value: Any, fallback: str = "0") -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (TypeError, ValueError, ArithmeticError):
+        return Decimal(fallback)
+
+
+def _safe_int(value: Any, fallback: int = 0) -> int:
+    try:
+        if value is None:
+            return fallback
+        return int(float(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _build_orderbook_entries(entries: List[Dict[str, Any]]) -> List[OrderbookEntry]:
+    sanitized: List[OrderbookEntry] = []
+    for record in entries:
+        sanitized.append(OrderbookEntry(
+            price=_safe_decimal(record.get("price")),
+            volume=_safe_decimal(record.get("volume")),
+            timestamp=_safe_int(record.get("timestamp")),
+        ))
+    return sanitized
+
+
+async def _build_candles_response(
+    symbol: str,
+    interval: str,
+    since: Optional[int],
+    limit: int,
+) -> OHLCSeriesResponse:
+    if interval not in ALLOWED_INTERVALS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported interval")
+
+    try:
+        candles, last = await kraken_service.get_ohlc(symbol, interval, since)
+    except KrakenAPIError as exc:
+        raise _handle_kraken_error(exc)
+
+    entries = _ohlc_entries(candles[:limit])
+
+    return OHLCSeriesResponse(
+        pair=symbol,
+        interval=interval,
+        last=last,
+        candles=entries,
+    )
 
 def _ticker_response(ticker: Ticker) -> TickerResponse:
     data = {
@@ -103,29 +173,83 @@ async def get_ticker(pair: str):
     return _ticker_response(ticker)
 
 
+@router.get("/prices", response_model=PricesResponse)
+async def get_market_prices(
+    symbols: Optional[List[str]] = Query(
+        None,
+        alias="symbol",
+        description="Comma-separated or repeated trading symbols to fetch.",
+    ),
+) -> PricesResponse:
+    """Return current ticker data for multiple symbols."""
+    seen: set[str] = set()
+    selected: List[str] = []
+
+    for raw in symbols or []:
+        for part in raw.split(","):
+            normalized = part.strip().upper()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            selected.append(normalized)
+
+    if not selected:
+        selected = DEFAULT_PRICE_SYMBOLS
+
+    prices: List[TickerResponse] = []
+
+    for symbol in selected:
+        try:
+            ticker = await kraken_service.get_ticker(symbol)
+        except KrakenAPIError as exc:
+            raise _handle_kraken_error(exc)
+        prices.append(_ticker_response(ticker))
+
+    return PricesResponse(prices=prices)
+
+
 @router.get("/ohlc/{pair}", response_model=OHLCSeriesResponse)
 async def get_ohlc(
     pair: str,
     interval: str = Query("1h", description="OHLC interval", pattern="^(1m|5m|15m|30m|1h|4h|1d|1w|2w)$"),
     since: Optional[int] = Query(None, ge=0, description="Unix timestamp to start from"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of candles to return"),
-):
+) -> OHLCSeriesResponse:
     """Return OHLC candle data for the requested pair and interval."""
-    if interval not in ALLOWED_INTERVALS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported interval")
+    return await _build_candles_response(pair, interval, since, limit)
 
+
+@router.get("/candles/{symbol}", response_model=OHLCSeriesResponse)
+async def get_candles(
+    symbol: str,
+    interval: str = Query("1h", description="OHLC interval", pattern="^(1m|5m|15m|30m|1h|4h|1d|1w|2w)$"),
+    since: Optional[int] = Query(None, ge=0, description="Unix timestamp to start from"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of candles to return"),
+) -> OHLCSeriesResponse:
+    """Return OHLC candle data for the requested symbol and interval."""
+    return await _build_candles_response(symbol, interval, since, limit)
+
+
+@router.get("/orderbook/{symbol}", response_model=OrderbookResponse)
+async def get_orderbook(
+    symbol: str,
+    count: int = Query(25, ge=1, le=500, description="Number of bids/asks to return per side"),
+) -> OrderbookResponse:
+    """Return a simplified order book for the given trading symbol."""
     try:
-        candles, last = await kraken_service.get_ohlc(pair, interval, since)
+        orderbook = await kraken_service.get_orderbook(symbol, count=count)
     except KrakenAPIError as exc:
         raise _handle_kraken_error(exc)
 
-    entries = _ohlc_entries(candles[:limit])
+    orderbook = orderbook or {}
 
-    return OHLCSeriesResponse(
-        pair=pair,
-        interval=interval,
-        last=last,
-        candles=entries,
+    bids = _build_orderbook_entries(orderbook.get("bids", []))
+    asks = _build_orderbook_entries(orderbook.get("asks", []))
+
+    return OrderbookResponse(
+        symbol=symbol,
+        bids=bids,
+        asks=asks,
     )
 
 
