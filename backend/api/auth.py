@@ -2,6 +2,8 @@
 Authentication API routes.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -20,6 +22,8 @@ from core.auth import get_current_user, get_current_session
 from services.email import email_service
 from services.password_reset import password_reset_service
 from datetime import datetime
+
+logger = logging.getLogger("cryptotrader.auth")
 
 router = APIRouter()
 
@@ -89,9 +93,12 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     - Creates user in database
     - Returns user ID
     """
+    logger.info("Registration attempt for email %s", request.email)
+
     # Validate password strength
     is_valid, error_msg = validate_password_strength(request.password)
     if not is_valid:
+        logger.warning("Registration failed for %s: weak password", request.email)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
@@ -100,6 +107,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
+        logger.warning("Registration failed for %s: duplicate email", request.email)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered"
@@ -118,11 +126,13 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         db.refresh(user)
     except IntegrityError:
         db.rollback()
+        logger.error("Registration failed for %s: integrity error", request.email)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered"
         )
 
+    logger.info("User registered successfully: id=%s, email=%s", user.id, user.email)
     return RegisterResponse(
         id=user.id,
         email=user.email,
@@ -140,9 +150,12 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     - Stores session with expiry in database
     - Returns token for subsequent requests
     """
+    logger.info("Login attempt for email %s", request.email)
+
     # Find user by email
     user = db.query(User).filter(User.email == request.email).first()
     if not user:
+        logger.warning("Login failed for %s: user not found", request.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
@@ -150,6 +163,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
     # Verify password
     if not verify_password(request.password, user.password_hash):
+        logger.warning("Login failed for %s: invalid password", request.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
@@ -171,6 +185,12 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     db.commit()
 
+    logger.info(
+        "User %s authenticated and session created (expires %s)",
+        user.email,
+        expires_at.isoformat()
+    )
+
     return LoginResponse(
         token=token,
         expires_at=expires_at.isoformat(),
@@ -189,8 +209,10 @@ async def logout(
     - Invalidates session token
     - Removes session from database
     """
+    logger.info("Logout requested for user id=%s", session.user_id)
     db.delete(session)
     db.commit()
+    logger.info("User %s logged out successfully", session.user_id)
     return MessageResponse(message="Logged out successfully")
 
 
@@ -225,6 +247,8 @@ async def request_password_reset(
 
     Always returns success to prevent email enumeration.
     """
+    logger.info("Password reset request received for email %s", request.email)
+
     # Find user by email
     user = db.query(User).filter(User.email == request.email).first()
 
@@ -239,6 +263,7 @@ async def request_password_reset(
         )
 
     # Always return success to prevent email enumeration
+    logger.info("Password reset flow triggered for email %s (user exists: %s)", request.email, bool(user))
     return MessageResponse(
         message="If an account with that email exists, a password reset link has been sent."
     )
@@ -256,9 +281,11 @@ async def confirm_password_reset(
     - Updates password hash
     - Invalidates all existing sessions
     """
+    logger.info("Confirming password reset token")
     # Validate token
     reset_token = password_reset_service.validate_token(request.token)
     if not reset_token:
+        logger.warning("Password reset confirmation failed: invalid token")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
@@ -275,6 +302,7 @@ async def confirm_password_reset(
     # Find user
     user = db.query(User).filter(User.id == reset_token.user_id).first()
     if not user:
+        logger.warning("Password reset confirmation failed: user %s not found", reset_token.user_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid reset token"
@@ -290,6 +318,7 @@ async def confirm_password_reset(
     password_reset_service.mark_used(request.token)
 
     db.commit()
+    logger.info("Password reset completed for user %s", user.email)
 
     return MessageResponse(message="Password has been reset successfully. Please log in with your new password.")
 

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from db.database import init_db
-from api import auth_router, system_router
+from api import auth_router, market_router, system_router
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ async def root():
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(system_router, prefix="/api/system", tags=["System"])
+app.include_router(market_router, prefix="/api/market", tags=["Market"])
 
 # Future routers (to be implemented in later phases)
 # from api.strategies import router as strategies_router

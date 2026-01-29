@@ -2,3 +2,6 @@
 .triad/
 triad_handoff.json
 triad_inbox.md
+__pycache__/
+*.pyc
+backend/venv/
