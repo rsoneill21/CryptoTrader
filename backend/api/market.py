@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
 from services.kraken_ws import KrakenWSFeed, kraken_ws
+from services.portfolio import PortfolioSnapshot, portfolio_service
 
 router = APIRouter()
 
@@ -275,6 +276,15 @@ async def list_pairs():
     ]
 
     return PairsResponse(pairs=summaries)
+
+
+@router.get("/portfolio", response_model=PortfolioSnapshot)
+async def get_portfolio(force_refresh: bool = Query(False, description="Skip cache and refresh data")):
+    """Return cached Kraken balance snapshot."""
+    try:
+        return await portfolio_service.get_snapshot(force_refresh=force_refresh)
+    except KrakenAPIError as exc:
+        raise _handle_kraken_error(exc)
 
 
 ALLOWED_WS_FEEDS = {
