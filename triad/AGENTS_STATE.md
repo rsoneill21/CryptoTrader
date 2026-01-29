@@ -16,20 +16,19 @@ Build an AI-powered cryptocurrency trading platform with 230 features across 11 
 - React functional components with hooks
 
 ## Next
-- Monitor Codex progress on Phase 2
-- Review Gemini's Phase 1 review when complete
-- Address any review findings
+- **Claude**: Address review findings from `REVIEW_PHASE1.md`. High priority: lack of tests.
+- **Codex**: Continue implementing Phase 2, but be prepared to pause to address review findings.
 
 ---
 
 ## In Progress
 - **Codex**: Implementing Phase 2 (Tasks 2.1-2.7) - Exchange Integration
-- **Gemini**: Reviewing Phase 1 code
 
 ## Completed
 - [x] Project analysis (2026-01-29)
 - [x] PLAN.md populated with 11 phases, 50+ tasks
 - [x] Phase 1: Foundation & Infrastructure (20 tasks) - 2026-01-29
+- [x] Phase 1 Code Review (Gemini) - 2026-01-29
 
 ## How to Run
 
@@ -56,7 +55,10 @@ npm start  # Runs on port 3000
 ---
 
 ## Known Issues
-_None_
+- **High**: No automated tests for backend or frontend.
+- **Medium**: Password reset service uses in-memory storage.
+- **Low**: Hardcoded CORS origin, mismatched frontend/backend validation.
+- See `REVIEW_PHASE1.md` for full details.
 
 ---
 
