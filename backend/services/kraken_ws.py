@@ -125,6 +125,7 @@ class KrakenWebSocket:
 
         # Client connections (for broadcasting)
         self._clients: Set[Any] = set()
+        self._client_feeds: Dict[Any, Set[str]] = {}
 
         # Heartbeat
         self._last_heartbeat: datetime = datetime.utcnow()
@@ -584,7 +585,7 @@ class KrakenWebSocket:
 
     # Client management for broadcasting
 
-    def add_client(self, client: Any) -> None:
+    def add_client(self, client: Any, feeds: Optional[Set[str]] = None) -> None:
         """
         Add a client connection for broadcasting.
 
@@ -592,6 +593,8 @@ class KrakenWebSocket:
             client: WebSocket client connection
         """
         self._clients.add(client)
+        feed_set = set(feeds) if feeds else set()
+        self._client_feeds[client] = feed_set
         logger.info(f"Client added. Total clients: {len(self._clients)}")
 
     def remove_client(self, client: Any) -> None:
@@ -602,6 +605,7 @@ class KrakenWebSocket:
             client: WebSocket client connection
         """
         self._clients.discard(client)
+        self._client_feeds.pop(client, None)
         logger.info(f"Client removed. Total clients: {len(self._clients)}")
 
     async def _broadcast(self, event_type: str, data: Dict[str, Any]) -> None:
@@ -624,6 +628,9 @@ class KrakenWebSocket:
         disconnected = set()
 
         for client in self._clients:
+            feeds = self._client_feeds.get(client)
+            if feeds and event_type not in feeds:
+                continue
             try:
                 await client.send_text(message)
             except Exception:

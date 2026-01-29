@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from db.database import init_db
+from services.kraken_ws import start_kraken_ws, stop_kraken_ws
 from api import auth_router, market_router, system_router
 
 
@@ -16,8 +17,10 @@ async def lifespan(app: FastAPI):
     # Startup
     print("Starting CryptoTrader Backend...")
     init_db()
+    await start_kraken_ws()
     yield
     # Shutdown
+    await stop_kraken_ws()
     print("Shutting down CryptoTrader Backend...")
 
 

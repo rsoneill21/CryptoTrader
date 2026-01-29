@@ -2,12 +2,13 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
+from services.kraken_ws import KrakenWSFeed, kraken_ws
 
 router = APIRouter()
 
@@ -150,3 +151,32 @@ async def list_pairs():
     ]
 
     return PairsResponse(pairs=summaries)
+
+
+ALLOWED_WS_FEEDS = {
+    KrakenWSFeed.TICKER.value,
+    KrakenWSFeed.TRADE.value,
+    KrakenWSFeed.OHLC.value,
+}
+
+
+@router.websocket("/stream/{feed}")
+async def market_stream(websocket: WebSocket, feed: str):
+    """
+    WebSocket endpoint that streams Kraken updates to connected clients.
+    Clients pick a feed (ticker, trade, ohlc) and receive matching events.
+    """
+    feed = feed.lower()
+    if feed not in ALLOWED_WS_FEEDS:
+        await websocket.close(code=1003)
+        return
+
+    await websocket.accept()
+    kraken_ws.add_client(websocket, feeds={feed})
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        kraken_ws.remove_client(websocket)
