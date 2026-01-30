@@ -388,25 +388,29 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
       </style>
     </head>
     <body class="bg-slate-950 text-slate-100">
-      <div class="flex min-h-screen items-center justify-center px-4 py-10 sm:py-16">
+      <div class="flex min-h-screen flex-col items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
         <div class="w-full max-w-5xl space-y-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/60 sm:p-10">
           <header class="space-y-2 text-center">
             <p class="text-xs uppercase tracking-[0.4em] text-cyan-400">Security</p>
             <h1 class="text-3xl font-semibold text-white">Reset your password</h1>
-            <p class="text-sm text-slate-400">Request a reset link and complete the confirmation without leaving the page.</p>
+            <p class="text-sm text-slate-400">
+              Request a reset link, paste the code from your inbox, and choose a new password without losing
+              momentum.
+            </p>
           </header>
 
-          <div class="grid gap-6 lg:grid-cols-2">
-            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+          <div class="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6 shadow-inner">
               <div class="space-y-2">
                 <p class="text-sm font-semibold text-slate-200">Step 1 · Request reset link</p>
-                <p class="text-xs text-slate-400">We will only send an email if the account exists. Check your inbox (and spam folder).</p>
+                <p class="text-xs text-slate-400">We will only email you if the account exists. Check both inbox and spam folders.</p>
               </div>
               <form id="request-reset-form" class="space-y-4" novalidate>
                 <div>
                   <label for="request-email" class="text-xs uppercase tracking-wider text-slate-400">Email</label>
                   <input
                     id="request-email"
+                    name="email"
                     type="email"
                     required
                     class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
@@ -420,20 +424,21 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                 >
                   Send reset link
                 </button>
-                <p id="request-alert" class="min-h-[1.25rem] text-sm text-slate-400"></p>
+                <p id="request-alert" aria-live="polite" class="min-h-[1.25rem] text-sm text-slate-400"></p>
               </form>
             </section>
 
-            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6 shadow-inner">
               <div class="space-y-2">
                 <p class="text-sm font-semibold text-slate-200">Step 2 · Confirm reset</p>
-                <p class="text-xs text-slate-400">Paste the code from the email, pick a new password, and submit.</p>
+                <p class="text-xs text-slate-400">Paste the code from the email and choose a strong password to finish.</p>
               </div>
               <form id="confirm-reset-form" class="space-y-4" novalidate>
                 <div>
                   <label for="confirm-email" class="text-xs uppercase tracking-wider text-slate-400">Email</label>
                   <input
                     id="confirm-email"
+                    name="email"
                     type="email"
                     required
                     class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
@@ -444,6 +449,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                   <label for="reset-token" class="text-xs uppercase tracking-wider text-slate-400">Reset code</label>
                   <input
                     id="reset-token"
+                    name="token"
                     type="text"
                     required
                     class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
@@ -454,6 +460,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                   <label for="new-password" class="text-xs uppercase tracking-wider text-slate-400">New password</label>
                   <input
                     id="new-password"
+                    name="new-password"
                     type="password"
                     required
                     class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
@@ -464,6 +471,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                   <label for="confirm-password" class="text-xs uppercase tracking-wider text-slate-400">Confirm password</label>
                   <input
                     id="confirm-password"
+                    name="confirm-password"
                     type="password"
                     required
                     class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
@@ -477,7 +485,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                 >
                   Update password
                 </button>
-                <p id="confirm-alert" class="min-h-[1.25rem] text-sm text-slate-400"></p>
+                <p id="confirm-alert" aria-live="polite" class="min-h-[1.25rem] text-sm text-slate-400"></p>
               </form>
             </section>
           </div>
@@ -498,17 +506,16 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
           const newPassword = document.getElementById("new-password");
           const confirmPassword = document.getElementById("confirm-password");
 
-          const normalize = (value) => value.trim();
+          const normalize = (value) => (value ?? "").trim();
 
-          const updateAlert = (element, message, type = "neutral") => {
-            const base = "min-h-[1.25rem] text-sm font-medium transition-colors";
+          const updateAlert = (element, message, tone = "neutral") => {
             const palette = {
               success: "text-emerald-300",
               error: "text-rose-400",
               neutral: "text-slate-400",
             };
             element.textContent = message;
-            element.className = `${base} ${palette[type] ?? palette.neutral}`;
+            element.className = `min-h-[1.25rem] text-sm font-medium transition-colors ${palette[tone] ?? palette.neutral}`;
           };
 
           const handleResponse = async (response, fallbackMessage) => {
@@ -524,7 +531,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
             event.preventDefault();
             const email = normalize(requestEmail.value);
             if (!email) {
-              updateAlert(requestAlert, "Please enter your email.", "error");
+              updateAlert(requestAlert, "Please enter your email to receive the reset link.", "error");
               return;
             }
             requestButton.disabled = true;
@@ -541,7 +548,11 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                 }),
                 "Unable to send reset email."
               );
-              updateAlert(requestAlert, "If the email exists, you will receive instructions shortly.", "success");
+              updateAlert(
+                requestAlert,
+                "If we found an account for that address, check your inbox for a code.",
+                "success"
+              );
               confirmEmail.value = email;
             } catch (error) {
               updateAlert(requestAlert, error.message ?? "Unable to send reset email.", "error");
@@ -552,11 +563,10 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
 
           confirmForm.addEventListener("submit", async (event) => {
             event.preventDefault();
-            const email = normalize(confirmEmail.value);
-            const token = normalize(resetToken.value);
+            const tokenValue = normalize(resetToken.value);
             const passwordValue = normalize(newPassword.value);
             const confirmValue = normalize(confirmPassword.value);
-            if (!email || !token || !passwordValue || !confirmValue) {
+            if (!tokenValue || !passwordValue || !confirmValue) {
               updateAlert(confirmAlert, "Complete every field to continue.", "error");
               return;
             }
@@ -565,7 +575,7 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
               return;
             }
             confirmButton.disabled = true;
-            updateAlert(confirmAlert, "Verifying code...", "neutral");
+            updateAlert(confirmAlert, "Verifying code and updating password...", "neutral");
             try {
               await handleResponse(
                 await fetch("/api/auth/password/reset/confirm", {
@@ -575,16 +585,16 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                     Accept: "application/json",
                   },
                   body: JSON.stringify({
-                    token,
+                    token: tokenValue,
                     new_password: passwordValue,
                   }),
                 }),
                 "Unable to reset password."
               );
               updateAlert(confirmAlert, "Success! You can now log in with your new password.", "success");
+              resetToken.value = "";
               newPassword.value = "";
               confirmPassword.value = "";
-              resetToken.value = "";
             } catch (error) {
               updateAlert(confirmAlert, error.message ?? "Unable to reset password.", "error");
             } finally {
