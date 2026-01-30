@@ -1,5 +1,6 @@
 """Market data API routes backed by Kraken public endpoints."""
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,31 @@ from services.portfolio import PortfolioSnapshot, portfolio_service
 router = APIRouter()
 
 ALLOWED_INTERVALS = list(KrakenService.INTERVAL_MAP.keys())
+
+PAIR_REGEX = r"^[A-Z0-9]{2,12}/[A-Z0-9]{2,12}$"
+PAIR_PATTERN = re.compile(PAIR_REGEX)
+
+
+def _normalize_trading_pair(value: str, parameter: str = "pair") -> str:
+    """Ensure a trading pair is provided in BASE/QUOTE format."""
+    sanitized = value.strip().upper()
+    if not sanitized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{parameter} cannot be empty",
+        )
+
+    if not PAIR_PATTERN.match(sanitized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{parameter} must be in BASE/QUOTE format "
+                "using uppercase letters and numbers "
+                f"(e.g., BTC/USD). Got: {value}"
+            ),
+        )
+
+    return sanitized
 
 
 class TickerResponse(BaseModel):
@@ -166,8 +192,9 @@ def _ohlc_entries(candles: List[OHLC]) -> List[OHLCEntry]:
 @router.get("/ticker/{pair}", response_model=TickerResponse)
 async def get_ticker(pair: str):
     """Return current ticker data for the requested pair."""
+    normalized_pair = _normalize_trading_pair(pair, parameter="pair")
     try:
-        ticker = await kraken_service.get_ticker(pair)
+        ticker = await kraken_service.get_ticker(normalized_pair)
     except KrakenAPIError as exc:
         raise _handle_kraken_error(exc)
 
@@ -188,9 +215,14 @@ async def get_market_prices(
 
     for raw in symbols or []:
         for part in raw.split(","):
-            normalized = part.strip().upper()
-            if not normalized or normalized in seen:
+            candidate = part.strip()
+            if not candidate:
                 continue
+
+            normalized = _normalize_trading_pair(candidate, parameter="symbol")
+            if normalized in seen:
+                continue
+
             seen.add(normalized)
             selected.append(normalized)
 
@@ -217,7 +249,8 @@ async def get_ohlc(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of candles to return"),
 ) -> OHLCSeriesResponse:
     """Return OHLC candle data for the requested pair and interval."""
-    return await _build_candles_response(pair, interval, since, limit)
+    validated_pair = _normalize_trading_pair(pair, parameter="pair")
+    return await _build_candles_response(validated_pair, interval, since, limit)
 
 
 @router.get("/candles/{symbol}", response_model=OHLCSeriesResponse)
@@ -228,7 +261,8 @@ async def get_candles(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of candles to return"),
 ) -> OHLCSeriesResponse:
     """Return OHLC candle data for the requested symbol and interval."""
-    return await _build_candles_response(symbol, interval, since, limit)
+    validated_symbol = _normalize_trading_pair(symbol, parameter="symbol")
+    return await _build_candles_response(validated_symbol, interval, since, limit)
 
 
 @router.get("/orderbook/{symbol}", response_model=OrderbookResponse)
@@ -237,8 +271,9 @@ async def get_orderbook(
     count: int = Query(25, ge=1, le=500, description="Number of bids/asks to return per side"),
 ) -> OrderbookResponse:
     """Return a simplified order book for the given trading symbol."""
+    validated_symbol = _normalize_trading_pair(symbol, parameter="symbol")
     try:
-        orderbook = await kraken_service.get_orderbook(symbol, count=count)
+        orderbook = await kraken_service.get_orderbook(validated_symbol, count=count)
     except KrakenAPIError as exc:
         raise _handle_kraken_error(exc)
 

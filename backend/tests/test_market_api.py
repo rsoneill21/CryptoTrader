@@ -91,3 +91,21 @@ async def test_get_ticker_kraken_error(monkeypatch):
 
     assert exc.value.status_code == 502
     assert "limit exceeded" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_invalid_pair():
+    with pytest.raises(HTTPException) as exc:
+        await market_module.get_ticker("not-a-pair")
+
+    assert exc.value.status_code == 400
+    assert "BASE/QUOTE" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_get_market_prices_invalid_symbol():
+    with pytest.raises(HTTPException) as exc:
+        await market_module.get_market_prices(symbols=["BTC/USD", "invalid"])
+
+    assert exc.value.status_code == 400
+    assert "BASE/QUOTE" in str(exc.value.detail)
