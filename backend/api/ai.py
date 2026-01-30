@@ -16,12 +16,13 @@ from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from db.database import get_db
-from db.models import ChatHistory
+from db.models import ChatHistory, StrategyPerformance
+from services.ai_models import AIModelDescriptor, AIModelsService, AIProvider
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,43 @@ class ChatHistoryList(BaseModel):
     total: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AIModelInventoryResponse(BaseModel):
+    """Wrapper for API responses that list configured AI models."""
+
+    models: List[AIModelDescriptor]
+
+
+class AIModelActivationRequest(BaseModel):
+    """Request body used to change the active provider."""
+
+    provider: AIProvider
+
+
+class AIModelActivationResponse(BaseModel):
+    """Confirmation payload after activating a provider."""
+
+    active_provider: AIProvider
+    models: List[AIModelDescriptor]
+
+
+class ModelComparisonEntry(BaseModel):
+    provider: AIProvider
+    model: str
+    description: str
+    available: bool
+    active: bool
+    strategy_count: int
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    average_win_rate: Optional[float]
+    total_pnl: float
+
+
+class ModelComparisonResponse(BaseModel):
+    comparisons: List[ModelComparisonEntry]
 
 
 class ChatAIService:
@@ -339,3 +377,119 @@ async def chat_history(
         ) from exc
 
     return ChatHistoryList(history=entries, total=total)
+
+
+def _normalize_int(value: Optional[Any]) -> int:
+    if value is None:
+        return 0
+    return int(value)
+
+
+def _normalize_float(value: Optional[Any]) -> float:
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+def _normalize_optional_float(value: Optional[Any]) -> Optional[float]:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _fetch_model_performance_stats(db: Session, model_name: str) -> Dict[str, Any]:
+    row = (
+        db.query(
+            func.count(StrategyPerformance.id).label("strategy_count"),
+            func.sum(StrategyPerformance.total_trades).label("total_trades"),
+            func.sum(StrategyPerformance.winning_trades).label("winning_trades"),
+            func.sum(StrategyPerformance.losing_trades).label("losing_trades"),
+            func.avg(StrategyPerformance.win_rate).label("average_win_rate"),
+            func.sum(StrategyPerformance.total_pnl).label("total_pnl"),
+        )
+        .filter(StrategyPerformance.ai_model_used == model_name)
+        .one()
+    )
+    return {
+        "strategy_count": _normalize_int(row.strategy_count),
+        "total_trades": _normalize_int(row.total_trades),
+        "winning_trades": _normalize_int(row.winning_trades),
+        "losing_trades": _normalize_int(row.losing_trades),
+        "average_win_rate": _normalize_optional_float(row.average_win_rate),
+        "total_pnl": _normalize_float(row.total_pnl),
+    }
+
+
+@router.get("/models", response_model=AIModelInventoryResponse)
+async def list_ai_models() -> AIModelInventoryResponse:
+    """Return the configured AI model inventory."""
+    service = AIModelsService()
+    try:
+        models = service.list_model_inventory()
+        return AIModelInventoryResponse(models=models)
+    finally:
+        await service.close()
+
+
+@router.put("/models/active", response_model=AIModelActivationResponse)
+async def set_active_ai_model(
+    payload: AIModelActivationRequest,
+) -> AIModelActivationResponse:
+    """Switch the active AI provider for downstream requests."""
+    service = AIModelsService()
+    try:
+        service.set_active_provider(payload.provider)
+        inventory = service.list_model_inventory()
+        return AIModelActivationResponse(
+            active_provider=payload.provider,
+            models=inventory,
+        )
+    except RuntimeError as exc:
+        logger.warning(
+            "Failed to set active AI provider %s: %s",
+            payload.provider.value,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    finally:
+        await service.close()
+
+
+@router.get("/models/comparison", response_model=ModelComparisonResponse)
+async def model_comparison(
+    db: Session = Depends(get_db),
+) -> ModelComparisonResponse:
+    """Provide per-provider stats that support the model comparison UI."""
+    service = AIModelsService()
+    try:
+        inventory = service.list_model_inventory()
+        comparison_entries: List[ModelComparisonEntry] = []
+        for descriptor in inventory:
+            stats = _fetch_model_performance_stats(db, descriptor.model)
+            comparison_entries.append(
+                ModelComparisonEntry(
+                    provider=descriptor.provider,
+                    model=descriptor.model,
+                    description=descriptor.description,
+                    available=descriptor.available,
+                    active=descriptor.active,
+                    strategy_count=stats["strategy_count"],
+                    total_trades=stats["total_trades"],
+                    winning_trades=stats["winning_trades"],
+                    losing_trades=stats["losing_trades"],
+                    average_win_rate=stats["average_win_rate"],
+                    total_pnl=stats["total_pnl"],
+                )
+            )
+        return ModelComparisonResponse(comparisons=comparison_entries)
+    except SQLAlchemyError as exc:
+        logger.exception("Failed to query model comparison data: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load AI model comparison data",
+        ) from exc
+    finally:
+        await service.close()
