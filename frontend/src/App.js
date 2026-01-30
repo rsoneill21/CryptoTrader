@@ -13,6 +13,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import ForgotPassword from './pages/ForgotPassword';
 
 // Placeholder pages (to be implemented)
 const StrategyLab = () => (
@@ -47,15 +48,6 @@ const Settings = () => (
   <div className="text-white">
     <h1 className="text-2xl font-bold mb-4">Settings</h1>
     <p className="text-gray-400">Coming soon...</p>
-  </div>
-);
-
-const ForgotPassword = () => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
-    <div className="max-w-md w-full text-center">
-      <h1 className="text-2xl font-bold text-white mb-4">Forgot Password</h1>
-      <p className="text-gray-400">Password reset functionality coming soon...</p>
-    </div>
   </div>
 );
 
