@@ -22,12 +22,20 @@ Create a `.env` or export environment variables before running:
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (if you plan to hit the AI agents)
 - `REDIS_URL` (defaults to `redis://localhost:6379/0`, used by Celery)
 
+### Database migrations
+```bash
+cd backend
+source venv/bin/activate
+alembic upgrade head
+```
+Alembic now owns the schema. The initial migration lives under `backend/alembic/versions/0001_initial_schema.py`, and `backend/db/database.init_db()` calls `alembic upgrade head` automatically when the API starts, so deployment never reverts the schema. When adding a new model or changing an existing table, run `alembic revision --autogenerate -m "describe change"` and review the generated script before applying it.
+
 ### Database initialization
 ```bash
 source venv/bin/activate
 python init_db.py
 ```
-This script imports the models under `db/models.py` and runs `Base.metadata.create_all` so tables exist before you start the app.
+This script now triggers Alembic migrations (instead of calling `Base.metadata.create_all`) so your database is brought up to date before the app launches.
 
 ## Running the API server
 ```bash

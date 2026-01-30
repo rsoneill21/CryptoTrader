@@ -33,7 +33,10 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables."""
+    """Apply migrations so the database schema is up to date."""
+
     from db import models  # Import models to register them
-    Base.metadata.create_all(bind=engine)
-    print("Database initialized successfully")
+    from db.migrations import run_migrations
+
+    run_migrations()
+    print("Database schema verified via Alembic migrations")
