@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const DEFAULT_FEED = 'ohlc';
 const DEFAULT_RECONNECT_MS = 5000;
+const MAX_PENDING_MESSAGES = 50;
 
 const buildWebSocketUrl = (feed = DEFAULT_FEED) => {
   const fallback = `ws://localhost:8000/api/market/stream/${feed}`;
@@ -54,6 +55,7 @@ export const useWebSocket = ({
   const reconnectTimerRef = useRef(null);
   const mountedRef = useRef(false);
   const shouldReconnectRef = useRef(autoReconnect);
+  const pendingMessagesRef = useRef([]);
 
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [connectionError, setConnectionError] = useState('');
@@ -65,6 +67,36 @@ export const useWebSocket = ({
       setter(value);
     }
   }, []);
+
+  const queuePendingMessage = useCallback((payload) => {
+    const queue = pendingMessagesRef.current;
+    if (queue.length >= MAX_PENDING_MESSAGES) {
+      queue.shift();
+    }
+    queue.push(payload);
+  }, []);
+
+  const flushPendingMessages = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const queue = pendingMessagesRef.current;
+    while (queue.length > 0) {
+      const next = queue.shift();
+      try {
+        socket.send(next);
+      } catch (err) {
+        queue.unshift(next);
+        safeSet(setConnectionError, 'Unable to flush queued messages');
+        if (typeof onError === 'function') {
+          onError(err);
+        }
+        break;
+      }
+    }
+  }, [onError, safeSet]);
 
   const processPayload = useCallback(
     (payload) => {
@@ -147,6 +179,7 @@ export const useWebSocket = ({
       if (typeof onOpen === 'function') {
         onOpen();
       }
+      flushPendingMessages();
     };
 
     socket.onmessage = (event) => {
@@ -182,7 +215,7 @@ export const useWebSocket = ({
       }
       scheduleReconnect();
     };
-  }, [feed, reconnectInterval, onClose, onError, onOpen, processPayload, safeSet]);
+  }, [feed, reconnectInterval, onClose, onError, onOpen, processPayload, safeSet, flushPendingMessages]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -202,15 +235,18 @@ export const useWebSocket = ({
   const sendMessage = useCallback(
     (message) => {
       const socket = socketRef.current;
+      const payload = typeof message === 'string' ? message : JSON.stringify(message);
+
       if (!socket || socket.readyState !== WebSocket.OPEN) {
+        queuePendingMessage(payload);
         return false;
       }
 
       try {
-        const payload = typeof message === 'string' ? message : JSON.stringify(message);
         socket.send(payload);
         return true;
       } catch (err) {
+        queuePendingMessage(payload);
         safeSet(setConnectionError, 'Unable to send message');
         if (typeof onError === 'function') {
           onError(err);
@@ -218,7 +254,7 @@ export const useWebSocket = ({
         return false;
       }
     },
-    [onError, safeSet]
+    [onError, queuePendingMessage, safeSet]
   );
 
   const closeConnection = useCallback(() => {

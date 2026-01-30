@@ -10,15 +10,29 @@ Provides async interface for:
 import asyncio
 import logging
 import os
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import krakenex
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+try:
+    from requests.exceptions import RequestException as _RequestException
+except ImportError:  # pragma: no cover - best effort when requests missing
+    _RequestException = ConnectionError
+
+_CONNECTION_ERRORS = (
+    _RequestException,
+    ConnectionError,
+    OSError,
+    asyncio.TimeoutError,
+)
 
 
 class OrderType(str, Enum):
@@ -118,6 +132,14 @@ class KrakenAPIError(Exception):
         super().__init__(self.message)
 
 
+@dataclass
+class _QueuedRequest:
+    method: str
+    params: Dict[str, Any]
+    private: bool
+    future: asyncio.Future[Any]
+
+
 class KrakenService:
     """
     Async wrapper for Kraken exchange API.
@@ -193,6 +215,12 @@ class KrakenService:
         # Rate limiting
         self._last_request_time: float = 0
         self._min_request_interval: float = 0.5  # 500ms between requests
+        self._request_queue: Deque[_QueuedRequest] = deque()
+        self._queue_task: Optional[asyncio.Task[Any]] = None
+        self._queue_lock = asyncio.Lock()
+        self._queue_delay = 2.0
+        self._max_queue_delay = 30.0
+        self._connection_healthy = True
 
     @property
     def is_authenticated(self) -> bool:
@@ -217,6 +245,134 @@ class KrakenService:
 
         self._last_request_time = asyncio.get_event_loop().time()
 
+    async def _request_once(
+        self,
+        method_name: str,
+        data: Dict[str, Any],
+        private: bool,
+    ) -> Dict[str, Any]:
+        """Make a single Kraken API request without recovery handling."""
+        await self._rate_limit()
+        payload = dict(data or {})
+
+        loop = asyncio.get_event_loop()
+        executor = self._api.query_private if private else self._api.query_public
+
+        response = await loop.run_in_executor(
+            None,
+            lambda: executor(method_name, payload),
+        )
+
+        if response.get("error"):
+            raise KrakenAPIError(
+                f"Kraken API error: {response['error']}",
+                response["error"],
+            )
+
+        return response.get("result", {})
+
+    async def _execute_with_recovery(
+        self,
+        method_name: str,
+        data: Dict[str, Any],
+        private: bool,
+    ) -> Dict[str, Any]:
+        """Execute the Kraken request and queue it on connection failure."""
+        params = dict(data or {})
+
+        try:
+            return await self._request_once(method_name, params, private)
+        except KrakenAPIError:
+            raise
+        except _CONNECTION_ERRORS as exc:
+            return await self._handle_connection_failure(method_name, params, private, exc)
+        except Exception as exc:
+            logger.error(f"Error querying Kraken API: {exc}")
+            raise KrakenAPIError(f"Request failed: {str(exc)}")
+
+    async def _handle_connection_failure(
+        self,
+        method_name: str,
+        data: Dict[str, Any],
+        private: bool,
+        exc: Exception,
+    ) -> Dict[str, Any]:
+        """Queue the request and ensure the recovery task is running."""
+        logger.warning(
+            "Kraken connection unavailable while calling %s (private=%s): %s",
+            method_name,
+            private,
+            exc,
+        )
+        self._connection_healthy = False
+        return await self._enqueue_request(method_name, data, private)
+
+    async def _enqueue_request(
+        self,
+        method_name: str,
+        data: Dict[str, Any],
+        private: bool,
+    ) -> Dict[str, Any]:
+        """Add the request to the queue and wait for it to be processed."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+        queued = _QueuedRequest(
+            method=method_name,
+            params=dict(data),
+            private=private,
+            future=future,
+        )
+
+        async with self._queue_lock:
+            self._request_queue.append(queued)
+
+        self._start_queue_processor()
+        return await future
+
+    def _start_queue_processor(self) -> None:
+        """Ensure the queue processor task is running."""
+        if self._queue_task and not self._queue_task.done():
+            return
+
+        self._queue_task = asyncio.create_task(self._drain_queue())
+
+    async def _drain_queue(self) -> None:
+        """Process queued requests when the connection is restored."""
+        delay = self._queue_delay
+
+        while True:
+            async with self._queue_lock:
+                if not self._request_queue:
+                    break
+                queued = self._request_queue[0]
+
+            try:
+                result = await self._request_once(queued.method, queued.params, queued.private)
+            except _CONNECTION_ERRORS as exc:
+                logger.warning(
+                    "Still unable to reach Kraken while draining queue (method=%s): %s",
+                    queued.method,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, self._max_queue_delay)
+                continue
+            except KrakenAPIError as exc:
+                queued.future.set_exception(exc)
+            except Exception as exc:
+                logger.error("Error flushing queued Kraken request: %s", exc)
+                queued.future.set_exception(KrakenAPIError(f"Request failed during recovery: {exc}"))
+            else:
+                queued.future.set_result(result)
+
+            async with self._queue_lock:
+                if self._request_queue and self._request_queue[0] is queued:
+                    self._request_queue.popleft()
+
+            delay = self._queue_delay
+
+        self._connection_healthy = True
+
     async def _query_public(self, method: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Query public Kraken API endpoint.
@@ -231,28 +387,8 @@ class KrakenService:
         Raises:
             KrakenAPIError: If API returns an error
         """
-        await self._rate_limit()
-
-        try:
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._api.query_public(method, data or {})
-            )
-
-            if response.get("error"):
-                raise KrakenAPIError(
-                    f"Kraken API error: {response['error']}",
-                    response["error"]
-                )
-
-            return response.get("result", {})
-
-        except Exception as e:
-            if isinstance(e, KrakenAPIError):
-                raise
-            logger.error(f"Error querying Kraken public API: {e}")
-            raise KrakenAPIError(f"Request failed: {str(e)}")
+        params: Dict[str, Any] = data or {}
+        return await self._execute_with_recovery(method, params, private=False)
 
     async def _query_private(self, method: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -271,28 +407,8 @@ class KrakenService:
         if not self._authenticated:
             raise KrakenAPIError("API credentials required for private endpoints")
 
-        await self._rate_limit()
-
-        try:
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._api.query_private(method, data or {})
-            )
-
-            if response.get("error"):
-                raise KrakenAPIError(
-                    f"Kraken API error: {response['error']}",
-                    response["error"]
-                )
-
-            return response.get("result", {})
-
-        except Exception as e:
-            if isinstance(e, KrakenAPIError):
-                raise
-            logger.error(f"Error querying Kraken private API: {e}")
-            raise KrakenAPIError(f"Request failed: {str(e)}")
+        params: Dict[str, Any] = data or {}
+        return await self._execute_with_recovery(method, params, private=True)
 
     async def get_ticker(self, symbol: str) -> Ticker:
         """
