@@ -71,6 +71,17 @@ Alerts are persisted via `services.alert_service.AlertService`, which normalizes
 
 ### Combined alerts + activity feed
 - `GET /api/ai/alerts-activity` – single payload that returns the current alert list plus activity log entries, complete with pagination (`alerts_page`, `alerts_page_size`, `activity_page`, `activity_page_size`), the same alert filters (`severity`, `status`, `type`, `search`, `since`, `until`), and optional `log_level`/`log_source` selectors. The response also includes `unread_alerts` so clients can keep notification badges in sync. Each activity entry mirrors the `SystemLog` record, exposing its `level`, `source`, `message`, `timestamp`, and the structured `details` JSON for richer context.
+ 
+## Strategy, Trades, Risk & Export APIs
+
+These routers were wired into `main.py` so the backend now exposes the feature-complete domain APIs implemented under `backend/api/`.
+
+- `/api/strategies` – list strategies (with optional status filtering), inspect individual definitions, and promote paper strategies via `/api/strategies/{id}/promote`.
+- `/api/trades` – fetch the live trade feed with `GET /api/trades/active`, close trades through `POST /api/trades/{trade_id}/close`, and adjust stop-loss or take-profit values using `POST /api/trades/{trade_id}/adjust`.
+- `/api/risk` – manage the global risk profile with `GET|PUT /api/risk/settings`, retrieve the live `GET /api/risk/score`, and configure session timeouts, notifications, theme preferences, and API key metadata beneath `/api/risk/settings/...`.
+- `/api/export` – stream CSV exports for trades via `GET /api/export/trades`, and serialize strategy metadata through `GET /api/export/strategies`.
+
+Clients can rely on these endpoints to synchronize strategy config, execute trade actions, tune risk limits, and download historical records.
 
 
 ## Production deployment (HTTPS/TLS)
