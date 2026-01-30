@@ -18,7 +18,32 @@ for candidate in (
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
+import sys
+from unittest.mock import MagicMock
+
+# Mock core.settings because of pydantic version mismatch in environment
+mock_settings_module = MagicMock()
+mock_settings = MagicMock()
+mock_settings.session_cookie_name = "cryptotrader_session"
+mock_settings.secure_cookies = False
+mock_settings.session_cookie_same_site = "lax"
+mock_settings_module.get_app_settings.return_value = mock_settings
+sys.modules["core.settings"] = mock_settings_module
+
+# Mock missing dependencies in venv
+mock_websockets = MagicMock()
+sys.modules["websockets"] = mock_websockets
+sys.modules["websockets.exceptions"] = MagicMock()
+
+sys.modules["pandas"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["ta"] = MagicMock()
+sys.modules["openai"] = MagicMock()
+sys.modules["anthropic"] = MagicMock()
+sys.modules["jose"] = MagicMock()
+sys.modules["passlib"] = MagicMock()
+sys.modules["passlib.context"] = MagicMock()
 
 from api.auth import (
     register,
@@ -27,13 +52,17 @@ from api.auth import (
     get_session as session_info,
     request_password_reset,
     confirm_password_reset,
+    setup_mfa,
+    verify_mfa,
     RegisterRequest,
     LoginRequest,
     PasswordResetRequest,
     PasswordResetConfirmRequest,
+    MFAVerifyRequest,
 )
 from db.database import Base, engine, SessionLocal
 from db.models import User, Session as UserSession
+from core.security import compute_totp
 from services.password_reset import password_reset_service
 from services.email import email_service
 
@@ -70,7 +99,7 @@ async def _create_user(db, email: str = VALID_EMAIL, password: str = VALID_PASSW
 
 
 async def _authenticate(db, email: str = VALID_EMAIL, password: str = VALID_PASSWORD):
-    return await login(LoginRequest(email=email, password=password), db=db)
+    return await login(LoginRequest(email=email, password=password), response=Response(), db=db)
 
 
 @pytest.mark.asyncio
@@ -105,7 +134,7 @@ async def test_login_returns_session_token(db_session):
 async def test_login_with_invalid_credentials(db_session):
     await _create_user(db_session)
     with pytest.raises(HTTPException):
-        await login(LoginRequest(email=VALID_EMAIL, password="badPass1!"), db=db_session)
+        await login(LoginRequest(email=VALID_EMAIL, password="badPass1!"), response=Response(), db=db_session)
 
 
 @pytest.mark.asyncio
@@ -129,7 +158,7 @@ async def test_logout_removes_session(db_session):
     session_record = db_session.query(UserSession).filter(UserSession.user_id == 1).first()
     assert session_record is not None
 
-    await logout(session=session_record, db=db_session)
+    await logout(response=Response(), session=session_record, db=db_session)
     remaining = db_session.query(UserSession).filter(UserSession.user_id == 1).count()
     assert remaining == 0
 
@@ -153,7 +182,7 @@ async def test_password_reset_flow(db_session):
         db=db_session,
     )
 
-    login_response = await login(LoginRequest(email=user.email, password="NewPassw0rd!"), db=db_session)
+    login_response = await login(LoginRequest(email=user.email, password="NewPassw0rd!"), response=Response(), db=db_session)
     assert login_response.token
 
 
@@ -247,7 +276,7 @@ async def test_register_rejects_password_without_special_char(db_session):
 @pytest.mark.asyncio
 async def test_login_rejects_nonexistent_email(db_session):
     with pytest.raises(HTTPException):
-        await login(LoginRequest(email="nobody@example.com", password="irrelevant"), db=db_session)
+        await login(LoginRequest(email="nobody@example.com", password="irrelevant"), response=Response(), db=db_session)
 
 
 @pytest.mark.asyncio
@@ -256,3 +285,71 @@ async def test_multiple_sessions_allowed(db_session):
     token1 = (await _authenticate(db_session)).token
     token2 = (await _authenticate(db_session)).token
     assert token1 != token2
+
+
+@pytest.mark.asyncio
+async def test_mfa_setup_flow(db_session):
+    await _create_user(db_session)
+    user = db_session.query(User).filter(User.email == VALID_EMAIL).first()
+    
+    # Setup MFA
+    response = await setup_mfa(user=user, db=db_session)
+    assert response.secret
+    assert response.otpauth_url
+    assert user.mfa_secret == response.secret
+    assert not user.mfa_enabled
+
+    # Verify MFA
+    code = compute_totp(response.secret)
+    await verify_mfa(MFAVerifyRequest(code=code), user=user, db=db_session)
+    assert user.mfa_enabled
+
+
+@pytest.mark.asyncio
+async def test_mfa_verify_fails_with_invalid_code(db_session):
+    await _create_user(db_session)
+    user = db_session.query(User).filter(User.email == VALID_EMAIL).first()
+    
+    setup_response = await setup_mfa(user=user, db=db_session)
+    
+    with pytest.raises(HTTPException) as exc:
+        await verify_mfa(MFAVerifyRequest(code="000000"), user=user, db=db_session)
+    assert exc.value.status_code == 401
+    assert not user.mfa_enabled
+
+
+@pytest.mark.asyncio
+async def test_login_enforces_mfa(db_session):
+    await _create_user(db_session)
+    user = db_session.query(User).filter(User.email == VALID_EMAIL).first()
+    
+    # Enable MFA
+    setup_response = await setup_mfa(user=user, db=db_session)
+    code = compute_totp(setup_response.secret)
+    await verify_mfa(MFAVerifyRequest(code=code), user=user, db=db_session)
+    
+    # Login without MFA code should fail
+    with pytest.raises(HTTPException) as exc:
+        await login(LoginRequest(email=VALID_EMAIL, password=VALID_PASSWORD), response=Response(), db=db_session)
+    assert exc.value.status_code == 401
+    assert "MFA code required" in exc.value.detail
+
+    # Login with invalid MFA code should fail
+    with pytest.raises(HTTPException) as exc:
+        await login(
+            LoginRequest(email=VALID_EMAIL, password=VALID_PASSWORD, mfa_code="000000"), 
+            response=Response(),
+            db=db_session
+        )
+    assert exc.value.status_code == 401
+    assert "Invalid MFA code" in exc.value.detail
+
+    # Login with valid MFA code should succeed
+    # Recompute code as time might have passed
+    valid_code = compute_totp(setup_response.secret)
+    response = await login(
+        LoginRequest(email=VALID_EMAIL, password=VALID_PASSWORD, mfa_code=valid_code),
+        response=Response(),
+        db=db_session
+    )
+    assert response.token

@@ -4,6 +4,7 @@ Authentication API routes.
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Response, status
 from pydantic import BaseModel, EmailStr
@@ -19,6 +20,9 @@ from core.security import (
     validate_password_strength,
     generate_session_token,
     get_session_expiry,
+    generate_totp_secret,
+    verify_totp,
+    get_totp_uri,
 )
 from core.auth import get_current_user, get_current_session
 from services.email import email_service
@@ -44,6 +48,7 @@ class RegisterResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    mfa_code: Optional[str] = None
 
 
 class LoginResponse(BaseModel):
@@ -70,6 +75,7 @@ class PasswordResetConfirmRequest(BaseModel):
 
 class MFASetupResponse(BaseModel):
     secret: str
+    otpauth_url: str
     message: str
 
 
@@ -176,6 +182,21 @@ async def login(
             detail="Invalid email or password"
         )
 
+    # Verify MFA if enabled
+    if user.mfa_enabled:
+        if not request.mfa_code:
+            logger.warning("Login failed for %s: MFA code required", request.email)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="MFA code required"
+            )
+        if not verify_totp(user.mfa_secret, request.mfa_code):
+            logger.warning("Login failed for %s: invalid MFA code", request.email)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid MFA code"
+            )
+
     # Generate session token
     token = generate_session_token()
     expires_at = get_session_expiry(user.session_timeout_minutes)
@@ -219,9 +240,9 @@ async def login(
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
+    response: Response,
     session: UserSession = Depends(get_current_session),
     db: Session = Depends(get_db),
-    response: Response,
 ):
     """
     Logout current user.
@@ -351,7 +372,10 @@ async def confirm_password_reset(
 
 
 @router.post("/mfa/setup", response_model=MFASetupResponse)
-async def setup_mfa():
+async def setup_mfa(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Setup MFA for current user.
 
@@ -359,17 +383,49 @@ async def setup_mfa():
     - Returns secret for authenticator app setup
     - MFA not enabled until verified
     """
-    # TODO: Implement later (not in Phase 1 scope)
-    raise HTTPException(status_code=501, detail="Not implemented")
+    logger.info("MFA setup initiated for user %s", user.email)
+    
+    secret = generate_totp_secret()
+    user.mfa_secret = secret
+    db.commit()
+    
+    otpauth_url = get_totp_uri(secret, user.email)
+    
+    return MFASetupResponse(
+        secret=secret,
+        otpauth_url=otpauth_url,
+        message="MFA secret generated. Please verify to enable."
+    )
 
 
 @router.post("/mfa/verify", response_model=MessageResponse)
-async def verify_mfa(request: MFAVerifyRequest):
+async def verify_mfa(
+    request: MFAVerifyRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Verify MFA code and enable MFA.
 
     - Validates code against secret
     - Enables MFA on user account if valid
     """
-    # TODO: Implement later (not in Phase 1 scope)
-    raise HTTPException(status_code=501, detail="Not implemented")
+    logger.info("MFA verification attempt for user %s", user.email)
+    
+    if not user.mfa_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA not set up"
+        )
+        
+    if not verify_totp(user.mfa_secret, request.code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication code"
+        )
+        
+    user.mfa_enabled = True
+    db.commit()
+    
+    logger.info("MFA enabled for user %s", user.email)
+    return MessageResponse(message="MFA enabled successfully")
