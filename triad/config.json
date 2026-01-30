@@ -3,6 +3,8 @@
   "lock_timeout_minutes": 30,
   "heartbeat_interval_minutes": 5,
   "stale_heartbeat_minutes": 10,
+  "stuck_task_claims_before_block": 3,
+  "stuck_task_idle_minutes": 30,
   "review_assignment": "round_robin",
   "auto_approve_when_solo": true,
   "auto_approve_timeout_minutes": 15,

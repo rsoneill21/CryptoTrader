@@ -134,7 +134,7 @@ invoke_model() {
             codex exec "$PROMPT"
             ;;
         gemini)
-            gemini -p --approval-mode yolo "$PROMPT"
+            gemini --approval-mode yolo "$PROMPT"
             ;;
     esac
 }
@@ -187,7 +187,21 @@ print(t['id'] if t else '')
         continue
     fi
 
-    # Priority 2: Available tasks
+    # Priority 2: Ensure every task has files_json before claiming
+    if python3 triad/bin/populate_task_files.py --limit 3 --quiet 2>/dev/null; then
+        :
+    else
+        echo "[DISCOVER] Unable to populate files_json for pending tasks"
+    fi
+
+    # Priority 3: Block repeatedly stalled tasks
+    if python3 triad/bin/block_stuck_tasks.py --limit 2 --quiet 2>/dev/null; then
+        :
+    else
+        echo "[BLOCK] Unable to auto-block hung tasks"
+    fi
+
+    # Priority 4: Available tasks
     NEXT_TASK=$(python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('triad/triad.db')
