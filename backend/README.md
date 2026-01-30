@@ -45,6 +45,26 @@ uvicorn main:app --reload --port 8000
 ```
 The API docs are available at `http://localhost:8000/docs` once the server starts.
 
+## Alerts & Activity APIs
+
+CryptoTrader's monitoring surface exposes a consolidated Alerts dashboard and activity log built on the same backend services the agents already use.
+
+### Alerts endpoints
+- `GET /api/alerts` – paginated listing with optional filters for `severity` (`info|warning|critical`), `status` (`new|viewed|actioned|dismissed`), `type`, `search`, `since`, `until`, `page`, and `page_size`. Returns `alerts`, `total`, `page`, and `page_size`.
+- `GET /api/alerts/{id}` – fetch a single alert record with all metadata (type, severity, status, related strategy/trade IDs, AI confidence, timestamps, and action taken).
+- `PATCH /api/alerts/{id}` – partial updates to the alert metadata.
+- `PATCH /api/alerts/{id}/status` – update only the status/action fields; `actioned_at` is set automatically for actioned/dismissed states.
+- `POST /api/alerts/bulk/status` – apply the same status/action metadata to multiple alerts in one request.
+
+Alerts are persisted via `services.alert_service.AlertService`, which normalizes severity, deduplicates near-duplicate alerts, and tracks AI confidence/action timestamps for the UI.
+
+### Activity log
+- `GET /api/system/logs` – paginated system log entries ordered newest first and filterable by level and source. Use this endpoint to power the Alerts & Activity tab and surface AI/system decisions alongside the alert feed.
+
+### Combined alerts + activity feed
+- `GET /api/ai/alerts-activity` – single payload that returns the current alert list plus activity log entries, complete with pagination (`alerts_page`, `alerts_page_size`, `activity_page`, `activity_page_size`), the same alert filters (`severity`, `status`, `type`, `search`, `since`, `until`), and optional `log_level`/`log_source` selectors. The response also includes `unread_alerts` so clients can keep notification badges in sync. Each activity entry mirrors the `SystemLog` record, exposing its `level`, `source`, `message`, `timestamp`, and the structured `details` JSON for richer context.
+
+
 ## Production deployment (HTTPS/TLS)
 
 The development server binds to `0.0.0.0:8000` over plain HTTP. For production, terminate TLS in front of the FastAPI app and configure the API to operate in HTTPS mode with tightly scoped cookies and HSTS headers.

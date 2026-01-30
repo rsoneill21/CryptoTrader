@@ -16,13 +16,15 @@ from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from db.database import get_db
-from db.models import ChatHistory, StrategyPerformance
+from db.models import Alert, ChatHistory, StrategyPerformance, SystemLog
 from services.ai_models import AIModelDescriptor, AIModelsService, AIProvider
+
+from api.alerts import AlertResponse
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +126,161 @@ class ModelComparisonEntry(BaseModel):
 
 class ModelComparisonResponse(BaseModel):
     comparisons: List[ModelComparisonEntry]
+
+
+class ActivityLogEntry(BaseModel):
+    id: int
+    level: str
+    source: str
+    message: str
+    details: Optional[dict[str, Any]] = None
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def _map_system_log_to_activity(record: SystemLog) -> ActivityLogEntry:
+    return ActivityLogEntry(
+        id=record.id,
+        level=record.level,
+        source=record.source,
+        message=record.message,
+        details=record.details_json,
+        timestamp=record.timestamp,
+    )
+
+
+class AlertsActivityResponse(BaseModel):
+    alerts: List[AlertResponse]
+    alerts_total: int
+    alerts_page: int
+    alerts_page_size: int
+    unread_alerts: int
+    activity: List[ActivityLogEntry]
+    activity_total: int
+    activity_page: int
+    activity_page_size: int
+
+
+def _apply_alert_filters(
+    query,
+    severity: Optional[str],
+    status_filter: Optional[str],
+    alert_type: Optional[str],
+    search: Optional[str],
+    since: Optional[datetime],
+    until: Optional[datetime],
+):
+    if severity:
+        query = query.filter(Alert.severity == severity)
+    if status_filter:
+        query = query.filter(Alert.status == status_filter)
+    if alert_type:
+        query = query.filter(Alert.type == alert_type)
+    if search:
+        trimmed = search.strip()
+        if trimmed:
+            pattern = f"%{trimmed}%"
+            query = query.filter(
+                or_(
+                    Alert.title.ilike(pattern),
+                    Alert.message.ilike(pattern),
+                )
+            )
+    if since:
+        query = query.filter(Alert.created_at >= since)
+    if until:
+        query = query.filter(Alert.created_at <= until)
+    return query
+
+
+def _apply_activity_filters(
+    query,
+    log_level: Optional[str],
+    log_source: Optional[str],
+):
+    if log_level:
+        query = query.filter(SystemLog.level == log_level)
+    if log_source:
+        query = query.filter(SystemLog.source.ilike(f"%{log_source}%"))
+    return query
+
+
+@router.get("/alerts-activity", response_model=AlertsActivityResponse)
+async def alerts_activity(
+    severity: Optional[str] = Query(None, description="Filter by alert severity (info|warning|critical)"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by alert status"),
+    alert_type: Optional[str] = Query(None, alias="type", description="Filter by alert type"),
+    search: Optional[str] = Query(None, description="Search alert titles or messages"),
+    since: Optional[datetime] = Query(None, description="Return alerts created after this timestamp"),
+    until: Optional[datetime] = Query(None, description="Return alerts created before this timestamp"),
+    alerts_page: int = Query(1, ge=1, description="Alerts page number"),
+    alerts_page_size: int = Query(12, ge=1, le=100, description="Number of alerts per page"),
+    log_level: Optional[str] = Query(None, description="Filter activity log level (info|warning|error|critical)"),
+    log_source: Optional[str] = Query(None, description="Filter activity log source/component"),
+    activity_page: int = Query(1, ge=1, description="Activity log page number"),
+    activity_page_size: int = Query(25, ge=1, le=100, description="Number of activity entries per page"),
+    db: Session = Depends(get_db),
+) -> AlertsActivityResponse:
+    """Return a combined alerts feed and activity log for the dashboard."""
+    try:
+        alert_query = _apply_alert_filters(
+            db.query(Alert),
+            severity,
+            status_filter,
+            alert_type,
+            search,
+            since,
+            until,
+        )
+        alerts_total = alert_query.count()
+        alerts_records = (
+            alert_query.order_by(desc(Alert.created_at))
+            .offset((alerts_page - 1) * alerts_page_size)
+            .limit(alerts_page_size)
+            .all()
+        )
+        unread_alerts = (
+            db.query(func.count(Alert.id))
+            .filter(Alert.status == "new")
+            .scalar()
+            or 0
+        )
+        unread_alerts = int(unread_alerts)
+    except SQLAlchemyError as exc:
+        logger.exception("Unable to query alerts for activity feed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load alerts data",
+        ) from exc
+
+    try:
+        activity_query = _apply_activity_filters(db.query(SystemLog), log_level, log_source)
+        activity_total = activity_query.count()
+        activity_records = (
+            activity_query.order_by(desc(SystemLog.timestamp))
+            .offset((activity_page - 1) * activity_page_size)
+            .limit(activity_page_size)
+            .all()
+        )
+    except SQLAlchemyError as exc:
+        logger.exception("Unable to query activity log entries: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load activity log data",
+        ) from exc
+
+    return AlertsActivityResponse(
+        alerts=[AlertResponse.from_orm(record) for record in alerts_records],
+        alerts_total=alerts_total,
+        alerts_page=alerts_page,
+        alerts_page_size=alerts_page_size,
+        unread_alerts=unread_alerts,
+        activity=[_map_system_log_to_activity(record) for record in activity_records],
+        activity_total=activity_total,
+        activity_page=activity_page,
+        activity_page_size=activity_page_size,
+    )
 
 
 class ChatAIService:
