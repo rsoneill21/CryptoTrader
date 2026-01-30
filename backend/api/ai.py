@@ -15,6 +15,7 @@ import openai
 from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+import pydantic as _pydantic
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,12 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from db.models import Alert, ChatHistory, StrategyPerformance, SystemLog
+
+if not hasattr(_pydantic, "BaseSettings"):
+    from pydantic_settings import BaseSettings as _BaseSettings
+
+    _pydantic.BaseSettings = _BaseSettings
+
 from services.ai_models import AIModelDescriptor, AIModelsService, AIProvider
 
 from api.alerts import AlertResponse
