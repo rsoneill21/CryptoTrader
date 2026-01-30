@@ -5,17 +5,19 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import AlertNotification from './AlertNotification';
 
 const SIDEBAR_KEY = 'cryptotrader_sidebar';
 
 const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
-    // Check localStorage or default to open on desktop
-    const saved = localStorage.getItem(SIDEBAR_KEY);
+    if (typeof window === 'undefined') {
+      return true;
+    }
+    const saved = window.localStorage.getItem(SIDEBAR_KEY);
     if (saved !== null) {
       return saved === 'true';
     }
-    // Default: open on desktop, closed on mobile
     return window.innerWidth >= 1024;
   });
 
@@ -24,12 +26,13 @@ const Layout = ({ children }) => {
     localStorage.setItem(SIDEBAR_KEY, sidebarOpen.toString());
   }, [sidebarOpen]);
 
-  // Close sidebar on mobile when route changes
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 1024) {
         setSidebarOpen(false);
+        return;
       }
+      setSidebarOpen(true);
     };
 
     window.addEventListener('resize', handleResize);
@@ -41,19 +44,21 @@ const Layout = ({ children }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 dark:bg-gray-900 light:bg-gray-50">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-gray-900 to-black text-white">
+      <AlertNotification />
       <Sidebar isOpen={sidebarOpen} onToggle={toggleSidebar} />
 
       {/* Main content area */}
       <div
         className={`
+          min-h-screen
           transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-16'}
+          ${sidebarOpen ? 'lg:ml-72' : 'lg:ml-20'}
         `}
       >
         <Header sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
 
-        <main className="p-4 lg:p-6">
+        <main className="flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
           {children}
         </main>
       </div>

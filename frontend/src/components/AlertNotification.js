@@ -75,7 +75,7 @@ const AlertNotification = () => {
       <div className="fixed top-4 right-4 z-40 flex items-center gap-2">
         <Link
           to="/alerts"
-          className="relative flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-gray-800 text-gray-300 shadow-lg shadow-black/50 transition hover:text-white"
+          className="relative flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-gray-800 text-gray-300 shadow-lg shadow-black/50 transition duration-200 hover:scale-105 hover:text-white"
           aria-label="Open alerts dashboard"
         >
           <BellIcon className="h-6 w-6" />
@@ -89,21 +89,24 @@ const AlertNotification = () => {
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="rounded-lg border border-white/20 px-3 py-2 text-xs uppercase tracking-wide text-white transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-white/20 px-3 py-2 text-xs uppercase tracking-wide text-white transition duration-200 hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? 'Syncing...' : 'Refresh'}
         </button>
       </div>
 
       {error && (
-        <div className="fixed top-20 right-4 z-40 rounded-xl border border-red-500/60 bg-red-900/90 px-4 py-2 text-xs text-red-100">
+        <div
+          className="fixed top-20 right-4 z-40 rounded-xl border border-red-500/60 bg-red-900/90 px-4 py-2 text-xs text-red-100 shadow-2xl shadow-black/70"
+          role="alert"
+        >
           {error}
         </div>
       )}
 
       {popupVisible && currentPopup && (
         <div
-          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-2xl border border-white/10 bg-gray-900/95 p-5 text-sm text-white shadow-2xl shadow-black/60"
+          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-2xl border border-white/10 bg-black/70 p-5 text-sm text-white shadow-2xl shadow-black/80 backdrop-blur-lg transition duration-300 motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.01]"
           role="status"
           aria-live="assertive"
         >
@@ -135,7 +138,7 @@ const AlertNotification = () => {
             <Link
               to="/alerts"
               onClick={handleDismiss}
-              className="text-xs text-blue-300 transition hover:text-blue-100"
+              className="text-xs text-blue-300 transition duration-200 hover:text-blue-100"
             >
               View alerts
             </Link>

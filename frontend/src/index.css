@@ -4,15 +4,16 @@
 
 /* CryptoTrader Dark Theme */
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #1a1a1a;
-  --bg-tertiary: #2a2a2a;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
+  --bg-primary: #030712;
+  --bg-secondary: #111827;
+  --bg-tertiary: #1f2933;
+  --text-primary: #f1f5f9;
+  --text-secondary: #9ca3af;
   --accent-green: #00d26a;
   --accent-red: #ff4757;
   --accent-blue: #4a90d9;
   --accent-yellow: #ffd93d;
+  --bg-gradient: radial-gradient(circle at top, #0f172a 0%, #020617 60%, #010410 100%);
 }
 
 body {
@@ -22,8 +23,32 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: var(--bg-primary);
+  background-image: var(--bg-gradient);
+  background-repeat: no-repeat;
+  background-size: cover;
+  min-height: 100vh;
   color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  body {
+    padding: 0 0.5rem;
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.6s ease-out both;
 }
 
 /* Monospace for prices and numbers */

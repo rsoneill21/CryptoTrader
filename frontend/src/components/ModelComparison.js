@@ -155,12 +155,19 @@ const ModelComparison = () => {
     [comparisons, secondaryModel],
   );
 
-  const deltaPnl = primaryEntry && secondaryEntry
-    ? primaryEntry.total_pnl - secondaryEntry.total_pnl
-    : null;
+const deltaPnl = primaryEntry && secondaryEntry
+  ? primaryEntry.total_pnl - secondaryEntry.total_pnl
+  : null;
 
-  const renderComparisonCard = (entry, label) => (
-    <div className="flex flex-col gap-4 rounded-[28px] border border-gray-800 bg-slate-950/60 p-5">
+
+const renderComparisonCard = (entry, label, loadingState) => {
+  const ready = Boolean(entry);
+  return (
+    <div
+      className="relative flex flex-col gap-4 rounded-[28px] border border-gray-800 bg-slate-950/60 p-5 shadow-2xl shadow-black/60 transition duration-300 motion-safe:hover:-translate-y-1"
+      aria-live="polite"
+      aria-busy={!ready}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[0.65rem] uppercase tracking-[0.4em] text-gray-500">{label}</p>
@@ -205,16 +212,33 @@ const ModelComparison = () => {
               {metric.label}
             </span>
             <span className="text-right text-white">
-              {computeMetricValue(entry, metric)}
+              {ready ? (
+                computeMetricValue(entry, metric)
+              ) : (
+                <span className="inline-flex h-4 w-16 items-center justify-center rounded-full bg-white/10 text-transparent animate-pulse">
+                  &nbsp;
+                </span>
+              )}
             </span>
           </div>
         ))}
       </div>
+      {loadingState && (
+        <div className="pointer-events-none absolute inset-0 rounded-[28px] bg-black/60 text-xs uppercase tracking-[0.5em] text-sky-300 backdrop-blur">
+          <div className="flex h-full w-full items-center justify-center">
+            Refreshing…
+          </div>
+        </div>
+      )}
     </div>
   );
+};
 
   return (
-    <section className="space-y-6 rounded-[32px] border border-gray-800 bg-gradient-to-br from-gray-950/90 to-black/70 p-6 shadow-2xl shadow-black/60">
+    <section
+      className="relative space-y-6 rounded-[32px] border border-gray-800 bg-gradient-to-br from-gray-950/90 to-black/70 p-6 shadow-2xl shadow-black/60 animate-fade-up"
+      aria-live="polite"
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.4em] text-sky-400">AI intelligence</p>
@@ -274,8 +298,8 @@ const ModelComparison = () => {
         </p>
       )}
       <div className="grid gap-5 lg:grid-cols-2">
-        {renderComparisonCard(primaryEntry, 'Primary')}
-        {renderComparisonCard(secondaryEntry, 'Comparator')}
+        {renderComparisonCard(primaryEntry, 'Primary', loading)}
+        {renderComparisonCard(secondaryEntry, 'Comparator', loading)}
       </div>
       {primaryEntry && secondaryEntry && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-gray-800 bg-gray-950/60 px-4 py-3 text-xs uppercase tracking-[0.3em] text-gray-400">

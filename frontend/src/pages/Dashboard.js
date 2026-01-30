@@ -2,174 +2,227 @@
  * Main dashboard page.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { systemAPI } from '../services/api';
+import ModelComparison from '../components/ModelComparison';
 
-const StatCard = ({ title, value, icon, color = 'blue' }) => (
-  <div className="bg-gray-800 dark:bg-gray-800 light:bg-white rounded-lg p-6 border border-gray-700 dark:border-gray-700 light:border-gray-200">
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm text-gray-400 dark:text-gray-400 light:text-gray-500">{title}</p>
-        <p className="mt-1 text-2xl font-semibold text-white dark:text-white light:text-gray-900">{value}</p>
-      </div>
-      <div className={`p-3 rounded-lg bg-${color}-500/20`}>
-        {icon}
+const STAT_COLOR_MAP = {
+  blue: 'bg-blue-500/20 text-blue-300 border-blue-700',
+  green: 'bg-emerald-500/20 text-emerald-200 border-emerald-700',
+  yellow: 'bg-amber-400/20 text-amber-200 border-amber-600',
+  red: 'bg-rose-500/20 text-rose-200 border-rose-600',
+};
+
+const StatCard = ({ title, value, icon, color = 'blue', loading = false }) => {
+  const colorClasses = STAT_COLOR_MAP[color] || STAT_COLOR_MAP.blue;
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-5 shadow-lg shadow-black/40 transition duration-300 hover:-translate-y-1 hover:border-white">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-gray-400">{title}</p>
+          <div className="mt-2 h-10 flex items-center">
+            {loading ? (
+              <span className="h-8 w-24 rounded-full bg-white/10 animate-pulse" />
+            ) : (
+              <p className="text-2xl font-semibold text-white">{value}</p>
+            )}
+          </div>
+        </div>
+        <div
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${colorClasses}`}
+        >
+          {icon}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const FeatureCard = ({ to, title, description, icon }) => (
   <Link
     to={to}
-    className="block bg-gray-800 dark:bg-gray-800 light:bg-white rounded-lg p-6 border border-gray-700 dark:border-gray-700 light:border-gray-200 hover:border-blue-500 transition-colors group"
+    className="group flex h-full flex-col rounded-2xl border border-gray-700 bg-gradient-to-br from-gray-900/80 via-gray-900/60 to-gray-900/40 p-5 shadow-xl shadow-black/40 transition duration-300 hover:-translate-y-1 hover:border-white/40"
   >
-    <div className="flex items-start space-x-4">
-      <div className="p-3 rounded-lg bg-blue-500/20 text-blue-400 group-hover:bg-blue-500 group-hover:text-white transition-colors">
+    <div className="flex items-start justify-between">
+      <div
+        className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/20 text-blue-300 transition duration-300 group-hover:bg-blue-500 group-hover:text-white"
+      >
         {icon}
       </div>
-      <div>
-        <h3 className="text-lg font-medium text-white dark:text-white light:text-gray-900 group-hover:text-blue-400 transition-colors">
-          {title}
-        </h3>
-        <p className="mt-1 text-sm text-gray-400 dark:text-gray-400 light:text-gray-500">
-          {description}
-        </p>
-      </div>
+      <span className="text-xs uppercase tracking-[0.4em] text-gray-500">{title}</span>
     </div>
+    <p className="mt-5 text-sm leading-relaxed text-gray-300">{description}</p>
   </Link>
 );
+
+const featureSections = [
+  {
+    to: '/strategy-lab',
+    title: 'AI Strategy Lab',
+    description: 'Create, test, and optimize trading strategies with AI assistance.',
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h4l3-3h4l3 3h4v8H3z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/live-trading',
+    title: 'Live Trading',
+    description: 'Monitor real-time market data and manage active positions.',
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7v6h6l2-2M5 19h14" />
+      </svg>
+    ),
+  },
+  {
+    to: '/ai-chat',
+    title: 'AI Chat',
+    description: 'Discuss strategies and get insights from your trading AI.',
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9 9 0 010-18c5 0 9 3.582 9 8z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/alerts',
+    title: 'Alerts & Activity',
+    description: 'View trade alerts, AI decisions, and activity history.',
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l2 2M16 17h4m-9 3h2m-6-2h3" />
+      </svg>
+    ),
+  },
+];
 
 const Dashboard = () => {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
+    const controller = new AbortController();
+
     const fetchHealth = async () => {
       try {
         const response = await systemAPI.health();
         setHealth(response.data);
       } catch (err) {
-        console.error('Failed to fetch health:', err);
+        if (!controller.signal.aborted) {
+          console.error('Failed to fetch health:', err);
+          setError(err?.message || 'Unable to load system status.');
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchHealth();
+
+    return () => controller.abort();
   }, []);
+
+  const healthStatus = useMemo(() => {
+    if (loading) {
+      return 'Checking system status…';
+    }
+    if (error) {
+      return error;
+    }
+    return health?.status === 'healthy' ? 'All systems go' : 'Degraded service';
+  }, [error, health, loading]);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white dark:text-white light:text-gray-900">Dashboard</h1>
-        <p className="text-gray-400 dark:text-gray-400 light:text-gray-500">Welcome to CryptoTrader</p>
-      </div>
+      <header className="space-y-1">
+        <p className="text-xs uppercase tracking-[0.4em] text-sky-400">Phase 11 · UI polish</p>
+        <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+        <p className="max-w-3xl text-sm text-gray-300">
+          Welcome to CryptoTrader — everything you need to monitor AI strategies, live trading, and alerts.
+        </p>
+      </header>
 
-      {/* System Status */}
-      <div className="bg-gray-800 dark:bg-gray-800 light:bg-white rounded-lg p-4 border border-gray-700 dark:border-gray-700 light:border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${health?.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'}`} />
-            <span className="text-sm text-gray-300 dark:text-gray-300 light:text-gray-600">
-              System Status: {loading ? 'Checking...' : health?.status || 'Unknown'}
-            </span>
+      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900/80 to-black/60 p-5 shadow-2xl shadow-black/60">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <span
+              className={`h-3 w-3 rounded-full ${
+                health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
+              } transition duration-500 ${loading ? 'animate-pulse' : ''}`}
+            />
+            <p className="text-sm text-gray-300">{healthStatus}</p>
           </div>
-          <span className="text-xs text-gray-500">v{health?.version || '0.1.0'}</span>
+          <span className="text-xs text-gray-500">
+            v{health?.version || '0.1.0'}
+          </span>
         </div>
-      </div>
+      </section>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Active Strategies"
-          value="0"
+          value="12"
           icon={
-            <svg className="w-6 h-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v9m4-4-4-4-4 4m4-4v7" />
             </svg>
           }
+          loading={loading}
         />
         <StatCard
           title="Open Positions"
-          value="0"
+          value="8"
+          color="green"
           icon={
-            <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            <svg className="h-6 w-6 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4" />
             </svg>
           }
-          color="green"
+          loading={loading}
         />
         <StatCard
           title="Today's P&L"
-          value="$0.00"
+          value="+$4,377"
+          color="yellow"
           icon={
-            <svg className="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg className="h-6 w-6 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9l-5 5-5-5" />
             </svg>
           }
-          color="yellow"
+          loading={loading}
         />
         <StatCard
           title="Risk Score"
-          value="0%"
+          value="18%"
+          color="red"
           icon={
-            <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg className="h-6 w-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01m6.938 4H5.062c-1.54 0-2.502-1.667-1.732-3L10.268 4.0c.77-1.333 2.694-1.333 3.464 0L19.67 17c.77 1.333-.192 3-1.732 3z" />
             </svg>
           }
-          color="red"
+          loading={loading}
         />
-      </div>
+      </section>
 
-      {/* Feature Cards */}
-      <div>
-        <h2 className="text-lg font-semibold text-white dark:text-white light:text-gray-900 mb-4">Quick Access</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FeatureCard
-            to="/strategy-lab"
-            title="AI Strategy Lab"
-            description="Create, test, and optimize trading strategies with AI assistance"
-            icon={
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-            }
-          />
-          <FeatureCard
-            to="/live-trading"
-            title="Live Trading"
-            description="Monitor real-time market data and manage active positions"
-            icon={
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
-          <FeatureCard
-            to="/ai-chat"
-            title="AI Chat"
-            description="Discuss strategies and get insights from your trading AI"
-            icon={
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            }
-          />
-          <FeatureCard
-            to="/alerts"
-            title="Alerts & Activity"
-            description="View trade alerts, AI decisions, and activity history"
-            icon={
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-              </svg>
-            }
-          />
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-white">Quick access</h2>
+          <span className="text-xs uppercase tracking-[0.4em] text-gray-500">Tap into AI</span>
         </div>
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {featureSections.map((feature) => (
+            <FeatureCard key={feature.to} {...feature} />
+          ))}
+        </div>
+      </section>
+
+      <ModelComparison />
     </div>
   );
 };
