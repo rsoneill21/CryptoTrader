@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 import openai
+from openai import AsyncOpenAI
 from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -36,6 +37,30 @@ from api.alerts import AlertResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class _OpenAIChatCompletionCompat:
+    """Bridge that maps the legacy ChatCompletion API calls to AsyncOpenAI."""
+
+    def _collect_client_kwargs(self) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        for attr in ("api_key", "api_base", "api_type", "api_version", "organization"):
+            value = getattr(openai, attr, None)
+            if value is not None:
+                params[attr] = value
+        return params
+
+    async def acreate(self, **kwargs: Any) -> Any:
+        if AsyncOpenAI is None:
+            raise RuntimeError("openai.AsyncOpenAI is required for ChatCompletion.acreate().")
+        client = AsyncOpenAI(**self._collect_client_kwargs())
+        try:
+            return await client.chat.completions.create(**kwargs)
+        finally:
+            await client.aclose()
+
+
+openai.ChatCompletion = _OpenAIChatCompletionCompat()
 
 CHUNK_SIZE = 160
 
