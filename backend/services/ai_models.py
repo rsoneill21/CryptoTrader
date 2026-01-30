@@ -267,15 +267,24 @@ class AIModelsService:
             request.temperature if request.temperature is not None else 0.25
         )
         max_tokens = request.max_tokens
+        system_prompt = (request.system_prompt or self._settings.system_prompt or "").strip()
+
+        call_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if system_prompt:
+            call_kwargs["system"] = system_prompt
+
         try:
             response = await asyncio.to_thread(
                 self._anthropic_client.messages.create,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                **call_kwargs,
             )
-            text = (response.content or "").strip()
+            content_blocks = getattr(response, "content", None)
+            text = self._extract_claude_text(content_blocks)
             serialized_response = self._serialize_claude_response(response)
             raw = {
                 "provider": AIProvider.CLAUDE.value,
@@ -338,17 +347,39 @@ class AIModelsService:
     def _build_claude_messages(
         self, request: AIModelRequest
     ) -> List[Dict[str, str]]:
-        messages: List[Dict[str, str]] = []
-        system = request.system_prompt or self._settings.system_prompt
-        if system:
-            messages.append({"role": "system", "content": system.strip()})
-
+        """Build the Anthropic messages payload (system prompt handled separately)."""
         user_content = request.prompt
         if request.suffix:
             user_content = f"{user_content}\n{request.suffix}"
 
-        messages.append({"role": "user", "content": user_content})
-        return messages
+        return [{"role": "user", "content": user_content}]
+
+    def _extract_claude_text(self, content_blocks: Any) -> str:
+        """Extract the generated text from Anthropic ContentBlock objects."""
+
+        def _block_text(block: Any) -> Optional[str]:
+            if not block:
+                return None
+            if isinstance(block, str):
+                return block
+            if hasattr(block, "text"):
+                return getattr(block, "text")
+            if isinstance(block, dict):
+                return block.get("text")
+            return None
+
+        parts: List[str] = []
+        if isinstance(content_blocks, list):
+            for block in content_blocks:
+                part = _block_text(block)
+                if part:
+                    parts.append(part)
+        else:
+            single_part = _block_text(content_blocks)
+            if single_part:
+                parts.append(single_part)
+
+        return "".join(parts).strip()
 
     def _serialize_claude_response(self, response: Any) -> Any:
         for attr in ("dict", "to_dict"):
