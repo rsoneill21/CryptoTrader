@@ -2,13 +2,21 @@
 CryptoTrader - FastAPI Backend Entry Point
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
 from contextlib import asynccontextmanager
 
 from api.errors import register_exception_handlers
 from db.database import init_db
 from services.kraken_ws import start_kraken_ws, stop_kraken_ws
+from core.settings import get_app_settings
 from api import auth_router, market_router, system_router
 
 
@@ -25,6 +33,27 @@ async def lifespan(app: FastAPI):
     print("Shutting down CryptoTrader Backend...")
 
 
+settings = get_app_settings()
+
+
+class HSTSMiddleware(BaseHTTPMiddleware):
+    """Attach a Strict-Transport-Security header when TLS is active."""
+
+    def __init__(self, app: FastAPI, header_value: str | None):
+        super().__init__(app)
+        self.header_value = header_value
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        response = await call_next(request)
+        if self.header_value:
+            response.headers.setdefault("Strict-Transport-Security", self.header_value)
+        return response
+
+
 app = FastAPI(
     title="CryptoTrader API",
     description="AI-powered cryptocurrency trading platform API",
@@ -37,11 +66,14 @@ register_exception_handlers(app)
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if settings.hsts_header_value and settings.tls_enabled:
+    app.add_middleware(HSTSMiddleware, header_value=settings.hsts_header_value)
 
 
 @app.get("/")
@@ -74,4 +106,19 @@ app.include_router(market_router, prefix="/api/market", tags=["Market"])
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn_kwargs: dict[str, Any] = {
+        "app": app,
+        "host": settings.host,
+        "port": settings.port,
+    }
+
+    if settings.tls_enabled:
+        uvicorn_kwargs.update({
+            "ssl_certfile": settings.tls_certfile,
+            "ssl_keyfile": settings.tls_keyfile,
+        })
+        if settings.tls_ca_bundle:
+            uvicorn_kwargs["ssl_ca_certs"] = settings.tls_ca_bundle
+
+    uvicorn.run(**uvicorn_kwargs)

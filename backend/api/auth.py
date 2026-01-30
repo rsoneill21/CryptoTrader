@@ -3,12 +3,14 @@ Authentication API routes.
 """
 
 import logging
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from core.settings import get_app_settings
 from db.database import get_db
 from db.models import User, Session as UserSession
 from core.security import (
@@ -21,12 +23,10 @@ from core.security import (
 from core.auth import get_current_user, get_current_session
 from services.email import email_service
 from services.password_reset import password_reset_service
-from datetime import datetime
 
 logger = logging.getLogger("cryptotrader.auth")
 
 router = APIRouter()
-
 
 # --- Request/Response Models ---
 
@@ -79,6 +79,9 @@ class MFAVerifyRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+settings = get_app_settings()
 
 
 # --- Routes ---
@@ -141,7 +144,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
+async def login(
+    request: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
     """
     Authenticate user and create session.
 
@@ -185,6 +192,18 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     db.commit()
 
+    max_age = int((expires_at - datetime.utcnow()).total_seconds())
+    response.set_cookie(
+        settings.session_cookie_name,
+        token,
+        httponly=True,
+        secure=settings.secure_cookies,
+        samesite=settings.session_cookie_same_site,
+        max_age=max_age,
+        expires=max_age,
+        path="/",
+    )
+
     logger.info(
         "User %s authenticated and session created (expires %s)",
         user.email,
@@ -201,7 +220,8 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
     session: UserSession = Depends(get_current_session),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    response: Response,
 ):
     """
     Logout current user.
@@ -212,6 +232,13 @@ async def logout(
     logger.info("Logout requested for user id=%s", session.user_id)
     db.delete(session)
     db.commit()
+    if response is not None:
+        response.delete_cookie(
+            settings.session_cookie_name,
+            path="/",
+            secure=settings.secure_cookies,
+            samesite=settings.session_cookie_same_site,
+        )
     logger.info("User %s logged out successfully", session.user_id)
     return MessageResponse(message="Logged out successfully")
 

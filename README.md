@@ -116,6 +116,7 @@ The system uses a multi-agent architecture:
 - Configurable session timeouts
 - Protected routes and API endpoints
 - Confirmation required for sensitive operations (promoting to live trading, adjusting risk parameters)
+- Production deployments require TLS termination (reverse proxy or Uvicorn), and when `APP_ENV=production` the backend sets `Strict-Transport-Security` plus secure/HttpOnly session cookies (see `backend/core/settings.py` for additional env vars such as `FRONTEND_ORIGINS`, `SESSION_COOKIE_SAMESITE`, and TLS certificate paths).
 
 ## Development
 
@@ -140,6 +141,16 @@ cd backend && pytest
 # Frontend tests
 cd frontend && npm test
 ```
+
+### Triad Task Synchronization
+
+- **Purpose:** `triad/bin/sync_features_to_tasks.py` reads every feature stored in `features.db`, converts it into a Triad `tasks` row, and writes that row to `triad/triad.db`. This makes the legacy feature backlog available to the worker loop without touching `features.db` at runtime.
+- **Default behavior:** `python3 triad/bin/sync_features_to_tasks.py` inserts every feature as `task_id = feature-<id>` in phase `99` with status `available` (or `blocked` when dependencies exist, `done` when the feature was already marked passing).
+- **Useful options:**
+  - `--dry-run` to preview inserts without modifying `triad.db`.
+  - `--update-existing` to refresh an existing task’s title/description/status if the feature row changed.
+  - `--min-id/--max-id/--limit` to import a subset of features and `--id-prefix` or `--phase` to align with other task naming conventions.
+- **Workflow:** run the script once (or incrementally) before starting workers; the new tasks then become candidates for `./triad/run_worker.sh` as soon as their dependencies are satisfied and they get reviewed.
 
 ## License
 
