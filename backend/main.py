@@ -575,9 +575,8 @@ FORGOT_PASSWORD_PAGE_HTML = dedent("""\
                     Accept: "application/json",
                   },
                   body: JSON.stringify({
-                    email,
                     token,
-                    password: passwordValue,
+                    new_password: passwordValue,
                   }),
                 }),
                 "Unable to reset password."
