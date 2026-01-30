@@ -45,6 +45,14 @@ uvicorn main:app --reload --port 8000
 ```
 The API docs are available at `http://localhost:8000/docs` once the server starts.
 
+## AI Chat interface
+
+A standalone AI chat experience is exposed at `http://localhost:8000/ai-chat` so the UI can stay focused on the orchestrator and streaming chat endpoints.
+
+- The page pulls conversation history from `GET /api/ai/chat/history` and streams new replies via `POST /api/ai/chat` (text/event-stream with SSE framing). Every chunk is persisted and visible in the inbox once complete.
+- Active provider metadata is available via `GET /api/ai/models`, enabling the interface to highlight whether OpenAI or Claude are available.
+- Refresh controls and status badges keep the operator informed about streaming progress and errors so the orchestrator can be queried without leaving the backend.
+
 ## Alerts & Activity APIs
 
 CryptoTrader's monitoring surface exposes a consolidated Alerts dashboard and activity log built on the same backend services the agents already use.
