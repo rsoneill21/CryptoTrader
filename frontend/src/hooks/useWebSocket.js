@@ -6,7 +6,7 @@ const MAX_PENDING_MESSAGES = 50;
 
 const buildWebSocketUrl = (feed = DEFAULT_FEED) => {
   const fallback = `ws://localhost:8000/api/market/stream/${feed}`;
-  const configUrl = process.env.REACT_APP_API_URL;
+  const configUrl = import.meta.env.VITE_API_URL;
 
   if (configUrl) {
     try {

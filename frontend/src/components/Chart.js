@@ -23,7 +23,7 @@ const normalizeCandles = (entries) =>
     .filter(Boolean); // remove invalid entries
 
 const buildWebSocketUrl = () => {
-  const baseUrl = process.env.REACT_APP_API_URL || window.location.origin;
+  const baseUrl = import.meta.env.VITE_API_URL || window.location.origin;
   try {
     const parsed = new URL(baseUrl);
     const scheme = parsed.protocol === 'https:' ? 'wss:' : 'ws:';

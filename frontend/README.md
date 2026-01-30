@@ -1,34 +1,33 @@
 # CryptoTrader Frontend
 
-React + TailwindCSS storefront for the CryptoTrader experience. This project is bootstrapped with Create React App and ships with the routing, charts, and service clients that the backend expects.
+React + TailwindCSS client powered by Vite. The frontend is responsible for rendering the dashboard, handling authentication, and streaming market data into the AI-assisted workspace.
 
 ## Requirements
-- Node.js 18+ (the `engines` field is not locked, but modern LTS versions work best)
-- npm 10+ (installed with Node.js)
+- Node.js 18+ (any modern LTS work well)
+- npm 10+ (bundled with Node.js 20+)
 
-## Quick start
+## Getting started
 ```bash
 cd frontend
 npm install
 ```
 
 ## Environment variables
-CRA automatically injects `REACT_APP_*` variables into the bundle. The frontend reads these values when building:
-- `REACT_APP_API_URL` – overrides the API base URL (defaults to `http://localhost:8000`).
+Vite exposes `import.meta.env` variables that are prefixed with `VITE_`. The frontend honors:
+- `VITE_API_URL` — overrides the backend base URL (`http://localhost:8000` when unset)
 
-During local development the `proxy` field in `package.json` forwards unknown requests to `http://localhost:8000`, so you can keep CORS configuration simple.
+During development, the Vite dev server proxies `/api`, `/auth`, and `/ws` to `http://localhost:8000` so you can run the backend locally without CORS tweaks.
 
-## Scripts
+## Available scripts
 ```bash
-npm start        # Runs the dev server (http://localhost:3000)
-npm test         # Launches the Jest test runner
-npm run build     # Produces a production bundle in build/
+npm run dev     # Start Vite dev server (http://localhost:5173)
+npm run build   # Produce production assets under dist/
+npm run preview # Launch a static preview of the production build
+npm run lint    # Run ESLint across the React source tree
 ```
 
-`npm start` runs the app with fast refresh and environment-aware logging. `npm test` loads the React Testing Library utilities already configured in `package.json`.
-
-## TailwindCSS
-Tailwind is configured in `tailwind.config.js` and consumed via the generated CSS entry in `src/index.css`. No additional build steps are required beyond `npm start` / `npm run build`.
+## Styling
+TailwindCSS is already wired up via `postcss.config.js` and `tailwind.config.js`. The entry point `src/index.css` pulls in the Tailwind layers and the custom dark-theme variables used throughout the app.
 
 ## Production build
-After running `npm run build`, serve the contents of `build/` with your preferred static file server (e.g., `serve -s build` or put the folder behind Nginx). The final bundle will call the API located at `_REACT_APP_API_URL` or the proxied backend.
+After `npm run build`, serve the `dist/` directory with your preferred static server (e.g., `npm install -g serve && serve dist`). The final bundle will call the API configured via `VITE_API_URL`, or fall back to the proxied backend when the env var is absent.

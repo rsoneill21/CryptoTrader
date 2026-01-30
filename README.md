@@ -130,16 +130,17 @@ uvicorn main:app --reload
 ### Frontend Development
 ```bash
 cd frontend
-npm start
+npm install
+npm run dev
 ```
 
-### Running Tests
+### Running Tests & Linters
 ```bash
 # Backend tests
 cd backend && pytest
 
-# Frontend tests
-cd frontend && npm test
+# Frontend lint
+cd frontend && npm run lint
 ```
 
 ### Triad Task Synchronization
