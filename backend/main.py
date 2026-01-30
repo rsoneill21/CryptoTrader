@@ -370,6 +370,234 @@ AI_CHAT_PAGE_HTML = dedent("""\
     </html>
 """)
 
+FORGOT_PASSWORD_PAGE_HTML = dedent("""\
+    <!DOCTYPE html>
+    <html lang="en" class="dark">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>CryptoTrader | Reset Password</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <style>
+        body {
+          font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        ::placeholder {
+          color: rgba(148, 163, 184, 0.8);
+        }
+      </style>
+    </head>
+    <body class="bg-slate-950 text-slate-100">
+      <div class="flex min-h-screen items-center justify-center px-4 py-10 sm:py-16">
+        <div class="w-full max-w-5xl space-y-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/60 sm:p-10">
+          <header class="space-y-2 text-center">
+            <p class="text-xs uppercase tracking-[0.4em] text-cyan-400">Security</p>
+            <h1 class="text-3xl font-semibold text-white">Reset your password</h1>
+            <p class="text-sm text-slate-400">Request a reset link and complete the confirmation without leaving the page.</p>
+          </header>
+
+          <div class="grid gap-6 lg:grid-cols-2">
+            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+              <div class="space-y-2">
+                <p class="text-sm font-semibold text-slate-200">Step 1 · Request reset link</p>
+                <p class="text-xs text-slate-400">We will only send an email if the account exists. Check your inbox (and spam folder).</p>
+              </div>
+              <form id="request-reset-form" class="space-y-4" novalidate>
+                <div>
+                  <label for="request-email" class="text-xs uppercase tracking-wider text-slate-400">Email</label>
+                  <input
+                    id="request-email"
+                    type="email"
+                    required
+                    class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                    placeholder="you@company.com"
+                  />
+                </div>
+                <button
+                  id="request-reset-button"
+                  type="submit"
+                  class="w-full rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold uppercase tracking-widest text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Send reset link
+                </button>
+                <p id="request-alert" class="min-h-[1.25rem] text-sm text-slate-400"></p>
+              </form>
+            </section>
+
+            <section class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+              <div class="space-y-2">
+                <p class="text-sm font-semibold text-slate-200">Step 2 · Confirm reset</p>
+                <p class="text-xs text-slate-400">Paste the code from the email, pick a new password, and submit.</p>
+              </div>
+              <form id="confirm-reset-form" class="space-y-4" novalidate>
+                <div>
+                  <label for="confirm-email" class="text-xs uppercase tracking-wider text-slate-400">Email</label>
+                  <input
+                    id="confirm-email"
+                    type="email"
+                    required
+                    class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                    placeholder="you@company.com"
+                  />
+                </div>
+                <div>
+                  <label for="reset-token" class="text-xs uppercase tracking-wider text-slate-400">Reset code</label>
+                  <input
+                    id="reset-token"
+                    type="text"
+                    required
+                    class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                    placeholder="XXXXXXXX"
+                  />
+                </div>
+                <div>
+                  <label for="new-password" class="text-xs uppercase tracking-wider text-slate-400">New password</label>
+                  <input
+                    id="new-password"
+                    type="password"
+                    required
+                    class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                    placeholder="Create a strong password"
+                  />
+                </div>
+                <div>
+                  <label for="confirm-password" class="text-xs uppercase tracking-wider text-slate-400">Confirm password</label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    required
+                    class="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                    placeholder="Repeat new password"
+                  />
+                </div>
+                <button
+                  id="confirm-reset-button"
+                  type="submit"
+                  class="w-full rounded-2xl bg-white/90 px-4 py-3 text-sm font-semibold uppercase tracking-widest text-slate-950 transition hover:bg-white/100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Update password
+                </button>
+                <p id="confirm-alert" class="min-h-[1.25rem] text-sm text-slate-400"></p>
+              </form>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        (() => {
+          const requestForm = document.getElementById("request-reset-form");
+          const confirmForm = document.getElementById("confirm-reset-form");
+          const requestButton = document.getElementById("request-reset-button");
+          const confirmButton = document.getElementById("confirm-reset-button");
+          const requestAlert = document.getElementById("request-alert");
+          const confirmAlert = document.getElementById("confirm-alert");
+          const requestEmail = document.getElementById("request-email");
+          const confirmEmail = document.getElementById("confirm-email");
+          const resetToken = document.getElementById("reset-token");
+          const newPassword = document.getElementById("new-password");
+          const confirmPassword = document.getElementById("confirm-password");
+
+          const normalize = (value) => value.trim();
+
+          const updateAlert = (element, message, type = "neutral") => {
+            const base = "min-h-[1.25rem] text-sm font-medium transition-colors";
+            const palette = {
+              success: "text-emerald-300",
+              error: "text-rose-400",
+              neutral: "text-slate-400",
+            };
+            element.textContent = message;
+            element.className = `${base} ${palette[type] ?? palette.neutral}`;
+          };
+
+          const handleResponse = async (response, fallbackMessage) => {
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const detail = payload.detail ?? payload.error ?? fallbackMessage;
+              throw new Error(detail);
+            }
+            return payload;
+          };
+
+          requestForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = normalize(requestEmail.value);
+            if (!email) {
+              updateAlert(requestAlert, "Please enter your email.", "error");
+              return;
+            }
+            requestButton.disabled = true;
+            updateAlert(requestAlert, "Sending reset link...", "neutral");
+            try {
+              await handleResponse(
+                await fetch("/api/auth/password/reset", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                  },
+                  body: JSON.stringify({ email }),
+                }),
+                "Unable to send reset email."
+              );
+              updateAlert(requestAlert, "If the email exists, you will receive instructions shortly.", "success");
+              confirmEmail.value = email;
+            } catch (error) {
+              updateAlert(requestAlert, error.message ?? "Unable to send reset email.", "error");
+            } finally {
+              requestButton.disabled = false;
+            }
+          });
+
+          confirmForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = normalize(confirmEmail.value);
+            const token = normalize(resetToken.value);
+            const passwordValue = normalize(newPassword.value);
+            const confirmValue = normalize(confirmPassword.value);
+            if (!email || !token || !passwordValue || !confirmValue) {
+              updateAlert(confirmAlert, "Complete every field to continue.", "error");
+              return;
+            }
+            if (passwordValue !== confirmValue) {
+              updateAlert(confirmAlert, "Passwords do not match.", "error");
+              return;
+            }
+            confirmButton.disabled = true;
+            updateAlert(confirmAlert, "Verifying code...", "neutral");
+            try {
+              await handleResponse(
+                await fetch("/api/auth/password/reset/confirm", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                  },
+                  body: JSON.stringify({
+                    email,
+                    token,
+                    password: passwordValue,
+                  }),
+                }),
+                "Unable to reset password."
+              );
+              updateAlert(confirmAlert, "Success! You can now log in with your new password.", "success");
+              newPassword.value = "";
+              confirmPassword.value = "";
+              resetToken.value = "";
+            } catch (error) {
+              updateAlert(confirmAlert, error.message ?? "Unable to reset password.", "error");
+            } finally {
+              confirmButton.disabled = false;
+            }
+          });
+        })();
+      </script>
+    </body>
+    </html>
+""")
+
 
 
 class HSTSMiddleware(BaseHTTPMiddleware):
@@ -422,6 +650,12 @@ async def root():
 async def ai_chat_page():
     """Serve the AI chat interface so the frontend can stay simple."""
     return HTMLResponse(content=AI_CHAT_PAGE_HTML, status_code=200)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page():
+    """Serve the password reset experience."""
+    return HTMLResponse(content=FORGOT_PASSWORD_PAGE_HTML, status_code=200)
 
 
 # Include routers
