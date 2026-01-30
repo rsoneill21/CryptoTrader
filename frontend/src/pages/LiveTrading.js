@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Chart from '../components/Chart';
-import api from '../services/api';
+import { marketAPI, tradesAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
-const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD'];
+const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
 const OVERLAY_POSITIONS = ['top-4 left-4', 'top-4 right-4', 'bottom-4 right-4'];
 
 const parseNumber = (value) => {
@@ -24,11 +24,12 @@ const formatCurrency = (value) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(normalized);
 };
 
-const formatPercent = (value, digits = 1) => {
+const formatPercent = (value, digits = 2) => {
   if (typeof value !== 'number' && typeof value !== 'string') {
     return '0%';
   }
@@ -38,99 +39,49 @@ const formatPercent = (value, digits = 1) => {
     return '0%';
   }
 
-  const sign = normalized > 0 ? '+' : normalized < 0 ? '' : '';
+  const sign = normalized > 0 ? '+' : '';
   return `${sign}${normalized.toFixed(digits)}%`;
 };
 
 const LiveTrading = () => {
   const [portfolio, setPortfolio] = useState(null);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
-  const [portfolioError, setPortfolioError] = useState('');
   const [priceTickers, setPriceTickers] = useState([]);
   const [pricesLoading, setPricesLoading] = useState(true);
-  const [pricesError, setPricesError] = useState('');
+  const [activeTrades, setActiveTrades] = useState([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
   const [currentSymbol, setCurrentSymbol] = useState(TARGET_SYMBOL);
 
-  useEffect(() => {
-    let active = true;
+  // Manual trade form state
+  const [tradeSide, setTradeSide] = useState('buy');
+  const [tradeQuantity, setTradeQuantity] = useState('');
+  const [tradeLoading, setTradeLoading] = useState(false);
 
-    const loadPortfolio = async () => {
-      setPortfolioLoading(true);
-      setPortfolioError('');
+  const fetchData = useCallback(async () => {
+    try {
+      const [portfolioRes, pricesRes, tradesRes] = await Promise.all([
+        marketAPI.getPortfolio(),
+        marketAPI.getPrices(PRICE_SYMBOLS),
+        tradesAPI.getActiveTrades(),
+      ]);
 
-      try {
-        const response = await api.get('/api/market/portfolio');
-        if (!active) {
-          return;
-        }
-
-        setPortfolio(response.data);
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-
-        console.error('Live trading portfolio fetch failed', error);
-        setPortfolioError(error?.message || 'Unable to load portfolio snapshot.');
-      } finally {
-        if (active) {
-          setPortfolioLoading(false);
-        }
-      }
-    };
-
-    loadPortfolio();
-    return () => {
-      active = false;
-    };
+      setPortfolio(portfolioRes.data);
+      setPriceTickers(pricesRes.data?.prices || []);
+      setActiveTrades(tradesRes.data || []);
+    } catch (error) {
+      console.error('Failed to fetch live trading data', error);
+    } finally {
+      setPortfolioLoading(false);
+      setPricesLoading(false);
+      setTradesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    let active = true;
-    let intervalId;
-
-    const loadPrices = async () => {
-      setPricesError('');
-      if (!priceTickers.length) {
-        setPricesLoading(true);
-      }
-
-      try {
-        const response = await api.get('/api/market/prices', {
-          params: {
-            symbol: PRICE_SYMBOLS,
-          },
-        });
-
-        if (!active) {
-          return;
-        }
-
-        const payload = Array.isArray(response.data?.prices) ? response.data.prices : [];
-        setPriceTickers(payload);
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-
-        console.error('Live trading prices fetch failed', error);
-        setPricesError(error?.message || 'Unable to load ticker data.');
-      } finally {
-        if (active) {
-          setPricesLoading(false);
-        }
-      }
-    };
-
-    loadPrices();
-    intervalId = window.setInterval(loadPrices, 45000);
-
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const priceMap = useMemo(() => {
     const map = new Map();
@@ -144,10 +95,42 @@ const LiveTrading = () => {
 
   const currentTicker = priceMap.get(currentSymbol);
 
-  const livePositions = useMemo(() => {
-    if (!portfolio?.holdings?.length) {
-      return [];
+  const handleCreateTrade = async (e) => {
+    e.preventDefault();
+    if (!tradeQuantity || parseNumber(tradeQuantity) <= 0) return;
+
+    setTradeLoading(true);
+    try {
+      await tradesAPI.createTrade({
+        symbol: currentSymbol,
+        side: tradeSide,
+        quantity: parseNumber(tradeQuantity),
+        is_paper: true,
+      });
+      setTradeQuantity('');
+      fetchData();
+    } catch (error) {
+      console.error('Failed to execute trade', error);
+      alert('Trade execution failed: ' + (error.message || 'Unknown error'));
+    } finally {
+      setTradeLoading(false);
     }
+  };
+
+  const handleCloseTrade = async (tradeId, currentPrice) => {
+    if (!window.confirm(`Are you sure you want to close trade #${tradeId}?`)) return;
+
+    try {
+      await tradesAPI.closeTrade(tradeId, currentPrice, 'Manual close from dashboard');
+      fetchData();
+    } catch (error) {
+      console.error('Failed to close trade', error);
+      alert('Failed to close trade: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  const livePositions = useMemo(() => {
+    if (!portfolio?.holdings?.length) return [];
 
     return portfolio.holdings
       .map((holding) => {
@@ -155,270 +138,262 @@ const LiveTrading = () => {
         const symbol = `${holding.asset}/USD`;
         const ticker = priceMap.get(symbol);
         const lastPrice = ticker ? parseNumber(ticker.last) : null;
-        const openPrice = ticker ? parseNumber(ticker.open_24h ?? ticker.open) : null;
-        const valueUsd = lastPrice ? lastPrice * quantity : null;
-        const changePercent = lastPrice && openPrice ? ((lastPrice - openPrice) / openPrice) * 100 : 0;
-        const pnlUsd = valueUsd ? (valueUsd * changePercent) / 100 : 0;
+        const valueUsd = lastPrice ? lastPrice * quantity : 0;
 
         return {
           asset: holding.asset,
           symbol,
           quantity,
-          valueUsd: valueUsd ?? 0,
-          changePercent,
-          pnlUsd,
+          valueUsd,
           available: parseNumber(holding.available),
-          reserved: parseNumber(holding.reserved),
-          bias: changePercent >= 0 ? 'Long bias' : 'Hedged',
         };
       })
-      .filter((entry) => entry.quantity > 0)
-      .sort((a, b) => b.valueUsd - a.valueUsd)
-      .slice(0, 5);
+      .filter((entry) => entry.quantity > 0.0001)
+      .sort((a, b) => b.valueUsd - a.valueUsd);
   }, [portfolio, priceMap]);
-
-  const annotations = useMemo(() => {
-    const fallback = [
-      {
-        id: 'awaiting',
-        label: 'AI oversight',
-        value: 'Live data pending',
-        detail: 'Waiting for Kraken stream',
-        confidence: 'Moderate',
-      },
-      {
-        id: 'vault',
-        label: 'Risk control',
-        value: 'Stable',
-        detail: 'Positions held steady',
-        confidence: 'Medium',
-      },
-    ];
-
-    if (!priceMap.size) {
-      return fallback;
-    }
-
-    const cards = [];
-    const primary = priceMap.get(currentSymbol);
-
-    if (primary) {
-      const last = parseNumber(primary.last);
-      const open = parseNumber(primary.open_24h ?? primary.open);
-      const momentum = open ? ((last - open) / open) * 100 : 0;
-
-      cards.push({
-        id: 'momentum',
-        label: 'Momentum',
-        value: formatPercent(momentum),
-        detail: momentum >= 0 ? 'Bullish lift' : 'Pullback forming',
-        confidence: momentum >= 0 ? 'High' : 'Medium',
-      });
-    }
-
-    const sortedByChange = Array.from(priceMap.values())
-      .map((ticker) => {
-        const last = parseNumber(ticker.last);
-        const open = parseNumber(ticker.open_24h ?? ticker.open);
-        const change = open ? ((last - open) / open) * 100 : 0;
-        return { symbol: ticker.symbol, change };
-      })
-      .sort((a, b) => b.change - a.change);
-
-    if (sortedByChange.length >= 2) {
-      const topGainer = sortedByChange[0];
-      const topLoser = sortedByChange[sortedByChange.length - 1];
-
-      cards.push({
-        id: 'gainer',
-        label: `${topGainer.symbol} trend`,
-        value: `${formatPercent(topGainer.change)}`,
-        detail: 'Strong relative strength',
-        confidence: 'High',
-      });
-
-      cards.push({
-        id: 'loser',
-        label: `${topLoser.symbol} caution`,
-        value: `${formatPercent(topLoser.change)}`,
-        detail: 'Watch for reversal',
-        confidence: 'Medium',
-      });
-    }
-
-    return cards.slice(0, 3);
-  }, [currentSymbol, priceMap]);
-
-  const reasoningPoints = useMemo(() => {
-    const points = [];
-
-    if (annotations.length) {
-      annotations.forEach((annotation) => {
-        points.push(`${annotation.label}: ${annotation.detail} (${annotation.value}).`);
-      });
-    }
-
-    if (livePositions.length) {
-      const top = livePositions[0];
-      points.push(`Largest position ${top.asset} (${top.bias}) pairs with ${formatCurrency(top.valueUsd)} exposure.`);
-    }
-
-    if (pricesError) {
-      points.push('Price stream paused — relying on cached ticks until Kraken reconnects.');
-    }
-
-    if (!points.length) {
-      points.push('Awaiting live feeds before AI can express trading rationale.');
-    }
-
-    return points.slice(0, 5);
-  }, [annotations, livePositions, pricesError]);
-
-  const stats = useMemo(() => {
-    if (!currentTicker) {
-      return [];
-    }
-
-    const last = parseNumber(currentTicker.last);
-    const open = parseNumber(currentTicker.open_24h ?? currentTicker.open);
-    const change = open ? last - open : 0;
-
-    return [
-      { label: 'Last price', value: formatCurrency(last) },
-      { label: '24h change', value: formatPercent(((change / open) * 100) || 0), positive: change >= 0 },
-      { label: 'Bid / Ask', value: `${formatCurrency(currentTicker.bid)} / ${formatCurrency(currentTicker.ask)}` },
-      { label: '24h volume', value: `${Number(currentTicker.volume_24h || 0).toFixed(2)} ${currentSymbol.split('/')[0]}` },
-    ];
-  }, [currentSymbol, currentTicker]);
 
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-[0.4em] text-blue-300">Phase 5</p>
-        <h1 className="text-3xl font-bold text-white">Live Trading</h1>
-        <p className="text-sm text-gray-400">
-          Monitor the AI assistant, visualize the live chart, and keep tabs on your most active positions.
-        </p>
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-xs uppercase tracking-[0.4em] text-blue-400">Live Trading</p>
+          <h1 className="text-3xl font-bold text-white">Execution Terminal</h1>
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <div className="text-right">
+            <p className="text-gray-500 uppercase text-[10px] tracking-widest">Portfolio Value</p>
+            <p className="text-white font-semibold">{portfolio ? formatCurrency(portfolio.total_value_usd) : '—'}</p>
+          </div>
+          <div className="h-8 w-px bg-gray-800" />
+          <div className="text-right">
+            <p className="text-gray-500 uppercase text-[10px] tracking-widest">Available Cash</p>
+            <p className="text-emerald-400 font-semibold">{portfolio ? formatCurrency(portfolio.holdings.find(h => h.asset === 'USD')?.available || 0) : '—'}</p>
+          </div>
+        </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[3fr_1.2fr]">
-        <section className="space-y-6">
-          <div className="relative rounded-[28px] border border-gray-800 bg-gradient-to-b from-gray-900/80 to-black/70 p-6 shadow-2xl shadow-black/60">
-            <div className="relative">
-              <div className="pointer-events-none absolute inset-0 z-10">
-                {annotations.map((annotation, index) => (
-                  <div
-                    key={`${annotation.id}-${index}`}
-                    className={`absolute w-48 rounded-2xl border border-white/5 bg-black/70 px-4 py-3 text-sm text-gray-100 shadow-2xl backdrop-blur ${OVERLAY_POSITIONS[index % OVERLAY_POSITIONS.length]}`}
+      <div className="grid gap-6 lg:grid-cols-[1fr_350px]">
+        {/* Main Content Area */}
+        <div className="space-y-6">
+          {/* Chart & Market Stats */}
+          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold">
+                  {currentSymbol.split('/')[0]}
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">{currentSymbol}</h2>
+                  <p className="text-xs text-gray-400 uppercase tracking-tighter">Kraken Spot</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {PRICE_SYMBOLS.slice(0, 4).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setCurrentSymbol(s)}
+                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition ${currentSymbol === s ? 'bg-blue-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
                   >
-                    <p className="text-[10px] uppercase tracking-[0.3em] text-blue-300">{annotation.label}</p>
-                    <p className="mt-1 text-lg font-semibold text-white">{annotation.value}</p>
-                    <p className="text-xs text-gray-300">{annotation.detail}</p>
-                    <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-green-300">Confidence {annotation.confidence}</p>
-                  </div>
+                    {s.split('/')[0]}
+                  </button>
                 ))}
               </div>
+            </div>
 
+            <div className="h-[400px] w-full rounded-2xl overflow-hidden border border-gray-800 bg-black/40">
               <Chart symbol={currentSymbol} />
             </div>
 
-            <div className="mt-6 grid gap-3 md:grid-cols-4">
-              {stats.length ? (
-                stats.map((stat) => (
-                  <div key={stat.label} className="rounded-2xl border border-gray-800 bg-gray-900/60 p-3 text-sm">
-                    <p className="text-xs uppercase tracking-[0.3em] text-gray-500">{stat.label}</p>
-                    <p className={`mt-1 text-lg font-semibold ${stat.positive === false ? 'text-rose-400' : 'text-emerald-400'}`}>{stat.value}</p>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-2xl border border-dashed border-gray-600 bg-gray-900/40 p-4 text-xs text-gray-400">
-                  {pricesLoading ? 'Connecting to price feed…' : 'Select a market to view live stats.'}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+              {[
+                { label: 'Last Price', value: formatCurrency(currentTicker?.last), color: 'text-white' },
+                { label: '24h High', value: formatCurrency(currentTicker?.high_24h), color: 'text-gray-300' },
+                { label: '24h Low', value: formatCurrency(currentTicker?.low_24h), color: 'text-gray-300' },
+                { label: '24h Volume', value: `${parseNumber(currentTicker?.volume_24h).toFixed(2)} ${currentSymbol.split('/')[0]}`, color: 'text-gray-300' },
+              ].map(stat => (
+                <div key={stat.label} className="p-3 rounded-2xl bg-black/20 border border-gray-800">
+                  <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">{stat.label}</p>
+                  <p className={`text-sm font-bold ${stat.color}`}>{stat.value || '—'}</p>
                 </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-2">
-              {PRICE_SYMBOLS.map((symbolOption) => (
-                <button
-                  key={symbolOption}
-                  type="button"
-                  onClick={() => setCurrentSymbol(symbolOption)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    currentSymbol === symbolOption
-                      ? 'border-blue-400 bg-blue-500/20 text-blue-200'
-                      : 'border-gray-700 bg-white/5 text-gray-300 hover:border-blue-300 hover:text-white'
-                  }`}
-                >
-                  {symbolOption}
-                </button>
               ))}
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-gray-800 bg-gray-900/60 px-4 py-5 shadow-inner shadow-black/40">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Positions</p>
-                <h2 className="text-xl font-semibold text-white">Live holdings</h2>
-              </div>
-              <p className="text-xs text-gray-400">
-                {portfolio?.fetched_at
-                  ? `Updated ${new Date(portfolio.fetched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                  : 'Syncing…'}
-              </p>
+          {/* Active Trades */}
+          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">Active Trades</h2>
+              <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-widest">
+                {activeTrades.length} Positions
+              </span>
             </div>
 
-            <div className="mt-4 space-y-3">
-              {portfolioLoading ? (
-                <p className="text-sm text-gray-400">Loading portfolio snapshot…</p>
-              ) : portfolioError ? (
-                <p className="text-sm text-rose-300">{portfolioError}</p>
-              ) : livePositions.length ? (
-                livePositions.map((position) => (
-                  <div
-                    key={position.asset}
-                    className="flex items-center justify-between rounded-2xl border border-gray-800 bg-gray-950/70 p-3"
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-separate border-spacing-y-2">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-[0.2em] text-gray-500 px-4">
+                    <th className="pb-2 pl-4">Asset</th>
+                    <th className="pb-2">Side</th>
+                    <th className="pb-2">Entry Price</th>
+                    <th className="pb-2">Quantity</th>
+                    <th className="pb-2">Unrealized P&L</th>
+                    <th className="pb-2 pr-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradesLoading ? (
+                    <tr><td colSpan="6" className="py-8 text-center text-sm text-gray-500">Loading active trades...</td></tr>
+                  ) : activeTrades.length === 0 ? (
+                    <tr><td colSpan="6" className="py-8 text-center text-sm text-gray-500">No active trades found.</td></tr>
+                  ) : (
+                    activeTrades.map(trade => {
+                      const ticker = priceMap.get(trade.symbol);
+                      const currentPrice = ticker ? parseNumber(ticker.last) : trade.entry_price;
+                      const pnl = trade.entry_price ? (currentPrice - trade.entry_price) * trade.quantity * (trade.side === 'buy' ? 1 : -1) : 0;
+                      const pnlPercent = trade.entry_price ? (pnl / (trade.entry_price * trade.quantity)) * 100 : 0;
+
+                      return (
+                        <tr key={trade.id} className="bg-black/20 hover:bg-black/40 transition group">
+                          <td className="py-4 pl-4 rounded-l-2xl">
+                            <div className="font-bold text-white">{trade.symbol}</div>
+                            <div className="text-[10px] text-gray-500 uppercase tracking-tighter">
+                              {trade.is_paper ? 'Paper' : 'Live'} · {trade.is_manual ? 'Manual' : 'AI'}
+                            </div>
+                          </td>
+                          <td className="py-4">
+                            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${trade.side === 'buy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                              {trade.side}
+                            </span>
+                          </td>
+                          <td className="py-4 text-sm text-gray-300">{formatCurrency(trade.entry_price)}</td>
+                          <td className="py-4 text-sm text-gray-300">{trade.quantity}</td>
+                          <td className="py-4">
+                            <div className={`text-sm font-bold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {formatCurrency(pnl)}
+                            </div>
+                            <div className={`text-[10px] ${pnl >= 0 ? 'text-emerald-500/60' : 'text-rose-500/60'}`}>
+                              {formatPercent(pnlPercent)}
+                            </div>
+                          </td>
+                          <td className="py-4 pr-4 text-right rounded-r-2xl">
+                            <button
+                              onClick={() => handleCloseTrade(trade.id, currentPrice)}
+                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-400 text-xs font-bold hover:bg-rose-500 hover:text-white transition"
+                            >
+                              Close
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Manual Trade Form */}
+          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
+            <h2 className="text-xl font-bold text-white mb-6">Trade</h2>
+            <form onSubmit={handleCreateTrade} className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-2xl border border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setTradeSide('buy')}
+                  className={`py-2 rounded-xl text-xs font-bold uppercase transition ${tradeSide === 'buy' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-900/40' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                  Buy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTradeSide('sell')}
+                  className={`py-2 rounded-xl text-xs font-bold uppercase transition ${tradeSide === 'sell' ? 'bg-rose-500 text-white shadow-lg shadow-rose-900/40' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                  Sell
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-gray-500 ml-1">Asset</label>
+                <div className="relative">
+                  <select
+                    value={currentSymbol}
+                    onChange={(e) => setCurrentSymbol(e.target.value)}
+                    className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500 appearance-none"
                   >
-                    <div>
-                      <p className="text-sm font-semibold text-white">{position.asset}</p>
-                      <p className="text-xs text-gray-400">{position.symbol}</p>
-                      <p className="text-xs text-gray-500">{position.bias}</p>
+                    {PRICE_SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                    ↓
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-gray-500 ml-1">Quantity</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="any"
+                    value={tradeQuantity}
+                    onChange={(e) => setTradeQuantity(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 uppercase">
+                    {currentSymbol.split('/')[0]}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-widest mb-2 px-1">
+                  <span>Est. Cost</span>
+                  <span>{formatCurrency(parseNumber(tradeQuantity) * (currentTicker?.last || 0))}</span>
+                </div>
+                <button
+                  type="submit"
+                  disabled={tradeLoading || !tradeQuantity}
+                  className={`w-full py-4 rounded-[20px] font-bold uppercase tracking-widest text-sm transition ${tradeSide === 'buy' ? 'bg-emerald-500 hover:bg-emerald-400 text-white' : 'bg-rose-500 hover:bg-rose-400 text-white'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {tradeLoading ? 'Processing...' : `${tradeSide === 'buy' ? 'Execute Buy' : 'Execute Sell'}`}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Portfolio Breakdown */}
+          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
+            <h2 className="text-xl font-bold text-white mb-6">Holdings</h2>
+            <div className="space-y-3">
+              {portfolioLoading ? (
+                <p className="text-center text-xs text-gray-500 py-4">Loading holdings...</p>
+              ) : livePositions.length === 0 ? (
+                <p className="text-center text-xs text-gray-500 py-4">No assets held.</p>
+              ) : (
+                livePositions.map(pos => (
+                  <div key={pos.asset} className="flex items-center justify-between p-3 rounded-2xl bg-black/20 border border-gray-800">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-300">
+                        {pos.asset}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-white">{pos.asset}</p>
+                        <p className="text-[10px] text-gray-500">{pos.quantity.toFixed(4)}</p>
+                      </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm text-gray-300">{position.quantity.toFixed(4)} · {formatCurrency(position.valueUsd)}</p>
-                      <p className={`${position.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'} text-xs`}>Δ {formatPercent(position.changePercent)}</p>
+                      <p className="text-xs font-bold text-white">{formatCurrency(pos.valueUsd)}</p>
                     </div>
                   </div>
                 ))
-              ) : (
-                <p className="text-sm text-gray-400">No active positions detected yet.</p>
               )}
             </div>
           </div>
-        </section>
-
-        <section className="space-y-5 rounded-[28px] border border-gray-800 bg-gray-900/60 p-6 shadow-xl shadow-black/50">
-          <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-blue-300">AI reasoning</p>
-            <h2 className="text-2xl font-semibold text-white">Why trade now?</h2>
-            <p className="text-sm text-gray-400">Insights guided by the market analyst agent.</p>
-          </div>
-
-          <ul className="space-y-4 text-sm text-gray-200">
-            {reasoningPoints.map((point, index) => (
-              <li key={`reason-${index}`} className="rounded-2xl border border-gray-800 bg-gray-950/80 p-4 text-gray-200">
-                {point}
-              </li>
-            ))}
-          </ul>
-
-          <div className="rounded-2xl border border-dashed border-blue-500/50 bg-gradient-to-b from-blue-900/40 to-black/40 p-4 text-sm text-gray-200">
-            <p className="font-semibold text-white">AI confidence</p>
-            <p className="text-xs text-gray-400">
-              {annotations[0]?.confidence ? `${annotations[0].confidence} across highlighted signals` : 'Awaiting signal quality score.'}
-            </p>
-          </div>
-        </section>
+        </div>
       </div>
     </div>
   );

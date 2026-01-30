@@ -67,6 +67,56 @@ class CloseTradeResponse(BaseModel):
     message: str
 
 
+class CreateTradeRequest(BaseModel):
+    """Payload for creating a manual trade."""
+
+    symbol: str = Field(..., description="Trading pair (e.g., BTC/USD)")
+    side: str = Field(..., regex="^(buy|sell)$", description="Order side")
+    quantity: float = Field(..., gt=0)
+    is_paper: bool = True
+
+
+@router.post(
+    "/",
+    response_model=ActiveTradeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_manual_trade(
+    request: CreateTradeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ActiveTradeResponse:
+    """Execute a manual trade and record it."""
+    now = datetime.utcnow()
+    
+    trade = Trade(
+        symbol=request.symbol,
+        side=request.side,
+        quantity=request.quantity,
+        is_paper=request.is_paper,
+        is_manual=True,
+        entry_time=now,
+        # In a real app, we'd fetch the current price from an exchange here
+        # For now, we'll assume it's a market order that fills at some price
+        # (Placeholder for real execution logic)
+    )
+
+    try:
+        db.add(trade)
+        db.commit()
+        db.refresh(trade)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to create manual trade: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to execute trade",
+        )
+
+    logger.info("Manual trade created: id=%s, symbol=%s", trade.id, trade.symbol)
+    return _serialize_trade(trade)
+
+
 class AdjustTradeRequest(BaseModel):
     """Payload for adjusting stop-loss/take-profit levels."""
 

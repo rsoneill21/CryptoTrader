@@ -180,5 +180,20 @@ export const marketAPI = {
     api.get('/api/market/portfolio', { params: { force_refresh: forceRefresh } }),
 };
 
+// Trades API
+export const tradesAPI = {
+  getActiveTrades: () =>
+    api.get('/api/trades/active'),
+
+  createTrade: (data) =>
+    api.post('/api/trades/', data),
+
+  closeTrade: (tradeId, exitPrice, reason = '') =>
+    api.post(`/api/trades/${tradeId}/close`, { exit_price: exitPrice, reason }),
+
+  adjustTrade: (tradeId, data) =>
+    api.put(`/api/trades/${tradeId}/adjust`, data),
+};
+
 // Export default instance for custom requests
 export default api;
