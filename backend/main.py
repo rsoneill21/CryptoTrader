@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from api.errors import register_exception_handlers
 from db.database import init_db
 from services.kraken_ws import start_kraken_ws, stop_kraken_ws
 from api import auth_router, market_router, system_router
@@ -30,6 +31,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+register_exception_handlers(app)
 
 # CORS configuration
 app.add_middleware(

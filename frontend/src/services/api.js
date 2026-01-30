@@ -45,6 +45,32 @@ export const removeToken = () => {
   localStorage.removeItem(TOKEN_KEY);
 };
 
+const UNEXPECTED_ERROR_MESSAGE =
+  'Something went wrong. Please try again or contact support if the problem persists.';
+
+const extractAPIError = (data) => {
+  if (!data) {
+    return null;
+  }
+  if (data.error && typeof data.error === 'object') {
+    return data.error;
+  }
+  return null;
+};
+
+const normalizeAPIError = (errorResponseData) => {
+  const apiError = extractAPIError(errorResponseData);
+  if (!apiError) {
+    return null;
+  }
+
+  return {
+    message: apiError.message || apiError.detail || UNEXPECTED_ERROR_MESSAGE,
+    code: apiError.code || 'unknown_error',
+    details: apiError.details,
+  };
+};
+
 // Request interceptor - add auth token
 api.interceptors.request.use(
   (config) => {
@@ -77,11 +103,18 @@ api.interceptors.response.use(
       }
 
       // Format error message
-      const message = data?.detail || data?.message || 'An error occurred';
-      error.message = message;
+      const normalized = normalizeAPIError(data);
+      if (normalized) {
+        error.message = normalized.message;
+        error.apiCode = normalized.code;
+        error.apiDetails = normalized.details;
+      } else {
+        error.message = data?.detail || data?.message || 'An error occurred';
+      }
     } else if (error.request) {
       // Request made but no response
-      error.message = 'Unable to connect to server. Please check your connection.';
+      error.message =
+        'Unable to connect to CryptoTrader. Ensure the backend is running and retry.';
     }
 
     return Promise.reject(error);
