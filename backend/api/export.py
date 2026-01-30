@@ -1,0 +1,262 @@
+"""Export endpoints providing CSV and filtered strategy data."""
+
+import csv
+import logging
+from datetime import datetime, date, time
+from io import StringIO
+from typing import Dict, Iterator, List, Optional, Union
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, root_validator, validator
+from sqlalchemy.orm import Session
+
+from core.auth import get_current_user
+from db.database import get_db
+from db.models import Strategy, Trade, User
+
+logger = logging.getLogger("cryptotrader.export")
+router = APIRouter()
+
+
+class TradeExportParams(BaseModel):
+    """Optional filters for the trade export endpoint."""
+
+    start_time: Optional[datetime] = Field(
+        None,
+        description="Include trades with entry_time on or after this ISO timestamp.",
+    )
+    end_time: Optional[datetime] = Field(
+        None,
+        description="Include trades with entry_time on or before this ISO timestamp.",
+    )
+
+    @root_validator
+    def validate_time_range(cls, values: Dict[str, Optional[datetime]]) -> Dict[str, Optional[datetime]]:
+        """Ensure the start time is not after the end time."""
+        start = values.get("start_time")
+        end = values.get("end_time")
+        if start and end and start > end:
+            raise ValueError("start_time must be earlier than or equal to end_time")
+        return values
+
+
+class StrategyExportParams(BaseModel):
+    """Filters for the strategy export endpoint."""
+
+    start_date: Optional[datetime] = Field(
+        None,
+        description="Include strategies created on or after this date (inclusive).",
+    )
+    end_date: Optional[datetime] = Field(
+        None,
+        description="Include strategies created on or before this date (inclusive).",
+    )
+
+    @validator("start_date", pre=True)
+    def normalize_start_date(cls, value: Optional[Union[datetime, date, str]]) -> Optional[datetime]:
+        """Normalize dates to UTC datetimes starting at the beginning of the day."""
+        return cls._normalize_date_value(value, is_end=False)
+
+    @validator("end_date", pre=True)
+    def normalize_end_date(cls, value: Optional[Union[datetime, date, str]]) -> Optional[datetime]:
+        """Normalize dates to UTC datetimes ending at the end of the day."""
+        return cls._normalize_date_value(value, is_end=True)
+
+    @root_validator
+    def validate_date_range(cls, values: Dict[str, Optional[datetime]]) -> Dict[str, Optional[datetime]]:
+        """Ensure the start date is not after the end date."""
+        start = values.get("start_date")
+        end = values.get("end_date")
+        if start and end and start > end:
+            raise ValueError("start_date must be earlier than or equal to end_date")
+        return values
+
+    @classmethod
+    def _normalize_date_value(
+        cls,
+        value: Optional[Union[datetime, date, str]],
+        *,
+        is_end: bool,
+    ) -> Optional[datetime]:
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            return value
+
+        if isinstance(value, date):
+            boundary = time.max if is_end else time.min
+            return datetime.combine(value, boundary)
+
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return None
+
+            if cleaned.endswith("Z"):
+                cleaned = f"{cleaned[:-1]}+00:00"
+
+            try:
+                parsed = datetime.fromisoformat(cleaned)
+            except ValueError as exc:
+                raise ValueError("Invalid date format for export filters") from exc
+
+            is_date_only = "T" not in cleaned and " " not in cleaned
+            if is_date_only:
+                boundary = time.max if is_end else time.min
+                parsed_date = parsed.date()
+                tzinfo = parsed.tzinfo
+                return datetime.combine(
+                    parsed_date,
+                    boundary.replace(tzinfo=tzinfo),
+                )
+
+            return parsed
+
+        raise ValueError("Invalid date type for export filters")
+
+
+class StrategyExportItem(BaseModel):
+    """Fields returned by the strategy export endpoint."""
+
+    id: int
+    name: str
+    description: Optional[str]
+    source: str
+    status: str
+    github_url: Optional[str]
+    promoted_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+TRADES_CSV_HEADERS = [
+    "trade_id",
+    "strategy_id",
+    "symbol",
+    "side",
+    "entry_price",
+    "exit_price",
+    "quantity",
+    "pnl",
+    "fees",
+    "ai_model_used",
+    "entry_time",
+    "exit_time",
+    "is_paper",
+    "is_manual",
+]
+
+
+def _format_value(value: Optional[object]) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _serialize_strategy(strategy: Strategy) -> StrategyExportItem:
+    return StrategyExportItem(
+        id=strategy.id,
+        name=strategy.name,
+        description=strategy.description,
+        source=strategy.source or "manual",
+        status=strategy.status or "paper",
+        github_url=strategy.github_url,
+        promoted_at=strategy.promoted_at,
+        created_at=strategy.created_at,
+        updated_at=strategy.updated_at,
+    )
+
+
+def _generate_trade_csv_rows(trades: List[Trade]) -> Iterator[bytes]:
+    """Yield CSV chunks for trades to support streaming responses."""
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    try:
+        writer.writerow(TRADES_CSV_HEADERS)
+        yield csv_buffer.getvalue().encode("utf-8")
+        csv_buffer.truncate(0)
+        csv_buffer.seek(0)
+        for trade in trades:
+            writer.writerow([
+                _format_value(trade.id),
+                _format_value(trade.strategy_id),
+                _format_value(trade.symbol),
+                _format_value(trade.side),
+                _format_value(trade.entry_price),
+                _format_value(trade.exit_price),
+                _format_value(trade.quantity),
+                _format_value(trade.pnl),
+                _format_value(trade.fees),
+                _format_value(trade.ai_model_used),
+                _format_value(trade.entry_time),
+                _format_value(trade.exit_time),
+                _format_value(trade.is_paper),
+                _format_value(trade.is_manual),
+            ])
+            chunk = csv_buffer.getvalue().encode("utf-8")
+            if chunk:
+                yield chunk
+            csv_buffer.truncate(0)
+            csv_buffer.seek(0)
+    finally:
+        csv_buffer.close()
+
+
+@router.get("/trades", status_code=status.HTTP_200_OK)
+async def export_trades(
+    filters: TradeExportParams = Depends(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream trades as a CSV file, optionally filtering by entry time."""
+    try:
+        query = db.query(Trade)
+        if filters.start_time:
+            query = query.filter(Trade.entry_time >= filters.start_time)
+        if filters.end_time:
+            query = query.filter(Trade.entry_time <= filters.end_time)
+        trades = query.order_by(Trade.entry_time.desc()).all()
+    except Exception as exc:
+        logger.error("Failed to query trades for export: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to export trades",
+        )
+
+    headers = {
+        "Content-Disposition": "attachment; filename=trades_export.csv",
+    }
+
+    return StreamingResponse(
+        _generate_trade_csv_rows(trades),
+        media_type="text/csv",
+        headers=headers,
+    )
+
+
+@router.get("/strategies", response_model=List[StrategyExportItem], status_code=status.HTTP_200_OK)
+async def export_strategies(
+    filters: StrategyExportParams = Depends(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[StrategyExportItem]:
+    """Return strategies matching the requested creation date range."""
+    try:
+        query = db.query(Strategy)
+        if filters.start_date:
+            query = query.filter(Strategy.created_at >= filters.start_date)
+        if filters.end_date:
+            query = query.filter(Strategy.created_at <= filters.end_date)
+        strategies = query.order_by(Strategy.created_at.desc()).all()
+    except Exception as exc:
+        logger.error("Failed to query strategies for export: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to export strategies",
+        )
+
+    return [_serialize_strategy(strategy) for strategy in strategies]
