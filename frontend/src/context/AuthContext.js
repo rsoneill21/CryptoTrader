@@ -66,7 +66,7 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     try {
       const response = await authAPI.login(email, password);
-      const { token, user_id } = response.data;
+      const { token } = response.data;
 
       // Store token
       setToken(token);
