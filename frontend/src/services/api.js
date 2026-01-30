@@ -154,5 +154,31 @@ export const systemAPI = {
     api.get('/api/system/logs', { params }),
 };
 
+// Market API
+export const marketAPI = {
+  getTicker: (pair) =>
+    api.get(`/api/market/ticker/${pair}`),
+
+  getPrices: (symbols = []) => {
+    const params = symbols.length > 0 ? { symbol: symbols.join(',') } : {};
+    return api.get('/api/market/prices', { params });
+  },
+
+  getOHLC: (pair, params = {}) =>
+    api.get(`/api/market/ohlc/${pair}`, { params }),
+
+  getCandles: (symbol, params = {}) =>
+    api.get(`/api/market/candles/${symbol}`, { params }),
+
+  getOrderbook: (symbol, count = 25) =>
+    api.get(`/api/market/orderbook/${symbol}`, { params: { count } }),
+
+  listPairs: () =>
+    api.get('/api/market/pairs'),
+
+  getPortfolio: (forceRefresh = false) =>
+    api.get('/api/market/portfolio', { params: { force_refresh: forceRefresh } }),
+};
+
 // Export default instance for custom requests
 export default api;
