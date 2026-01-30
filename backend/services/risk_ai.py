@@ -14,6 +14,7 @@ from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from core.settings import get_user_settings_store
 from db.models import RiskSettings, StrategyPerformance, Trade
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,12 @@ class RiskContext(BaseModel):
     avg_trade_pnl: float
     daily_loss: float
     recent_drawdown_pct: float
+    session_timeout_seconds: int
+    session_idle_warning_seconds: int
+    notification_preferences: Dict[str, Any]
+    theme_mode: str
+    theme_high_contrast: bool
+    theme_auto_follow_system: bool
 
 
 class RiskAdjustment(BaseModel):
@@ -386,6 +393,11 @@ class RiskAIService:
             else 0.0
         )
 
+        store = get_user_settings_store()
+        session_snapshot = store.session_snapshot()
+        notification_snapshot = store.notification_snapshot()
+        theme_snapshot = store.theme_snapshot()
+
         return RiskContext(
             reference_time=now,
             max_position_size_pct=float(settings.max_position_size_pct or 0.0),
@@ -401,6 +413,12 @@ class RiskAIService:
             avg_trade_pnl=avg_pnl,
             daily_loss=daily_loss,
             recent_drawdown_pct=recent_drawdown_pct,
+            session_timeout_seconds=session_snapshot["timeout_seconds"],
+            session_idle_warning_seconds=session_snapshot["idle_warning_seconds"],
+            notification_preferences=notification_snapshot,
+            theme_mode=theme_snapshot["mode"],
+            theme_high_contrast=bool(theme_snapshot["high_contrast"]),
+            theme_auto_follow_system=bool(theme_snapshot["auto_follow_system"]),
         )
 
     def _ensure_risk_settings(self, db: Session) -> RiskSettings:
