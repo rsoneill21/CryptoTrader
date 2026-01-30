@@ -60,11 +60,11 @@ CryptoTrader is a web-based AI trading platform that acts like a real human trad
    ```
 
 3. **Configure environment variables**
-   Edit `.env` file with your API keys:
+   Copy `.env.example` to `.env` and replace the placeholders with your real keys. The example is kept in the repo to show the required fields (Kraken, OpenAI, optional Anthropic, Slack tokens, etc.) and the format you should use.
    ```
-   KRAKEN_API_KEY=your_key
-   KRAKEN_API_SECRET=your_secret
-   OPENAI_API_KEY=your_key
+   KRAKEN_API_KEY=your_real_api_key_here
+   KRAKEN_API_SECRET=your_real_api_secret_here
+   OPENAI_API_KEY=your_real_api_key_here
    ```
 
 4. **Start the development servers**
