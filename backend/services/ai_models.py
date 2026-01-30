@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import openai
-from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
+from anthropic import Anthropic
 from pydantic import BaseModel, BaseSettings, Field, HttpUrl, validator
 
 logger = logging.getLogger(__name__)
@@ -262,24 +262,26 @@ class AIModelsService:
         if not self._anthropic_client:
             raise RuntimeError("Anthropic API key is not configured")
 
-        prompt = self._build_claude_prompt(request)
+        messages = self._build_claude_messages(request)
         temperature = (
             request.temperature if request.temperature is not None else 0.25
         )
         max_tokens = request.max_tokens
         try:
             response = await asyncio.to_thread(
-                self._anthropic_client.completions.create,
+                self._anthropic_client.messages.create,
                 model=model,
-                prompt=prompt,
+                messages=messages,
                 temperature=temperature,
-                max_tokens_to_sample=max_tokens,
+                max_tokens=max_tokens,
             )
-            text = (response.completion or "").strip()
+            text = (response.content or "").strip()
+            serialized_response = self._serialize_claude_response(response)
             raw = {
                 "provider": AIProvider.CLAUDE.value,
                 "model": model,
                 "message": text,
+                "response": serialized_response,
             }
             return text, raw
         except Exception as exc:
@@ -333,6 +335,27 @@ class AIModelsService:
             {"role": "user", "content": request.prompt},
         ]
 
-    def _build_claude_prompt(self, request: AIModelRequest) -> str:
+    def _build_claude_messages(
+        self, request: AIModelRequest
+    ) -> List[Dict[str, str]]:
+        messages: List[Dict[str, str]] = []
         system = request.system_prompt or self._settings.system_prompt
-        return f"{HUMAN_PROMPT}{system}\n\n{request.prompt}{AI_PROMPT}"
+        if system:
+            messages.append({"role": "system", "content": system.strip()})
+
+        user_content = request.prompt
+        if request.suffix:
+            user_content = f"{user_content}\n{request.suffix}"
+
+        messages.append({"role": "user", "content": user_content})
+        return messages
+
+    def _serialize_claude_response(self, response: Any) -> Any:
+        for attr in ("dict", "to_dict"):
+            serializer = getattr(response, attr, None)
+            if callable(serializer):
+                try:
+                    return serializer()
+                except Exception:
+                    continue
+        return response
