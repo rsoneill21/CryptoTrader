@@ -3,7 +3,7 @@ Authentication API routes.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Response, status
@@ -210,10 +210,10 @@ async def login(
     db.add(session)
 
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.commit()
 
-    max_age = int((expires_at - datetime.utcnow()).total_seconds())
+    max_age = int((expires_at - datetime.now(timezone.utc)).total_seconds())
     response.set_cookie(
         settings.session_cookie_name,
         token,

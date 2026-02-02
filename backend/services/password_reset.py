@@ -5,7 +5,7 @@ Uses in-memory storage for development.
 For production, use database table or Redis.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from dataclasses import dataclass
 
@@ -47,7 +47,7 @@ class PasswordResetService:
 
         # Generate new token
         token = generate_reset_token()
-        expires_at = datetime.utcnow() + timedelta(minutes=self.token_lifetime_minutes)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.token_lifetime_minutes)
 
         self.tokens[token] = ResetToken(
             token=token,
@@ -79,7 +79,7 @@ class PasswordResetService:
         if reset_token.used:
             return None
 
-        if reset_token.expires_at < datetime.utcnow():
+        if reset_token.expires_at < datetime.now(timezone.utc):
             return None
 
         return reset_token
@@ -108,7 +108,7 @@ class PasswordResetService:
 
     def _cleanup_expired(self) -> None:
         """Remove expired tokens from memory."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [
             token for token, data in self.tokens.items()
             if data.expires_at < now or data.used

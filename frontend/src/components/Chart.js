@@ -28,7 +28,7 @@ const buildWebSocketUrl = () => {
     const parsed = new URL(baseUrl);
     const scheme = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${scheme}//${parsed.host}/api/market/stream/ohlc`;
-  } catch (error) {
+  } catch (_error) {
     const fallbackScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${fallbackScheme}//${window.location.host}/api/market/stream/ohlc`;
   }
@@ -177,7 +177,7 @@ const Chart = ({ symbol = DEFAULT_SYMBOL }) => {
       const wsUrl = buildWebSocketUrl();
       try {
         socket = new WebSocket(wsUrl);
-      } catch (err) {
+      } catch (_err) {
         setConnectionStatus('disconnected');
         setError('Live stream unavailable');
         return;
@@ -216,13 +216,12 @@ const Chart = ({ symbol = DEFAULT_SYMBOL }) => {
 
           if (timeframeRef.current === '1m') {
             seriesRef.current?.update(candle);
-          }
-
-          setLastUpdate(new Date(candle.time * 1000));
-        } catch (err) {
-          // ignore malformed websocket payloads
-        }
-      };
+                    }
+                    setLastUpdate(new Date(candle.time * 1000));
+                  } catch (_err) {
+                    // ignore malformed websocket payloads
+                  }
+                };
 
       socket.onerror = () => {
         if (cancelled) {

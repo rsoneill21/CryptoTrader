@@ -4,7 +4,6 @@ import { marketAPI, tradesAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
 const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
-const OVERLAY_POSITIONS = ['top-4 left-4', 'top-4 right-4', 'bottom-4 right-4'];
 
 const parseNumber = (value) => {
   const parsed = Number(value);
@@ -47,7 +46,6 @@ const LiveTrading = () => {
   const [portfolio, setPortfolio] = useState(null);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
   const [priceTickers, setPriceTickers] = useState([]);
-  const [pricesLoading, setPricesLoading] = useState(true);
   const [activeTrades, setActiveTrades] = useState([]);
   const [tradesLoading, setTradesLoading] = useState(true);
   const [currentSymbol, setCurrentSymbol] = useState(TARGET_SYMBOL);
@@ -72,7 +70,6 @@ const LiveTrading = () => {
       console.error('Failed to fetch live trading data', error);
     } finally {
       setPortfolioLoading(false);
-      setPricesLoading(false);
       setTradesLoading(false);
     }
   }, []);

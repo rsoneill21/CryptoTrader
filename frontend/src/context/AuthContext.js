@@ -32,7 +32,7 @@ export const AuthProvider = ({ children }) => {
       try {
         const response = await authAPI.getSession();
         setUser(response.data);
-      } catch (err) {
+      } catch (_err) {
         // Invalid/expired session - clear token
         removeToken();
         setUser(null);

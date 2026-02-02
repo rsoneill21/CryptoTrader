@@ -267,7 +267,7 @@ const ChartAnnotations = ({
       existing.forEach((series) => {
         try {
           chart.removeSeries(series);
-        } catch (err) {
+        } catch (_err) {
           // ignore removal errors
         }
       });
@@ -408,8 +408,8 @@ const ChartAnnotations = ({
   }, [chartRef, candles, selectedLayers, patternZones, entryExitZones, clearLayerSeries]);
 
   useEffect(() => {
+    const chart = chartRef?.current;
     return () => {
-      const chart = chartRef?.current;
       if (!chart) {
         layersRef.current = {
           support: [],
@@ -424,7 +424,7 @@ const ChartAnnotations = ({
         layersRef.current[key].forEach((series) => {
           try {
             chart.removeSeries(series);
-          } catch (err) {
+          } catch (_err) {
             // swallow cleanup errors
           }
         });

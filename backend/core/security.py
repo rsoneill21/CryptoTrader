@@ -9,7 +9,7 @@ import base64
 import struct
 import time
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -110,7 +110,7 @@ def get_session_expiry(timeout_minutes: int = 60) -> datetime:
     Returns:
         Datetime when session expires
     """
-    return datetime.utcnow() + timedelta(minutes=timeout_minutes)
+    return datetime.now(timezone.utc) + timedelta(minutes=timeout_minutes)
 
 
 def generate_totp_secret() -> str:

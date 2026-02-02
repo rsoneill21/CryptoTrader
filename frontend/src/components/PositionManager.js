@@ -26,7 +26,7 @@ const formatDateTime = (value) => {
       hour: '2-digit',
       minute: '2-digit',
     });
-  } catch (error) {
+  } catch (_error) {
     return '—';
   }
 };
@@ -285,7 +285,7 @@ const PositionManager = () => {
         ) : positions.length === 0 ? (
           <div className="flex flex-col gap-2 text-sm text-gray-400">
             <p>No active positions right now.</p>
-            <p>When strategies run, you'll see their live state here.</p>
+            <p>When strategies run, you&apos;ll see their live state here.</p>
           </div>
         ) : (
           <div className="space-y-5">

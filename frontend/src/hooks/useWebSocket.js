@@ -13,7 +13,7 @@ const buildWebSocketUrl = (feed = DEFAULT_FEED) => {
       const parsed = new URL(configUrl);
       const scheme = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${scheme}//${parsed.host}/api/market/stream/${feed}`;
-    } catch (err) {
+    } catch (_err) {
       // fallback to window origin or localhost if parsing fails
     }
   }
@@ -190,7 +190,7 @@ export const useWebSocket = ({
       try {
         const parsed = JSON.parse(event.data);
         processPayload(parsed);
-      } catch (err) {
+      } catch (_err) {
         // Ignore malformed payloads
       }
     };

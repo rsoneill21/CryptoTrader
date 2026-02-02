@@ -6,7 +6,7 @@ import React from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../context/ThemeContext';
 
-const Header = ({ sidebarOpen, onToggleSidebar }) => {
+const Header = ({ onToggleSidebar }) => {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
 

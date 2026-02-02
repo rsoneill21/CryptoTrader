@@ -12,13 +12,13 @@ import logging
 import os
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import krakenex
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,7 @@ class Ticker(BaseModel):
     trades_24h: int
     timestamp: datetime
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OHLC(BaseModel):
@@ -89,8 +88,7 @@ class OHLC(BaseModel):
     vwap: Decimal
     trades: int
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class Balance(BaseModel):
@@ -100,8 +98,7 @@ class Balance(BaseModel):
     available: Decimal
     reserved: Decimal
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OrderInfo(BaseModel):
@@ -119,8 +116,7 @@ class OrderInfo(BaseModel):
     fee: Decimal
     cost: Decimal
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class KrakenAPIError(Exception):
@@ -444,7 +440,7 @@ class KrakenService:
             low_24h=Decimal(pair_data["l"][1]),  # 24h low
             open_24h=Decimal(pair_data["o"]),  # 24h open
             trades_24h=int(pair_data["t"][1]),  # 24h trade count
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def get_ohlc(
@@ -484,7 +480,7 @@ class KrakenService:
 
             for item in value:
                 candles.append(OHLC(
-                    timestamp=datetime.utcfromtimestamp(item[0]),
+                    timestamp=datetime.fromtimestamp(item[0], timezone.utc),
                     open=Decimal(str(item[1])),
                     high=Decimal(str(item[2])),
                     low=Decimal(str(item[3])),
@@ -724,8 +720,8 @@ class KrakenService:
             volume=Decimal(str(order.get("vol", 0))),
             filled_volume=Decimal(str(order.get("vol_exec", 0))),
             status=status_map.get(order.get("status", ""), OrderStatus.PENDING),
-            created_at=datetime.utcfromtimestamp(order.get("opentm", 0)),
-            closed_at=datetime.utcfromtimestamp(order.get("closetm")) if order.get("closetm") else None,
+            created_at=datetime.fromtimestamp(order.get("opentm", 0), timezone.utc),
+            closed_at=datetime.fromtimestamp(order.get("closetm"), timezone.utc) if order.get("closetm") else None,
             fee=Decimal(str(order.get("fee", 0))),
             cost=Decimal(str(order.get("cost", 0))),
         )
@@ -757,7 +753,7 @@ class KrakenService:
                 volume=Decimal(str(order.get("vol", 0))),
                 filled_volume=Decimal(str(order.get("vol_exec", 0))),
                 status=OrderStatus.OPEN,
-                created_at=datetime.utcfromtimestamp(order.get("opentm", 0)),
+                created_at=datetime.fromtimestamp(order.get("opentm", 0), timezone.utc),
                 closed_at=None,
                 fee=Decimal(str(order.get("fee", 0))),
                 cost=Decimal(str(order.get("cost", 0))),
@@ -805,7 +801,7 @@ class KrakenService:
                 "volume": Decimal(str(trade.get("vol", 0))),
                 "cost": Decimal(str(trade.get("cost", 0))),
                 "fee": Decimal(str(trade.get("fee", 0))),
-                "timestamp": datetime.utcfromtimestamp(trade.get("time", 0)),
+                "timestamp": datetime.fromtimestamp(trade.get("time", 0), timezone.utc),
             })
 
         return trades
@@ -818,7 +814,7 @@ class KrakenService:
             Server timestamp as datetime
         """
         result = await self._query_public("Time")
-        return datetime.utcfromtimestamp(result.get("unixtime", 0))
+        return datetime.fromtimestamp(result.get("unixtime", 0), timezone.utc)
 
     async def get_asset_pairs(self) -> Dict[str, Dict[str, Any]]:
         """

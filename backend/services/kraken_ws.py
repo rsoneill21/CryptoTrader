@@ -8,7 +8,7 @@ to connected clients via FastAPI WebSocket endpoints.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Set
 from dataclasses import dataclass, asdict
@@ -128,7 +128,7 @@ class KrakenWebSocket:
         self._client_feeds: Dict[Any, Set[str]] = {}
 
         # Heartbeat
-        self._last_heartbeat: datetime = datetime.utcnow()
+        self._last_heartbeat: datetime = datetime.now(timezone.utc)
         self._heartbeat_task: Optional[asyncio.Task] = None
 
         # Reconnection settings
@@ -273,7 +273,7 @@ class KrakenWebSocket:
                 await asyncio.sleep(30)
 
                 # Check if we've received a heartbeat recently
-                elapsed = (datetime.utcnow() - self._last_heartbeat).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - self._last_heartbeat).total_seconds()
                 if elapsed > 60 and self._connected:
                     logger.warning(f"No heartbeat for {elapsed}s, reconnecting...")
                     await self._reconnect()
@@ -299,7 +299,7 @@ class KrakenWebSocket:
                 event = data.get("event")
 
                 if event == "heartbeat":
-                    self._last_heartbeat = datetime.utcnow()
+                    self._last_heartbeat = datetime.now(timezone.utc)
                     return
 
                 if event == "systemStatus":
@@ -362,7 +362,7 @@ class KrakenWebSocket:
                 vwap=Decimal(str(data["p"][1])),
                 high=Decimal(str(data["h"][1])),
                 low=Decimal(str(data["l"][1])),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
 
             # Call registered callbacks
@@ -386,7 +386,7 @@ class KrakenWebSocket:
                     symbol=symbol,
                     price=Decimal(str(trade[0])),
                     volume=Decimal(str(trade[1])),
-                    timestamp=datetime.utcfromtimestamp(float(trade[2])),
+                    timestamp=datetime.fromtimestamp(float(trade[2]), timezone.utc),
                     side="buy" if trade[3] == "b" else "sell",
                     order_type="market" if trade[4] == "m" else "limit",
                 )
@@ -409,8 +409,8 @@ class KrakenWebSocket:
         try:
             ohlc_data = {
                 "symbol": symbol,
-                "timestamp": datetime.utcfromtimestamp(float(data[0])).isoformat(),
-                "end_timestamp": datetime.utcfromtimestamp(float(data[1])).isoformat(),
+                "timestamp": datetime.fromtimestamp(float(data[0]), timezone.utc).isoformat(),
+                "end_timestamp": datetime.fromtimestamp(float(data[1]), timezone.utc).isoformat(),
                 "open": str(data[2]),
                 "high": str(data[3]),
                 "low": str(data[4]),
@@ -622,7 +622,7 @@ class KrakenWebSocket:
         message = json.dumps({
             "type": event_type,
             "data": data,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
         disconnected = set()

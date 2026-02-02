@@ -132,8 +132,6 @@ const calculateBollingerBands = (candles, period = 20, multiplier = 2) => {
     return null;
   }
 
-  const middle = calculateSMA(candles, period);
-
   const result = {
     upper: [],
     middle: [],
@@ -403,8 +401,8 @@ const ChartIndicators = ({
   }, [candles, selectedIndicators, chartRef, removeIndicatorSeries, updateIndicatorSeries]);
 
   useEffect(() => {
+    const chart = chartRef?.current;
     return () => {
-      const chart = chartRef?.current;
       if (!chart) {
         seriesMapRef.current = {};
         return;

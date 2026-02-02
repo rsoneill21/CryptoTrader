@@ -39,9 +39,6 @@ const StrategyLab = () => {
         const response = await api.get('/api/strategies');
         const list = Array.isArray(response.data) ? response.data : [];
         setStrategies(list);
-        if (!selectedStrategyId && list.length) {
-          setSelectedStrategyId(list[0].id);
-        }
       } catch (fetchError) {
         console.error('Unable to load strategies:', fetchError);
         setError(fetchError?.message || 'Failed to load strategies.');

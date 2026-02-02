@@ -82,7 +82,7 @@ const LoginForm = ({ onSubmit, error, loading }) => {
       </button>
 
       <p className="text-center text-sm text-gray-400">
-        Don't have an account?{' '}
+        Don&apos;t have an account?{' '}
         <Link to="/register" className="text-blue-400 hover:text-blue-300">
           Register
         </Link>

@@ -52,6 +52,7 @@ const Settings = () => (
 );
 
 function App() {
+  console.log('Rendering App component');
   return (
     <ThemeProvider>
       <AuthProvider>
@@ -73,6 +74,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            {/* ... rest of the routes ... */}
             <Route
               path="/strategy-lab"
               element={

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -20,13 +20,13 @@ def make_ticker(symbol: str = "BTC/USD") -> Ticker:
         low_24h=Decimal("49000"),
         open_24h=Decimal("49500"),
         trades_24h=1000,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
 def make_ohlc() -> OHLC:
     return OHLC(
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         open=Decimal("50000"),
         high=Decimal("50500"),
         low=Decimal("49500"),
