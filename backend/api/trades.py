@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from core.auth import get_current_user
@@ -71,7 +71,7 @@ class CreateTradeRequest(BaseModel):
     """Payload for creating a manual trade."""
 
     symbol: str = Field(..., description="Trading pair (e.g., BTC/USD)")
-    side: str = Field(..., regex="^(buy|sell)$", description="Order side")
+    side: str = Field(..., pattern="^(buy|sell)$", description="Order side")
     quantity: float = Field(..., gt=0)
     is_paper: bool = True
 
@@ -124,11 +124,11 @@ class AdjustTradeRequest(BaseModel):
     take_profit: Optional[float] = Field(None, gt=0.0)
     note: Optional[str] = Field(None, max_length=512)
 
-    @root_validator
-    def require_price_change(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        if values.get("stop_loss") is None and values.get("take_profit") is None:
+    @model_validator(mode="after")
+    def require_price_change(self) -> "AdjustTradeRequest":
+        if self.stop_loss is None and self.take_profit is None:
             raise ValueError("At least one of stop_loss or take_profit must be provided")
-        return values
+        return self
 
 
 def _build_order_summary(order: Order) -> OrderSummary:

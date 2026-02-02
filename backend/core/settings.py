@@ -9,7 +9,8 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, validator
+from pydantic_settings import BaseSettings
 
 
 class ThemeMode(str, Enum):

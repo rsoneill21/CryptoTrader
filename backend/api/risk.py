@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, conint, confloat, root_validator, validator
+from pydantic import BaseModel, Field, conint, confloat, model_validator, validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -94,13 +94,11 @@ class SessionSettingsUpdate(BaseModel):
         None, ge=15, description="How soon before timeout to prompt the user"
     )
 
-    @root_validator
-    def _ensure_idle_before_timeout(cls, values):
-        timeout = values.get("timeout_seconds")
-        idle = values.get("idle_warning_seconds")
-        if timeout is not None and idle is not None and idle >= timeout:
+    @model_validator(mode="after")
+    def _ensure_idle_before_timeout(self) -> "SessionSettingsUpdate":
+        if self.timeout_seconds is not None and self.idle_warning_seconds is not None and self.idle_warning_seconds >= self.timeout_seconds:
             raise ValueError("Idle warning must occur before the session timeout")
-        return values
+        return self
 
 
 class NotificationSettingsResponse(BaseModel):

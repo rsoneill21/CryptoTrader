@@ -10,7 +10,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
 from httpx import BasicAuth
-from pydantic import BaseModel, BaseSettings, Field, validator
+from pydantic import BaseModel, Field, validator
+from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 

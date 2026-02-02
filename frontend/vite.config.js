@@ -7,6 +7,18 @@ const wsTarget = apiOrigin.replace(/^https?/, wsProtocol);
 
 export default defineConfig({
   plugins: [react()],
+  esbuild: {
+    loader: 'jsx',
+    include: /src\/.*\.js$/,
+    exclude: [],
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,

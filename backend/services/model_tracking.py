@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -35,8 +35,7 @@ class ModelDecisionRecord(BaseModel):
         None, description="Profit and loss realized for the decision (if settled)"
     )
 
-    class Config:  # noqa: D106
-        anystr_strip_whitespace = True
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     @validator("model_name")
     def _non_empty_model(cls, value: str) -> str:  # pragma: no cover - trivial

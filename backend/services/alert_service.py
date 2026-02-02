@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy import desc
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -44,8 +44,7 @@ class AlertPayload(BaseModel):
     ai_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     dedup_window_seconds: Optional[int] = Field(None, ge=1)
 
-    class Config:
-        anystr_strip_whitespace = True
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     @validator("type", "title", pre=True)
     def _non_empty_string(cls, value: str) -> str:

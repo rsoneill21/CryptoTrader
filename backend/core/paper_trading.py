@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, root_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 
 from db.database import SessionLocal
 from db.models import Trade
@@ -46,13 +46,11 @@ class PaperTradeSignal(BaseModel):
     def _normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
 
-    @root_validator
-    def _require_side_for_entry(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        intent = values.get("intent")
-        side = values.get("side")
-        if intent == TradeIntent.ENTRY and side is None:
+    @model_validator(mode="after")
+    def _require_side_for_entry(self) -> "PaperTradeSignal":
+        if self.intent == TradeIntent.ENTRY and self.side is None:
             raise ValueError("side is required when intent is entry")
-        return values
+        return self
 
 
 class PaperPosition(BaseModel):

@@ -169,7 +169,7 @@ start_servers() {
     # Start frontend in background
     echo "Starting React frontend on port 3000..."
     cd frontend
-    npm start &
+    npm run dev &
     FRONTEND_PID=$!
     cd ..
 

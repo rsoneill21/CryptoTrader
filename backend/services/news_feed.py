@@ -15,7 +15,8 @@ from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence
 import httpx
 import openai
 from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
-from pydantic import BaseModel, BaseSettings, Field, HttpUrl, validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, validator
+from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +134,7 @@ class NewsArticle(BaseModel):
     symbols: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:  # noqa: D106
-        anystr_strip_whitespace = True
+    model_config = ConfigDict(str_strip_whitespace=True)
 
 
 class NewsRelevanceSummary(BaseModel):

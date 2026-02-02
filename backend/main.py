@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 
 settings = get_app_settings()
 
-AI_CHAT_PAGE_HTML = dedent("""\
+AI_CHAT_PAGE_HTML = dedent(r"""\
     <!DOCTYPE html>
     <html lang="en" class="dark">
     <head>
@@ -374,7 +374,7 @@ AI_CHAT_PAGE_HTML = dedent("""\
     </html>
 """)
 
-FORGOT_PASSWORD_PAGE_HTML = dedent("""\
+FORGOT_PASSWORD_PAGE_HTML = dedent(r"""\
     <!DOCTYPE html>
     <html lang="en" class="dark">
     <head>

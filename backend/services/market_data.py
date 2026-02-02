@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Callable, Iterable, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.orm import Session
 
 from db.database import SessionLocal
@@ -43,9 +43,10 @@ class MarketDataCandle(BaseModel):
     timeframe: str = Field(default="1m", min_length=1)
     source: str = Field(default="kraken", min_length=1)
 
-    class Config:
-        orm_mode = True
-        anystr_strip_whitespace = True
+    model_config = ConfigDict(
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
 
     @validator("symbol", "timeframe", "source")
     def _ensure_upper(cls, value: str) -> str:

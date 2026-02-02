@@ -8,7 +8,7 @@ from typing import Dict, Iterator, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, Field, model_validator, validator
 from sqlalchemy.orm import Session
 
 from core.auth import get_current_user
@@ -31,14 +31,12 @@ class TradeExportParams(BaseModel):
         description="Include trades with entry_time on or before this ISO timestamp.",
     )
 
-    @root_validator
-    def validate_time_range(cls, values: Dict[str, Optional[datetime]]) -> Dict[str, Optional[datetime]]:
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "TradeExportParams":
         """Ensure the start time is not after the end time."""
-        start = values.get("start_time")
-        end = values.get("end_time")
-        if start and end and start > end:
+        if self.start_time and self.end_time and self.start_time > self.end_time:
             raise ValueError("start_time must be earlier than or equal to end_time")
-        return values
+        return self
 
 
 class StrategyExportParams(BaseModel):
@@ -63,14 +61,12 @@ class StrategyExportParams(BaseModel):
         """Normalize dates to UTC datetimes ending at the end of the day."""
         return cls._normalize_date_value(value, is_end=True)
 
-    @root_validator
-    def validate_date_range(cls, values: Dict[str, Optional[datetime]]) -> Dict[str, Optional[datetime]]:
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "StrategyExportParams":
         """Ensure the start date is not after the end date."""
-        start = values.get("start_date")
-        end = values.get("end_date")
-        if start and end and start > end:
+        if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
-        return values
+        return self
 
     @classmethod
     def _normalize_date_value(

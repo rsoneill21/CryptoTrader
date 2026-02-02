@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 import openai
 from anthropic import Anthropic
-from pydantic import BaseModel, BaseSettings, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 
