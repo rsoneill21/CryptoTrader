@@ -4,6 +4,7 @@ CryptoTrader - FastAPI Backend Entry Point
 
 from __future__ import annotations
 
+import asyncio
 from textwrap import dedent
 from typing import Any
 
@@ -32,8 +33,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
     # Startup
     print("Starting CryptoTrader Backend...")
-    init_db()
-    await start_kraken_ws()
+    # Run init_db in a separate thread to avoid blocking the event loop
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, init_db)
+    asyncio.create_task(start_kraken_ws())
     yield
     # Shutdown
     await stop_kraken_ws()

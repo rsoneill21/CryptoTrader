@@ -646,13 +646,19 @@ kraken_ws = KrakenWebSocket()
 
 
 async def start_kraken_ws() -> None:
-    """Start the Kraken WebSocket service."""
-    await kraken_ws.connect()
+    """Start the Kraken WebSocket service with a timeout to prevent hanging startup."""
+    try:
+        # Give it 10 seconds to connect and subscribe
+        await asyncio.wait_for(kraken_ws.connect(), timeout=10.0)
 
-    # Subscribe to default pairs
-    default_pairs = ["BTC/USD", "ETH/USD"]
-    await kraken_ws.subscribe_ticker(default_pairs)
-    await kraken_ws.subscribe_trades(default_pairs)
+        # Subscribe to default pairs
+        default_pairs = ["BTC/USD", "ETH/USD"]
+        await asyncio.wait_for(kraken_ws.subscribe_ticker(default_pairs), timeout=5.0)
+        await asyncio.wait_for(kraken_ws.subscribe_trades(default_pairs), timeout=5.0)
+    except asyncio.TimeoutError:
+        logger.error("Timeout connecting to Kraken WebSocket. Continuing without real-time data.")
+    except Exception as e:
+        logger.error(f"Failed to start Kraken WebSocket: {e}")
 
 
 async def stop_kraken_ws() -> None:

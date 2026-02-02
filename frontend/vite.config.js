@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const apiOrigin = process.env.VITE_API_URL || 'http://localhost:8000';
-const wsProtocol = apiOrigin.startsWith('https') ? 'wss' : 'ws';
-const wsTarget = apiOrigin.replace(/^https?/, wsProtocol);
+// For the proxy to work reliably, it should point to the local backend address
+const apiOrigin = 'http://127.0.0.1:8000';
+const wsTarget = 'ws://127.0.0.1:8000';
 
 export default defineConfig({
   plugins: [react()],

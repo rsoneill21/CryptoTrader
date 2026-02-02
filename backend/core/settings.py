@@ -29,7 +29,7 @@ class AppSettings(BaseSettings):
     host: str = Field("0.0.0.0", env="APP_HOST")
     port: int = Field(8000, env="APP_PORT")
 
-    frontend_origins: List[str] = Field(
+    frontend_origins: Any = Field(
         default_factory=lambda: ["http://localhost:3000"],
         env="FRONTEND_ORIGINS",
     )
@@ -60,6 +60,11 @@ class AppSettings(BaseSettings):
     theme_default_mode: ThemeMode = Field(ThemeMode.DARK.value, env="THEME_DEFAULT_MODE")
     theme_high_contrast: bool = Field(False, env="THEME_HIGH_CONTRAST")
     theme_auto_follow_system: bool = Field(True, env="THEME_AUTO_FOLLOW_SYSTEM")
+
+    slack_bot_token: Optional[str] = Field(None, env="SLACK_BOT_TOKEN")
+    triad_slack_channel: Optional[str] = Field(None, env="TRIAD_SLACK_CHANNEL")
+    kraken_api_key: Optional[str] = Field(None, env="KRAKEN_API_KEY")
+    kraken_api_secret: Optional[str] = Field(None, env="KRAKEN_API_SECRET")
 
     class Config:
         env_file = ".env"
