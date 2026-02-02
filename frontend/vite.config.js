@@ -22,6 +22,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    allowedHosts: ['app.packnation.org'],
     proxy: {
       '/api': {
         target: apiOrigin,
