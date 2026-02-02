@@ -10,6 +10,7 @@ from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import Field, validator
+# Pydantic v2 migration: BaseSettings has been moved to the pydantic-settings package
 from pydantic_settings import BaseSettings
 
 

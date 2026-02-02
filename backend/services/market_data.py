@@ -44,7 +44,9 @@ class MarketDataCandle(BaseModel):
     source: str = Field(default="kraken", min_length=1)
 
     model_config = ConfigDict(
+        # Pydantic v2 migration: renamed from orm_mode
         from_attributes=True,
+        # Pydantic v2 migration: renamed from anystr_strip_whitespace
         str_strip_whitespace=True,
     )
 

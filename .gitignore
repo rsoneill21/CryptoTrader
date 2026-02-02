@@ -8,3 +8,7 @@ triad/triad.db-shm
 __pycache__/
 *.pyc
 backend/venv/
+node_modules/
+*.db
+*.db-wal
+*.db-shm

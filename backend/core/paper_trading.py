@@ -46,6 +46,7 @@ class PaperTradeSignal(BaseModel):
     def _normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
 
+    # Pydantic v2 migration: replaced @root_validator with @model_validator(mode='after')
     @model_validator(mode="after")
     def _require_side_for_entry(self) -> "PaperTradeSignal":
         if self.intent == TradeIntent.ENTRY and self.side is None:

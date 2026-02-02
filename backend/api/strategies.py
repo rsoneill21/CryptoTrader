@@ -41,6 +41,7 @@ class StrategyCreate(BaseModel):
     )
 
     class Config:
+        # Pydantic v2 migration: renamed from allow_population_by_field_name
         populate_by_name = True
 
 
@@ -65,6 +66,7 @@ class StrategyUpdate(BaseModel):
     )
 
     class Config:
+        # Pydantic v2 migration: renamed from allow_population_by_field_name
         populate_by_name = True
 
 

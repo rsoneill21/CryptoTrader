@@ -33,6 +33,7 @@ class AlertResponse(BaseModel):
     ai_confidence: Optional[float]
 
     class Config:
+        # Pydantic v2 migration: renamed from orm_mode
         from_attributes = True
 
 

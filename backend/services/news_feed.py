@@ -134,6 +134,7 @@ class NewsArticle(BaseModel):
     symbols: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    # Pydantic v2 migration: renamed from anystr_strip_whitespace
     model_config = ConfigDict(str_strip_whitespace=True)
 
 

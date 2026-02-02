@@ -35,6 +35,7 @@ class ModelDecisionRecord(BaseModel):
         None, description="Profit and loss realized for the decision (if settled)"
     )
 
+    # Pydantic v2 migration: renamed from anystr_strip_whitespace
     model_config = ConfigDict(str_strip_whitespace=True)
 
     @validator("model_name")

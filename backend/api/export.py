@@ -31,6 +31,7 @@ class TradeExportParams(BaseModel):
         description="Include trades with entry_time on or before this ISO timestamp.",
     )
 
+    # Pydantic v2 migration: replaced @root_validator with @model_validator(mode='after')
     @model_validator(mode="after")
     def validate_time_range(self) -> "TradeExportParams":
         """Ensure the start time is not after the end time."""
@@ -61,6 +62,7 @@ class StrategyExportParams(BaseModel):
         """Normalize dates to UTC datetimes ending at the end of the day."""
         return cls._normalize_date_value(value, is_end=True)
 
+    # Pydantic v2 migration: replaced @root_validator with @model_validator(mode='after')
     @model_validator(mode="after")
     def validate_date_range(self) -> "StrategyExportParams":
         """Ensure the start date is not after the end date."""

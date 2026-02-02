@@ -94,6 +94,7 @@ class SessionSettingsUpdate(BaseModel):
         None, ge=15, description="How soon before timeout to prompt the user"
     )
 
+    # Pydantic v2 migration: replaced @root_validator with @model_validator(mode='after')
     @model_validator(mode="after")
     def _ensure_idle_before_timeout(self) -> "SessionSettingsUpdate":
         if self.timeout_seconds is not None and self.idle_warning_seconds is not None and self.idle_warning_seconds >= self.timeout_seconds:

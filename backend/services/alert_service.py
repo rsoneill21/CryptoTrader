@@ -44,6 +44,7 @@ class AlertPayload(BaseModel):
     ai_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     dedup_window_seconds: Optional[int] = Field(None, ge=1)
 
+    # Pydantic v2 migration: renamed from anystr_strip_whitespace
     model_config = ConfigDict(str_strip_whitespace=True)
 
     @validator("type", "title", pre=True)

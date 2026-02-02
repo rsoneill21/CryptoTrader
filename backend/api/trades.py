@@ -124,6 +124,7 @@ class AdjustTradeRequest(BaseModel):
     take_profit: Optional[float] = Field(None, gt=0.0)
     note: Optional[str] = Field(None, max_length=512)
 
+    # Pydantic v2 migration: replaced @root_validator with @model_validator(mode='after')
     @model_validator(mode="after")
     def require_price_change(self) -> "AdjustTradeRequest":
         if self.stop_loss is None and self.take_profit is None:
