@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
-from dataclasses import dataclass
+import math
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 
@@ -96,6 +97,22 @@ class PaperPortfolioSnapshot(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class PaperStrategyPerformanceSummary(BaseModel):
+    """Aggregated paper trading performance for a single strategy."""
+
+    strategy_id: int
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    total_pnl: float
+    max_drawdown: float
+    sharpe_ratio: Optional[float]
+    latest_trade_time: Optional[datetime]
+    current_equity: float
+    recent_pnl_samples: List[float] = Field(default_factory=list)
+
+
 @dataclass
 class _MutablePosition:
     symbol: str
@@ -120,6 +137,20 @@ class _MutablePosition:
         )
 
 
+@dataclass
+class _StrategyMetricsState:
+    total_trades: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    total_pnl: float = 0.0
+    equity: float = 0.0
+    peak_equity: float = 0.0
+    max_drawdown: float = 0.0
+    last_trade_at: Optional[datetime] = None
+    pnl_sum_of_squares: float = 0.0
+    recent_trade_pnls: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
+
+
 class PaperTradingEngine:
     """Simulates trade execution and tracks virtual positions + P&L."""
 
@@ -135,6 +166,7 @@ class PaperTradingEngine:
         self._unrealized_pnl = 0.0
         self._positions: Dict[str, List[_MutablePosition]] = defaultdict(list)
         self._price_book: Dict[str, float] = {}
+        self._strategy_metrics: Dict[int, _StrategyMetricsState] = {}
         self._db_factory = db_factory
 
     async def execute_signal(self, signal: PaperTradeSignal) -> List[PaperTradeResult]:
@@ -230,6 +262,7 @@ class PaperTradingEngine:
                 metadata=dict(position.metadata),
             )
             results.append(result)
+            self._record_strategy_metrics(result)
 
             position.quantity -= closing_qty
             remaining -= closing_qty
@@ -245,6 +278,25 @@ class PaperTradingEngine:
 
         self._recalculate_unrealized()
         return results
+
+    def _record_strategy_metrics(self, result: PaperTradeResult) -> None:
+        if result.strategy_id is None:
+            return
+
+        metrics = self._strategy_metrics.setdefault(result.strategy_id, _StrategyMetricsState())
+        metrics.total_trades += 1
+        if result.pnl > 0:
+            metrics.winning_trades += 1
+        elif result.pnl < 0:
+            metrics.losing_trades += 1
+        metrics.total_pnl += result.pnl
+        metrics.equity += result.pnl
+        metrics.peak_equity = max(metrics.peak_equity, metrics.equity)
+        drawdown = metrics.peak_equity - metrics.equity
+        metrics.max_drawdown = max(metrics.max_drawdown, drawdown)
+        metrics.last_trade_at = result.exit_time
+        metrics.pnl_sum_of_squares += result.pnl * result.pnl
+        metrics.recent_trade_pnls.append(result.pnl)
 
     def _calculate_pnl(
         self, side: TradeSide, entry_price: float, exit_price: float, quantity: float
@@ -270,6 +322,45 @@ class PaperTradingEngine:
         if known_price is None:
             raise ValueError("price is required when no market price is cached for %s" % symbol)
         return known_price
+
+    async def strategy_performance_summary(self, strategy_id: int) -> Optional[PaperStrategyPerformanceSummary]:
+        """Return the calculated metrics for a specific strategy."""
+
+        async with self._lock:
+            metrics = self._strategy_metrics.get(strategy_id)
+            if not metrics or metrics.total_trades == 0:
+                return None
+            return self._build_performance_summary(strategy_id, metrics)
+
+    def _build_performance_summary(
+        self, strategy_id: int, metrics: _StrategyMetricsState
+    ) -> PaperStrategyPerformanceSummary:
+        win_rate = metrics.winning_trades / metrics.total_trades
+        return PaperStrategyPerformanceSummary(
+            strategy_id=strategy_id,
+            total_trades=metrics.total_trades,
+            winning_trades=metrics.winning_trades,
+            losing_trades=metrics.losing_trades,
+            win_rate=win_rate,
+            total_pnl=metrics.total_pnl,
+            max_drawdown=metrics.max_drawdown,
+            sharpe_ratio=self._calculate_sharpe_ratio(metrics),
+            latest_trade_time=metrics.last_trade_at,
+            current_equity=metrics.equity,
+            recent_pnl_samples=list(metrics.recent_trade_pnls),
+        )
+
+    def _calculate_sharpe_ratio(self, metrics: _StrategyMetricsState) -> Optional[float]:
+        if metrics.total_trades < 2:
+            return None
+        mean = metrics.total_pnl / metrics.total_trades
+        variance = (metrics.pnl_sum_of_squares / metrics.total_trades) - (mean * mean)
+        if variance <= 0:
+            return None
+        stddev = math.sqrt(variance)
+        if stddev <= 0:
+            return None
+        return mean / stddev
 
     def _normalize_symbol(self, symbol: str) -> str:
         return symbol.strip().upper()
@@ -318,6 +409,7 @@ __all__ = [
     "PaperPosition",
     "PaperTradeResult",
     "PaperPortfolioSnapshot",
+    "PaperStrategyPerformanceSummary",
     "TradeSide",
     "TradeIntent",
 ]

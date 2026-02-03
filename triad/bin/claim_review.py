@@ -78,6 +78,11 @@ def main():
                 "  Mobile table reminder: verify the data-table layouts stay readable at ≈360–480px and "
                 "scroll horizontally instead of overflowing the viewport."
             )
+        if task["id"] == "feature-45":
+            print(
+                "  Promotion reminder: confirm the strategy detail view surfaces the AI promotion recommendation, "
+                "includes reasoning + confidence, and the accept action is available before reviewing."
+            )
 
     except Exception as e:
         conn.rollback()

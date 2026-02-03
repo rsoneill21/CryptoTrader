@@ -113,6 +113,11 @@ def main():
                     "  Mobile table reminder: confirm vertical stacking + horizontal scrolling still work "
                     "for data tables on phones before closing the review."
                 )
+            if task_id == "feature-45":
+                print(
+                    "  Promotion reminder: validate the AI promotion recommendation includes reasoning, confidence, "
+                    "and the accept path flags the strategy as promoted before approving."
+                )
 
         else:  # request_changes
             conn.execute(
@@ -137,6 +142,11 @@ def main():
                 print(
                     "  Mobile table reminder: keep validating the responsive table layout (stacking and horizontal scrolling) "
                     "before resubmitting."
+                )
+            if task_id == "feature-45":
+                print(
+                    "  Promotion reminder: ensure the AI recommendation view shows metrics, reasoning, confidence, "
+                    "and that users can accept or reject the promotion recommendation before resubmitting."
                 )
 
     except Exception as e:
