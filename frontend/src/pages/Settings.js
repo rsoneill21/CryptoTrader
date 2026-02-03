@@ -1,5 +1,50 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import useAuth from '../hooks/useAuth';
+
+const CHAT_TONE_EVENT = 'cryptotrader:chatTonePreferenceChanged';
+const CHAT_TONE_STORAGE_KEY = 'cryptotrader.ai_chat_tone';
+const DEFAULT_CHAT_TONE = 'balanced';
+
+const CHAT_TONES = [
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    description: 'Friendly coverage with risk-aware context and a measured pace.',
+  },
+  {
+    value: 'concise',
+    label: 'Concise',
+    description: 'Short, bullet-style responses you can scan quickly.',
+  },
+  {
+    value: 'detailed',
+    label: 'Detailed',
+    description: 'Step-by-step rationale with supporting reasoning.',
+  },
+  {
+    value: 'data_driven',
+    label: 'Data-driven',
+    description: 'Focus on numbers, metrics, and evidence-backed signals.',
+  },
+  {
+    value: 'conversational',
+    label: 'Conversational',
+    description: 'Relaxed tone that feels like brainstorming with a teammate.',
+  },
+];
+
+const loadStoredChatTone = () => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_CHAT_TONE;
+  }
+  try {
+    return window.localStorage.getItem(CHAT_TONE_STORAGE_KEY) ?? DEFAULT_CHAT_TONE;
+  } catch (error) {
+    console.debug('Unable to read saved chat tone preference', error);
+    return DEFAULT_CHAT_TONE;
+  }
+};
 
 const DEFAULT_SOURCES = [
   {
@@ -71,6 +116,7 @@ const formatTimestamp = (value) => {
 };
 
 const SettingsPage = () => {
+  const { user } = useAuth();
   const [sources, setSources] = useState(
     DEFAULT_SOURCES.map((item) => ({ ...item, dirty: false }))
   );
@@ -79,6 +125,97 @@ const SettingsPage = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [visibleKeyId, setVisibleKeyId] = useState(null);
+  const [tonePreference, setTonePreference] = useState(() => loadStoredChatTone());
+  const [toneFeedback, setToneFeedback] = useState({ type: '', text: '' });
+
+  const broadcastTonePreference = useCallback((value) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(CHAT_TONE_EVENT, { detail: value }));
+  }, []);
+
+  useEffect(() => {
+    broadcastTonePreference(tonePreference);
+  }, [broadcastTonePreference, tonePreference]);
+
+  const persistTonePreference = useCallback((value) => {
+    setToneFeedback({ type: '', text: '' });
+    setTonePreference(value);
+    if (typeof window === 'undefined') {
+      setToneFeedback({
+        type: 'error',
+        text: 'Chat tone preferences require a browser environment.',
+      });
+      return;
+    }
+    try {
+      window.localStorage.setItem(CHAT_TONE_STORAGE_KEY, value);
+      setToneFeedback({
+        type: 'success',
+        text: 'Chat tone saved — new replies will follow this style.',
+      });
+    } catch (error) {
+      console.error('Unable to persist chat tone preference:', error);
+      setToneFeedback({
+        type: 'error',
+        text: 'Unable to save chat tone. Please allow storage access to continue.',
+      });
+    }
+  }, []);
+
+  const handleToneSelect = useCallback(
+    (value) => {
+      if (value === tonePreference) {
+        setToneFeedback({ type: '', text: '' });
+        return;
+      }
+      persistTonePreference(value);
+    },
+    [persistTonePreference, tonePreference]
+  );
+
+  const currentToneDetails = useMemo(
+    () => CHAT_TONES.find((option) => option.value === tonePreference) ?? CHAT_TONES[0],
+    [tonePreference]
+  );
+
+  // MFA State
+  const [mfaSetupData, setMfaSetupData] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaVerifying, setMfaVerifying] = useState(false);
+  const [mfaMessage, setMfaMessage] = useState({ type: '', text: '' });
+
+  const handleMFASetup = async () => {
+    setMfaMessage({ type: '', text: '' });
+    try {
+      const response = await api.post('/api/auth/mfa/setup');
+      setMfaSetupData(response.data);
+    } catch (err) {
+      setMfaMessage({ type: 'error', text: err.message || 'Failed to initiate MFA setup' });
+    }
+  };
+
+  const handleMFAVerify = async (e) => {
+    e.preventDefault();
+    if (mfaCode.length !== 6) {
+      setMfaMessage({ type: 'error', text: 'Enter a valid 6-digit code' });
+      return;
+    }
+    setMfaVerifying(true);
+    setMfaMessage({ type: '', text: '' });
+    try {
+      await api.post('/api/auth/mfa/verify', { code: mfaCode });
+      setMfaMessage({ type: 'success', text: 'MFA enabled successfully!' });
+      setMfaSetupData(null);
+      setMfaCode('');
+      // User state will update on next session check or refresh
+    } catch (err) {
+      setMfaMessage({ type: 'error', text: err.message || 'MFA verification failed' });
+    } finally {
+      setMfaVerifying(false);
+    }
+  };
 
   const loadSources = useCallback(async () => {
     setLoading(true);
@@ -247,6 +384,139 @@ const SettingsPage = () => {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      {/* MFA Configuration Section */}
+      <section className="rounded-2xl border border-gray-700/60 bg-gray-900/60 p-6 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-emerald-400">Security</p>
+            <h2 className="text-2xl font-semibold text-white">Multi-Factor Authentication</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Add an extra layer of security to your account using TOTP (Google Authenticator, Authy, etc).
+            </p>
+          </div>
+          <div>
+            {user?.mfa_enabled ? (
+              <span className="rounded-full bg-emerald-500/20 px-4 py-2 text-sm font-bold text-emerald-400 border border-emerald-500/50">
+                MFA ENABLED
+              </span>
+            ) : (
+              !mfaSetupData && (
+                <button
+                  onClick={handleMFASetup}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition"
+                >
+                  Setup MFA
+                </button>
+              )
+            )}
+          </div>
+        </div>
+
+        {mfaSetupData && (
+          <div className="mt-6 space-y-4 rounded-xl border border-blue-500/30 bg-blue-500/5 p-5">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-blue-200">1. Add to Authenticator App</p>
+              <p className="text-xs text-gray-400">
+                Enter the following secret key into your authenticator app (SHA1, 30s, 6 digits).
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="rounded bg-slate-800 px-3 py-1 text-lg font-mono text-cyan-300">
+                  {mfaSetupData.secret}
+                </code>
+              </div>
+            </div>
+
+            <form onSubmit={handleMFAVerify} className="space-y-3 pt-2 border-t border-blue-500/20">
+              <p className="text-sm font-semibold text-blue-200">2. Verify Code</p>
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  maxLength="6"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  className="w-32 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-center text-lg font-mono tracking-widest text-white focus:border-blue-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={mfaVerifying || mfaCode.length !== 6}
+                  className="rounded-lg bg-white px-6 py-2 text-sm font-bold text-slate-900 hover:bg-gray-100 disabled:opacity-50 transition"
+                >
+                  {mfaVerifying ? 'Verifying...' : 'Enable MFA'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMfaSetupData(null)}
+                  className="px-4 py-2 text-sm text-gray-400 hover:text-white transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {mfaMessage.text && (
+          <div className={`mt-4 rounded-lg p-3 text-sm ${
+            mfaMessage.type === 'error' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+          }`}>
+            {mfaMessage.text}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/50 p-6 shadow-xl shadow-black/60">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-sky-400">AI chat</p>
+            <h2 className="text-2xl font-semibold text-white">Communication style</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Choose how the orchestrator frames explanations. The selected tone is retained until you update it again.
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Current style: <span className="font-semibold text-white">{currentToneDetails.label}</span>
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {CHAT_TONES.map((tone) => {
+            const isActive = tone.value === tonePreference;
+            return (
+              <button
+                key={tone.value}
+                type="button"
+                onClick={() => handleToneSelect(tone.value)}
+                aria-pressed={isActive}
+                className={`flex flex-col gap-2 rounded-2xl border px-4 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                  isActive
+                    ? 'border-emerald-500/70 bg-emerald-500/10 text-white'
+                    : 'border-gray-700/60 bg-gray-900/60 text-gray-200 hover:border-sky-500/60 hover:bg-gray-900/80'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{tone.label}</p>
+                  {isActive && (
+                    <span className="rounded-full border border-emerald-500/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                      Active
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">{tone.description}</p>
+              </button>
+            );
+          })}
+        </div>
+        {toneFeedback.text && (
+          <p
+            className={`mt-5 text-sm ${
+              toneFeedback.type === 'error' ? 'text-rose-300' : 'text-emerald-300'
+            }`}
+          >
+            {toneFeedback.text}
+          </p>
+        )}
+      </section>
+
       <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/40 p-6 shadow-xl shadow-black/60">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
