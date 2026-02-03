@@ -44,3 +44,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 134 · Critical Alerts Color
 - **Status**: Implemented in backend alerts API and the alerts page.
 - **Details**: Severity values are now normalized to lowercase whenever alerts are created or updated so the UI can consistently recognize `critical`, and both the alert list rows and detail panel apply red borders/shadows when the normalized severity is critical so these warnings stand out from other severities.
+
+### Feature 135 · Info Alerts Color
+- **Status**: Implemented in the alerts page.
+- **Details**: Informational alerts now carry blue accents in the alert list rows and detail panel so `info` severity entries use a blue border/shadow hover state just like critical alerts use red, keeping the UI consistent with the new design spec.

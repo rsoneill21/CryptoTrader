@@ -32,6 +32,7 @@ const normalizeSeverity = (value) => {
 };
 
 const isCriticalSeverity = (value) => normalizeSeverity(value) === 'critical';
+const isInfoSeverity = (value) => normalizeSeverity(value) === 'info';
 
 const getSeverityBadgeClasses = (severity, sizeClass = 'text-[11px]') => {
   const normalized = normalizeSeverity(severity);
@@ -49,18 +50,30 @@ const CRITICAL_ALERT_SELECTED =
   'border-red-500 bg-red-500/15 shadow-[0_0_0_1px_rgba(234,88,12,0.8)]';
 const CRITICAL_ALERT_UNSELECTED =
   'border-red-500/70 hover:border-red-400 hover:bg-red-500/10 shadow-[0_0_0_1px_rgba(248,113,113,0.6)]';
+const INFO_ALERT_UNSELECTED =
+  'border-blue-500/60 hover:border-blue-400 hover:bg-blue-500/10 shadow-[0_0_0_1px_rgba(59,130,246,0.4)]';
 
 const getAlertRowClasses = (alert, isSelected) => {
   const critical = isCriticalSeverity(alert?.severity);
+  const info = isInfoSeverity(alert?.severity);
   if (isSelected) {
     return `${ALERT_BUTTON_BASE} ${critical ? CRITICAL_ALERT_SELECTED : ALERT_BUTTON_SELECTED}`;
   }
-  return `${ALERT_BUTTON_BASE} ${critical ? CRITICAL_ALERT_UNSELECTED : ALERT_BUTTON_UNSELECTED}`;
+  if (critical) {
+    return `${ALERT_BUTTON_BASE} ${CRITICAL_ALERT_UNSELECTED}`;
+  }
+  if (info) {
+    return `${ALERT_BUTTON_BASE} ${INFO_ALERT_UNSELECTED}`;
+  }
+  return `${ALERT_BUTTON_BASE} ${ALERT_BUTTON_UNSELECTED}`;
 };
 
 const getDetailPanelClasses = (severity) => {
   if (isCriticalSeverity(severity)) {
     return 'rounded-2xl border border-red-600/80 bg-gradient-to-b from-red-900/80 to-red-950/70 shadow-lg shadow-red-900/70';
+  }
+  if (isInfoSeverity(severity)) {
+    return 'rounded-2xl border border-blue-600/80 bg-gradient-to-b from-blue-900/80 to-blue-950/70 shadow-lg shadow-blue-900/70';
   }
   return 'rounded-2xl border border-gray-700 bg-gradient-to-b from-slate-900 to-gray-900/60 shadow-lg shadow-black/40';
 };
