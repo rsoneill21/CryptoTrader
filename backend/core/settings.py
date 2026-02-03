@@ -47,6 +47,7 @@ class AppSettings(BaseSettings):
     session_cookie_secure: bool = Field(False, env="SESSION_COOKIE_SECURE")
     allow_insecure_cookies: bool = Field(False, env="ALLOW_INSECURE_COOKIES")
     session_cookie_same_site: str = Field("lax", env="SESSION_COOKIE_SAMESITE")
+    allow_email_enumeration: bool = Field(False, env="ALLOW_EMAIL_ENUMERATION")
 
     session_timeout_seconds: int = Field(1800, env="SESSION_TIMEOUT_SECONDS")
     session_idle_warning_seconds: int = Field(120, env="SESSION_IDLE_WARNING_SECONDS")

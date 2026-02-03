@@ -114,13 +114,19 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
             detail=error_msg
         )
 
-    # Check if email already exists
+    # Check if email already exists (avoid enumeration by returning generic response)
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
-        logger.warning("Registration failed for %s: duplicate email", request.email)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
+        logger.warning("Registration attempted for existing email %s", request.email)
+        if getattr(settings, "allow_email_enumeration", False) is True:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered"
+            )
+        return RegisterResponse(
+            id=existing_user.id,
+            email=request.email,
+            message="Registration request received. If the email is already registered, please log in or reset your password.",
         )
 
     # Create new user
@@ -136,10 +142,17 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         db.refresh(user)
     except IntegrityError:
         db.rollback()
-        logger.error("Registration failed for %s: integrity error", request.email)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
+        logger.warning("Registration integrity error for %s (likely duplicate)", request.email)
+        if getattr(settings, "allow_email_enumeration", False) is True:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered"
+            )
+        existing_user = db.query(User).filter(User.email == request.email).first()
+        return RegisterResponse(
+            id=existing_user.id if existing_user else 0,
+            email=request.email,
+            message="Registration request received. If the email is already registered, please log in or reset your password.",
         )
 
     logger.info("User registered successfully: id=%s, email=%s", user.id, user.email)
