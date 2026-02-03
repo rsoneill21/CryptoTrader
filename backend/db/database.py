@@ -144,6 +144,24 @@ def log_system_error(
         session.close()
 
 
+def purge_expired_sessions(db: Optional[Session] = None) -> int:
+    """Delete expired user sessions and return the count removed."""
+
+    from db.models import Session as UserSession
+
+    owns_session = db is None
+    session = db or SessionLocal()
+    try:
+        expired = session.query(UserSession).filter(
+            UserSession.expires_at < datetime.utcnow()
+        ).delete()
+        session.commit()
+        return int(expired or 0)
+    finally:
+        if owns_session:
+            session.close()
+
+
 class MobileTableHints(BaseModel):
     """Layout hints that downstream components can use to keep tables responsive."""
 

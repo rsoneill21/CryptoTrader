@@ -14,19 +14,10 @@ def cleanup_expired_sessions():
 
     Should be scheduled in celery beat.
     """
-    from datetime import datetime
-    from db.database import SessionLocal
-    from db.models import Session as UserSession
+    from db.database import purge_expired_sessions
 
-    db = SessionLocal()
-    try:
-        expired = db.query(UserSession).filter(
-            UserSession.expires_at < datetime.utcnow()
-        ).delete()
-        db.commit()
-        return {"deleted": expired}
-    finally:
-        db.close()
+    deleted = purge_expired_sessions()
+    return {"deleted": deleted}
 
 
 @celery_app.task
