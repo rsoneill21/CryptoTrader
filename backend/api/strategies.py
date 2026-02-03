@@ -1,12 +1,13 @@
 """Strategy management endpoints."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from core.auth import get_current_user
@@ -15,6 +16,18 @@ from db.models import Strategy, StrategyPerformance, User, AIDecision
 from services.github_import import GitHubImportService
 from services.paper_trading_service import paper_trading_engine
 from core.paper_trading import PaperTradeSignal, PaperPortfolioSnapshot
+from backend.api.market import (
+    AnalystIndicatorSnapshot,
+    TechnicalSnapshot,
+    _build_indicator_snapshot,
+    _build_recommendations,
+    _build_technical_snapshot,
+    _normalize_trading_pair,
+)
+from backend.agents.market_analyst import market_analyst_agent
+from backend.agents.sentiment_agent import SentimentSummary, sentiment_agent
+from backend.services.market_data import market_data_service
+from backend.services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
 
 logger = logging.getLogger("cryptotrader.strategies")
 router = APIRouter()
@@ -143,6 +156,83 @@ class StrategyComparisonResponse(BaseModel):
     compared_at: datetime
 
 
+class StrategySuggestionRequest(BaseModel):
+    symbols: List[str] = Field(
+        ...,
+        min_items=1,
+        description="Trading pair(s) (BASE/QUOTE) to analyze for strategy suggestions.",
+    )
+    timeframe: str = Field(
+        "1h",
+        min_length=1,
+        description="Primary timeframe to consider when asking the AI for ideas.",
+    )
+    risk_tolerance: str = Field(
+        "balanced",
+        min_length=1,
+        description="Risk appetite descriptor passed to the AI.",
+    )
+    preferred_indicators: List[str] = Field(
+        default_factory=list,
+        description="Optional indicators to highlight in the request.",
+    )
+    target_return_pct: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Optional target return percentage the AI should aim for.",
+    )
+    max_positions: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional maximum concurrent positions to preserve.",
+    )
+    notes: Optional[str] = Field(
+        None,
+        description="Additional context or hypotheses to steer the AI.",
+    )
+    lookback: int = Field(
+        20,
+        ge=5,
+        le=200,
+        description="Number of recent candles to include when summarizing technicals.",
+    )
+    insight_limit: int = Field(
+        3,
+        ge=1,
+        le=6,
+        description="How many analyst insights to surface.",
+    )
+    sentiment_limit: int = Field(
+        5,
+        ge=1,
+        le=20,
+        description="How many sentiment samples to summarize.",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class StrategySuggestionDetail(BaseModel):
+    symbol: str
+    market_summary: str
+    technical: TechnicalSnapshot
+    analyst_indicators: AnalystIndicatorSnapshot
+    insights: List[Dict[str, Any]]
+    sentiment: Optional[SentimentSummary]
+    recommendations: List[str]
+    ai_proposal: Optional[StrategyProposal]
+    ai_error: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StrategySuggestionResponse(BaseModel):
+    generated_at: datetime
+    suggestions: List[StrategySuggestionDetail]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 def _serialize_strategy(strategy: Strategy) -> StrategyResponse:
     return StrategyResponse(
         id=strategy.id,
@@ -218,6 +308,156 @@ def _build_comparison_metrics(performance: Optional[StrategyPerformance]) -> Str
         ai_model_used=performance.ai_model_used,
         period_start=performance.period_start,
         period_end=performance.period_end,
+    )
+
+
+def _decimal_to_str(value: Optional[Decimal], precision: int = 2, default: str = "unknown") -> str:
+    if value is None:
+        return default
+    format_spec = f"{{:.{precision}f}}"
+    return format_spec.format(value)
+
+
+def _price_change_description(
+    last_price: Optional[Decimal], previous_price: Optional[Decimal]
+) -> str:
+    if last_price is None or previous_price is None or previous_price == Decimal("0"):
+        return ""
+    delta = last_price - previous_price
+    percent_change = (delta / previous_price) * Decimal("100")
+    return f"{delta:+.2f} ({percent_change:+.2f}%)"
+
+
+def _compile_market_summary(
+    symbol: str,
+    technical: TechnicalSnapshot,
+    indicators: AnalystIndicatorSnapshot,
+    insights: List[Dict[str, Any]],
+    sentiment: Optional[SentimentSummary],
+) -> str:
+    fragments: List[str] = []
+    direction = technical.direction or "unclear"
+    last_price = _decimal_to_str(technical.last_price)
+    summary = f"{symbol} is {direction} at {last_price}."
+    change = _price_change_description(technical.last_price, technical.previous_price)
+    if change:
+        summary += f" Change {change}."
+    fragments.append(summary)
+
+    if indicators.momentum is not None:
+        fragments.append(f"Momentum {float(indicators.momentum):.3f}.")
+    if indicators.volatility is not None:
+        fragments.append(f"Volatility {float(indicators.volatility):.3f}.")
+
+    if sentiment:
+        tone = "bullish" if sentiment.average_score >= 0.2 else "bearish" if sentiment.average_score <= -0.2 else "neutral"
+        fragments.append(f"Sentiment is {tone} (avg {sentiment.average_score:.2f}).")
+
+    if insights:
+        first_summary = insights[0].get("summary") or insights[0].get("type")
+        if first_summary:
+            fragments.append(f"Insight: {first_summary}")
+
+    return " ".join(fragments).strip()
+
+
+def _build_strategy_proposal_input(
+    symbol: str,
+    payload: StrategySuggestionRequest,
+    market_summary: str,
+) -> StrategyProposalInput:
+    indicators = [item.strip() for item in payload.preferred_indicators if item and item.strip()]
+    request_kwargs: Dict[str, Any] = {
+        "symbols": [symbol],
+        "timeframe": payload.timeframe,
+        "market_summary": market_summary,
+        "risk_tolerance": payload.risk_tolerance,
+        "preferred_indicators": indicators,
+    }
+    if payload.target_return_pct is not None:
+        request_kwargs["target_return_pct"] = payload.target_return_pct
+    if payload.max_positions is not None:
+        request_kwargs["max_positions"] = payload.max_positions
+    if payload.notes:
+        request_kwargs["notes"] = payload.notes
+
+    return StrategyProposalInput(**request_kwargs)
+
+
+async def _build_strategy_suggestion(
+    symbol: str, payload: StrategySuggestionRequest
+) -> StrategySuggestionDetail:
+    technical_payload = await market_data_service.summarize_symbol(
+        symbol, lookback=payload.lookback
+    )
+    technical_snapshot = _build_technical_snapshot(symbol, technical_payload)
+    indicator_payload = await market_analyst_agent.get_indicator_summary(symbol)
+    indicator_snapshot = _build_indicator_snapshot(indicator_payload)
+    insights = await market_analyst_agent.get_recent_insights(
+        symbol, limit=payload.insight_limit
+    )
+    sentiment_summary = await sentiment_agent.summarize_symbol(
+        symbol, limit=payload.sentiment_limit
+    )
+    recommendations = _build_recommendations(
+        symbol,
+        technical_snapshot,
+        indicator_snapshot,
+        insights,
+        sentiment_summary,
+    )
+    market_summary = _compile_market_summary(
+        symbol,
+        technical_snapshot,
+        indicator_snapshot,
+        insights,
+        sentiment_summary,
+    )
+
+    proposal: Optional[StrategyProposal] = None
+    ai_error: Optional[str] = None
+    try:
+        request_payload = _build_strategy_proposal_input(symbol, payload, market_summary)
+        proposal = await strategy_ai_service.propose_strategy(request_payload)
+    except Exception as exc:
+        logger.warning("Strategy AI suggestion failed for %s: %s", symbol, exc)
+        ai_error = str(exc)
+
+    return StrategySuggestionDetail(
+        symbol=symbol,
+        market_summary=market_summary,
+        technical=technical_snapshot,
+        analyst_indicators=indicator_snapshot,
+        insights=insights,
+        sentiment=sentiment_summary,
+        recommendations=recommendations,
+        ai_proposal=proposal,
+        ai_error=ai_error,
+    )
+
+
+@router.post("/suggestions", response_model=StrategySuggestionResponse)
+async def suggest_strategies(
+    payload: StrategySuggestionRequest,
+    current_user: User = Depends(get_current_user),
+) -> StrategySuggestionResponse:
+    """Generate AI-grounded strategy ideas for the requested market conditions."""
+    suggestions: List[StrategySuggestionDetail] = []
+
+    for raw_symbol in payload.symbols:
+        normalized_symbol = _normalize_trading_pair(raw_symbol, parameter="symbol")
+
+        try:
+            suggestion = await _build_strategy_suggestion(normalized_symbol, payload)
+            suggestions.append(suggestion)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Failed to generate strategy suggestion for %s: %s", normalized_symbol, exc)
+
+    return StrategySuggestionResponse(
+        generated_at=datetime.utcnow(),
+        suggestions=suggestions,
     )
 
 
