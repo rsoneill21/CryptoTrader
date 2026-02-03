@@ -11,13 +11,33 @@ from sqlalchemy.orm import Session
 
 from core.auth import get_current_user
 from db.database import get_db
-from db.models import Strategy, User
+from db.models import Strategy, StrategyPerformance, User, AIDecision
+from services.github_import import GitHubImportService
+from services.paper_trading_service import paper_trading_engine
+from core.paper_trading import PaperTradeSignal, PaperPortfolioSnapshot
 
 logger = logging.getLogger("cryptotrader.strategies")
 router = APIRouter()
 _FIELD_MISSING = object()
 
+COMPARISON_DEFAULT_STATUSES = ["live", "paper"]
+
+github_import_service = GitHubImportService()
+
 STATUS_HINT = "paper, live, paused, archived"
+
+
+class GitHubImportRequest(BaseModel):
+    """Payload for importing strategies from a GitHub URL."""
+    github_url: str = Field(..., description="URL to a GitHub repository or file")
+
+
+class GitHubImportResponse(BaseModel):
+    """Summary of the import operation."""
+    imported_count: int
+    failed_count: int
+    branch: Optional[str]
+    message: str
 
 
 class StrategyCreate(BaseModel):
@@ -95,6 +115,34 @@ class StrategyPromoteRequest(BaseModel):
     )
 
 
+class StrategyComparisonMetrics(BaseModel):
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    total_pnl: float
+    max_drawdown: float
+    sharpe_ratio: Optional[float]
+    ai_model_used: Optional[str]
+    period_start: Optional[datetime]
+    period_end: Optional[datetime]
+
+
+class StrategyComparisonEntry(BaseModel):
+    strategy_id: int
+    name: str
+    description: Optional[str]
+    source: str
+    status: str
+    updated_at: datetime
+    performance: StrategyComparisonMetrics
+
+
+class StrategyComparisonResponse(BaseModel):
+    strategies: List[StrategyComparisonEntry]
+    compared_at: datetime
+
+
 def _serialize_strategy(strategy: Strategy) -> StrategyResponse:
     return StrategyResponse(
         id=strategy.id,
@@ -124,6 +172,55 @@ def _normalize_status_filters(values: Optional[List[str]]) -> List[str]:
     return normalized
 
 
+def _order_strategies_by_requested_ids(
+    strategies: List[Strategy], requested_ids: List[int]
+) -> List[Strategy]:
+    if not strategies or not requested_ids:
+        return strategies
+
+    strategy_map = {strategy.id: strategy for strategy in strategies}
+    ordered: List[Strategy] = []
+    seen: set[int] = set()
+    for strategy_id in requested_ids:
+        if strategy_id in seen:
+            continue
+        seen.add(strategy_id)
+        strategy = strategy_map.get(strategy_id)
+        if strategy:
+            ordered.append(strategy)
+
+    return ordered
+
+
+def _build_comparison_metrics(performance: Optional[StrategyPerformance]) -> StrategyComparisonMetrics:
+    if not performance:
+        return StrategyComparisonMetrics(
+            total_trades=0,
+            winning_trades=0,
+            losing_trades=0,
+            win_rate=0.0,
+            total_pnl=0.0,
+            max_drawdown=0.0,
+            sharpe_ratio=None,
+            ai_model_used=None,
+            period_start=None,
+            period_end=None,
+        )
+
+    return StrategyComparisonMetrics(
+        total_trades=performance.total_trades or 0,
+        winning_trades=performance.winning_trades or 0,
+        losing_trades=performance.losing_trades or 0,
+        win_rate=performance.win_rate or 0.0,
+        total_pnl=performance.total_pnl or 0.0,
+        max_drawdown=performance.max_drawdown or 0.0,
+        sharpe_ratio=performance.sharpe_ratio,
+        ai_model_used=performance.ai_model_used,
+        period_start=performance.period_start,
+        period_end=performance.period_end,
+    )
+
+
 @router.get("/", response_model=List[StrategyResponse], status_code=status.HTTP_200_OK)
 async def list_strategies(
     status: Optional[List[str]] = Query(
@@ -149,6 +246,128 @@ async def list_strategies(
         )
 
     return [_serialize_strategy(strategy) for strategy in strategies]
+
+
+@router.get("/comparison", response_model=StrategyComparisonResponse)
+async def compare_strategies(
+    status: Optional[List[str]] = Query(
+        None,
+        alias="status",
+        description=f"Include strategies matching a status ({STATUS_HINT}). Defaults to {', '.join(COMPARISON_DEFAULT_STATUSES)}.",
+    ),
+    strategy_ids: Optional[List[int]] = Query(
+        None,
+        alias="strategy_id",
+        description="Repeatable filter to limit comparison to specific strategy IDs.",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StrategyComparisonResponse:
+    """Return comparison-ready strategy metadata and latest performance metrics."""
+    filters = _normalize_status_filters(status)
+    if not filters:
+        filters = COMPARISON_DEFAULT_STATUSES
+
+    try:
+        query = db.query(Strategy)
+        if filters:
+            query = query.filter(Strategy.status.in_(filters))
+        if strategy_ids:
+            query = query.filter(Strategy.id.in_(strategy_ids))
+
+        strategies = query.order_by(Strategy.updated_at.desc()).all()
+        if strategy_ids:
+            ordered = _order_strategies_by_requested_ids(strategies, strategy_ids)
+            if ordered:
+                strategies = ordered
+
+        strategy_ids_list = [strategy.id for strategy in strategies]
+        performance_map: Dict[int, StrategyPerformance] = {}
+        if strategy_ids_list:
+            performance_rows = (
+                db.query(StrategyPerformance)
+                .filter(StrategyPerformance.strategy_id.in_(strategy_ids_list))
+                .order_by(
+                    StrategyPerformance.strategy_id.asc(),
+                    StrategyPerformance.period_end.desc(),
+                )
+                .all()
+            )
+            for row in performance_rows:
+                if row.strategy_id not in performance_map:
+                    performance_map[row.strategy_id] = row
+
+        comparisons: List[StrategyComparisonEntry] = []
+        for strategy in strategies:
+            comparisons.append(
+                StrategyComparisonEntry(
+                    strategy_id=strategy.id,
+                    name=strategy.name,
+                    description=strategy.description,
+                    source=strategy.source or "manual",
+                    status=strategy.status or "paper",
+                    updated_at=strategy.updated_at,
+                    performance=_build_comparison_metrics(
+                        performance_map.get(strategy.id)
+                    ),
+                )
+            )
+
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error("Strategy comparison fetch failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to build strategy comparison data",
+        )
+
+    return StrategyComparisonResponse(
+        strategies=comparisons,
+        compared_at=datetime.utcnow(),
+    )
+
+
+@router.post("/import/github", response_model=GitHubImportResponse)
+async def import_from_github(
+    payload: GitHubImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> GitHubImportResponse:
+    """Import strategy definitions from a GitHub URL."""
+    try:
+        report = await github_import_service.import_strategies(payload.github_url)
+    except Exception as exc:
+        logger.error("GitHub import service failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        )
+
+    imported_count = 0
+    for candidate in report.candidates:
+        try:
+            strategy = Strategy(
+                name=candidate.name,
+                description=candidate.definition.description or f"Imported from {candidate.path}",
+                rules_json=candidate.definition.rules,
+                source="github",
+                status="paper",
+                github_url=f"{report.source_url}/blob/{report.branch}/{candidate.path}",
+                ai_modifications_json=candidate.ai_insights.dict() if candidate.ai_insights else None,
+            )
+            db.add(strategy)
+            imported_count += 1
+        except Exception as exc:
+            logger.warning("Failed to save imported strategy %s: %s", candidate.path, exc)
+
+    if imported_count > 0:
+        db.commit()
+
+    return GitHubImportResponse(
+        imported_count=imported_count,
+        failed_count=len(report.failures),
+        branch=report.branch,
+        message=f"Successfully imported {imported_count} strategies."
+    )
 
 
 @router.get("/{strategy_id}", response_model=StrategyResponse)
@@ -359,3 +578,46 @@ async def delete_strategy(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to delete strategy",
         )
+
+
+@router.post("/{strategy_id}/simulate")
+async def simulate_strategy_signal(
+    strategy_id: int,
+    signal: PaperTradeSignal,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Execute a paper trading signal for a strategy."""
+    strategy = db.get(Strategy, strategy_id)
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    signal.strategy_id = strategy_id
+    try:
+        results = await paper_trading_engine.execute_signal(signal)
+        if results:
+            await paper_trading_engine.persist_closed_trades(results)
+        
+        # Log the AI decision for this signal
+        decision = AIDecision(
+            agent_name="paper_trading_engine",
+            decision_type=f"paper_{signal.intent.value}",
+            reasoning_json={"signal": signal.dict(), "results_count": len(results)},
+            confidence_score=1.0,
+            action_taken=f"Executed {signal.side.value if signal.side else 'exit'} for {signal.symbol}",
+            related_strategy_id=strategy_id,
+        )
+        db.add(decision)
+        db.commit()
+        
+        return {"status": "success", "results_count": len(results)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/paper-portfolio", response_model=PaperPortfolioSnapshot)
+async def get_paper_portfolio(
+    current_user: User = Depends(get_current_user),
+):
+    """Return a snapshot of the current paper trading portfolio."""
+    return await paper_trading_engine.snapshot()

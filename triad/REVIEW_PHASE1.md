@@ -57,3 +57,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 139 · Tables scroll horizontally on mobile
 - **Status**: Implemented across backend layout hints and Triad coordination scripts.
 - **Details**: Added `MobileTableHints`/`get_mobile_table_hints` to `backend/db/database.py` along with `MarketDataTableLayout` helpers so APIs can report how many columns to keep visible before horizontal scrolling kicks in; `MarketDataService` now exposes this metadata. Triad claim/submit scripts print mobile-table reminders so reviewers know the data tables were validated at ~360‑480px and scroll instead of breaking the layout.
+
+### Feature 43 · View strategy comparison
+- **Status**: Implemented in `backend/api/strategies.py`.
+- **Details**: Added `GET /api/strategies/comparison` which gathers the latest performance metrics per strategy, supports status filters/defaults (paper/live), and allows optionally ordering the results via `strategy_id` query parameters so the UI can render side-by-side comparisons.
