@@ -2,6 +2,7 @@
 Database configuration and initialization.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -9,11 +10,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
 
 # Database URL - SQLite for development
@@ -54,6 +55,93 @@ def init_db():
 
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_DETAIL_PARTS = {
+    "authorization",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "credential",
+    "session",
+    "cookie",
+}
+
+
+def _coerce_to_json_serializable(value: Any) -> Any:
+    """Ensure the provided value can be serialized as JSON."""
+
+    try:
+        serialized = json.dumps(value, default=str)
+        return json.loads(serialized)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return str(value)
+
+
+def _sanitize_value(value: Any) -> Any:
+    """Sanitize an arbitrary value while keeping complex structures intact."""
+
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return _sanitize_mapping(value)
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return _coerce_to_json_serializable(value)
+
+
+def _sanitize_mapping(mapping: Mapping[Any, Any]) -> Dict[str, Any]:
+    """Redact sensitive entries within mapping types recursively."""
+
+    sanitized: Dict[str, Any] = {}
+    for raw_key, raw_value in mapping.items():
+        key = str(raw_key)
+        normalized_key = key.lower()
+        if any(part in normalized_key for part in _SENSITIVE_DETAIL_PARTS):
+            sanitized[key] = "<redacted>"
+            continue
+        sanitized[key] = _sanitize_value(raw_value)
+    return sanitized
+
+
+def sanitize_log_details(details: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a copy of the details with sensitive keys redacted."""
+
+    if not details:
+        return None
+
+    return _sanitize_mapping(details)
+
+
+def log_system_error(
+    level: str,
+    source: str,
+    message: str,
+    details: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Persist a structured entry in the system_logs table."""
+
+    from db.models import SystemLog
+
+    sanitized = sanitize_log_details(details)
+    session = SessionLocal()
+    try:
+        log = SystemLog(
+            level=level,
+            source=source,
+            message=message,
+            details_json=sanitized,
+        )
+        session.add(log)
+        session.commit()
+    except SQLAlchemyError as exc:
+        session.rollback()
+        logger.warning("Failed to write system log (%s): %s", source, exc)
+    finally:
+        session.close()
 
 
 class MobileTableHints(BaseModel):

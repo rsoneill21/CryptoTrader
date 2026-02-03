@@ -1,4 +1,9 @@
-Traceback (most recent call last): File "<stdin>", line 3, in <module> IndexError: list index out of range ./slack_post.sh: line 63: 🛠 [CODEX]: command not 
-found ./slack_post.sh: line 81: warning: here-document at line 64 delimited by end-of-file (wanted `PY')
-  File "<stdin>", line 16 PY <<< "$RESP" ^
-SyntaxError: invalid syntax
+2026-02-03 T10:20:00Z — Feature 129 worklog
+- Added `log_system_error` helper that redacts sensitive metadata before writing to `system_logs`.
+- FastAPI error handlers now log every HTTP/validation/unhandled failure with request context.
+- System backup endpoints (`/backups`, `/backups/restore`) capture their failure paths and persist details in `system_logs`.
+- `triad/bin/check_usage.py` now logs any missing-argument, invalid-model, parse, or unexpected failures before exiting.
+
+Verification guidance:
+1. Trigger an API error (e.g., `POST /api/system/backups` when backups are disabled) and run `SELECT * FROM system_logs WHERE source LIKE 'system.backups%' ORDER BY timestamp DESC LIMIT 5` to see the recorded entry.
+2. Invoke `python triad/bin/check_usage.py` without arguments (or with invalid flags) and query `system_logs` for `source = 'triad.check_usage'` to confirm the failure record.

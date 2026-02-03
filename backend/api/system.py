@@ -4,7 +4,7 @@ System API routes.
 
 import asyncio
 import logging
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from datetime import datetime
 from fastapi import APIRouter, Query, Depends, HTTPException, status
@@ -19,11 +19,24 @@ from db.database import (
     backup_sqlite_database,
     list_sqlite_backups,
     restore_sqlite_database,
+    log_system_error,
 )
 from db.models import SystemLog, User
 
 router = APIRouter()
 logger = logging.getLogger("cryptotrader.system")
+
+
+def _log_backup_event(
+    level: str,
+    operation: str,
+    message: str,
+    details: Optional[dict[str, Any]] = None,
+) -> None:
+    payload = {"operation": operation}
+    if details:
+        payload.update(details)
+    log_system_error(level, "system.backups", message, payload)
 
 
 # --- Request/Response Models ---
@@ -171,6 +184,12 @@ async def create_database_backup(user: User = Depends(get_current_user)):
     """Trigger a snapshot of the sqlite database file."""
     settings = get_app_settings()
     if not settings.database_backup_enabled:
+        _log_backup_event(
+            "warning",
+            "create_backup",
+            "Database backups disabled",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database backups are disabled",
@@ -185,15 +204,33 @@ async def create_database_backup(user: User = Depends(get_current_user)):
         )
     except ValueError as exc:
         logger.error("Invalid backup configuration: %s", exc)
+        _log_backup_event(
+            "warning",
+            "create_backup",
+            "Invalid backup configuration",
+            {"user_id": user.id, "error": str(exc)},
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except FileNotFoundError:
         logger.error("Database file missing when creating backup")
+        _log_backup_event(
+            "error",
+            "create_backup",
+            "Database file missing when creating backup",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database file not available for backup",
         )
     except Exception:
         logger.exception("Unexpected error while creating database backup")
+        _log_backup_event(
+            "error",
+            "create_backup",
+            "Unexpected error while creating database backup",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create database backup",
@@ -213,6 +250,12 @@ async def list_database_backups(user: User = Depends(get_current_user)):
     """List available sqlite database backups."""
     settings = get_app_settings()
     if not settings.database_backup_enabled:
+        _log_backup_event(
+            "warning",
+            "list_backups",
+            "Database backups disabled for listing",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database backups are disabled",
@@ -226,12 +269,24 @@ async def list_database_backups(user: User = Depends(get_current_user)):
         )
     except ValueError as exc:
         logger.error("Invalid backup configuration: %s", exc)
+        _log_backup_event(
+            "warning",
+            "list_backups",
+            "Invalid backup configuration while listing backups",
+            {"user_id": user.id, "error": str(exc)},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
     except Exception:
         logger.exception("Unexpected error while listing database backups")
+        _log_backup_event(
+            "error",
+            "list_backups",
+            "Unexpected error while listing database backups",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to read database backups",
@@ -258,11 +313,23 @@ async def restore_database_backup(
     """Restore a sqlite database from a selected backup."""
     settings = get_app_settings()
     if not settings.database_backup_enabled:
+        _log_backup_event(
+            "warning",
+            "restore_backup",
+            "Database backups disabled, restore unavailable",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database backups are disabled",
         )
     if not settings.database_restore_enabled:
+        _log_backup_event(
+            "warning",
+            "restore_backup",
+            "Database restores disabled",
+            {"user_id": user.id},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database restores are disabled",
@@ -277,18 +344,36 @@ async def restore_database_backup(
         )
     except ValueError as exc:
         logger.error("Invalid restore request: %s", exc)
+        _log_backup_event(
+            "warning",
+            "restore_backup",
+            "Invalid restore request",
+            {"user_id": user.id, "file_name": payload.file_name, "error": str(exc)},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
     except FileNotFoundError:
         logger.warning("Requested backup missing: %s", payload.file_name)
+        _log_backup_event(
+            "error",
+            "restore_backup",
+            "Backup file not found during restore",
+            {"user_id": user.id, "file_name": payload.file_name},
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Backup file not found",
         )
     except Exception:
         logger.exception("Unexpected error while restoring database backup")
+        _log_backup_event(
+            "error",
+            "restore_backup",
+            "Unexpected error while restoring database backup",
+            {"user_id": user.id, "file_name": payload.file_name},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to restore database backup",
