@@ -15,9 +15,15 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, Response
 from contextlib import asynccontextmanager
 
+import logging as _logging
+
 from api.errors import register_exception_handlers
-from db.database import init_db
+from db.database import init_db, SessionLocal
+from db.models import Alert
+from services.kraken import kraken_service
 from services.kraken_ws import start_kraken_ws, stop_kraken_ws
+
+_logger = _logging.getLogger("cryptotrader.kraken_alerts")
 from core.settings import get_app_settings
 from api import auth_router, market_router, system_router
 from api.alerts import router as alerts_router
@@ -28,6 +34,26 @@ from api.strategies import router as strategies_router
 from api.trades import router as trades_router
 
 
+def _kraken_error_alert(severity: str, title: str, details: dict) -> None:
+    """Persist a Kraken API error as an alert record."""
+    try:
+        db = SessionLocal()
+        try:
+            alert = Alert(
+                type="kraken_api_error",
+                title=title,
+                message=details.get("error") or details.get("message") or str(details),
+                severity=severity,
+                status="new",
+            )
+            db.add(alert)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        _logger.warning("Failed to persist Kraken error alert: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
@@ -36,6 +62,10 @@ async def lifespan(app: FastAPI):
     # Run init_db in a separate thread to avoid blocking the event loop
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, init_db)
+
+    # Register Kraken error → alert callback
+    kraken_service.on_error(_kraken_error_alert)
+
     asyncio.create_task(start_kraken_ws())
     yield
     # Shutdown

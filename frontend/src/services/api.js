@@ -149,6 +149,9 @@ export const systemAPI = {
   health: () =>
     api.get('/api/system/health'),
 
+  connectionStatus: () =>
+    api.get('/api/system/connection-status'),
+
   logs: (params = {}) =>
     api.get('/api/system/logs', { params }),
 };
@@ -192,6 +195,21 @@ export const tradesAPI = {
 
   adjustTrade: (tradeId, data) =>
     api.put(`/api/trades/${tradeId}/adjust`, data),
+
+  addToPosition: (tradeId, quantity) =>
+    api.post(`/api/trades/${tradeId}/add`, { quantity }),
+
+  toggleAI: (tradeId) =>
+    api.put(`/api/trades/${tradeId}/ai-toggle`),
+
+  getTradeOrders: (tradeId) =>
+    api.get(`/api/trades/${tradeId}/orders`),
+
+  getOrderStatus: (orderId) =>
+    api.get(`/api/trades/orders/${orderId}/status`),
+
+  cancelOrder: (orderId) =>
+    api.post(`/api/trades/orders/${orderId}/cancel`),
 };
 
 // Export default instance for custom requests

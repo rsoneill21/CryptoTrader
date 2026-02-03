@@ -14,6 +14,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import ForgotPassword from './pages/ForgotPassword';
+import SystemLogs from './pages/SystemLogs';
 
 // Placeholder pages (to be implemented)
 const StrategyLab = () => (
@@ -121,6 +122,16 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Settings />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/system-logs"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <SystemLogs />
                   </Layout>
                 </ProtectedRoute>
               }

@@ -22,6 +22,7 @@ from db.database import (
     log_system_error,
 )
 from db.models import SystemLog, User
+from services.kraken import kraken_service, KrakenAPIError
 
 router = APIRouter()
 logger = logging.getLogger("cryptotrader.system")
@@ -48,10 +49,18 @@ class ServiceStatus(BaseModel):
     kraken: str = "not_configured"
 
 
+class KrakenConnectionStatus(BaseModel):
+    authenticated: bool
+    reachable: bool
+    latency_ms: Optional[float] = None
+    error: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
     services: ServiceStatus
+    kraken_details: Optional[KrakenConnectionStatus] = None
 
 
 class LogEntry(BaseModel):
@@ -110,16 +119,73 @@ async def health_check():
     """
     Health check endpoint.
 
-    Returns status of all system services.
+    Returns status of all system services including live Kraken API connectivity.
     """
+    kraken_status = "not_configured"
+    kraken_details = None
+
+    if kraken_service.is_authenticated:
+        kraken_details = KrakenConnectionStatus(
+            authenticated=True, reachable=False
+        )
+        try:
+            start = asyncio.get_event_loop().time()
+            await kraken_service.get_server_time()
+            elapsed = (asyncio.get_event_loop().time() - start) * 1000
+            kraken_status = "connected"
+            kraken_details.reachable = True
+            kraken_details.latency_ms = round(elapsed, 1)
+        except KrakenAPIError as exc:
+            kraken_status = "error"
+            kraken_details.error = str(exc)
+        except Exception as exc:
+            kraken_status = "unreachable"
+            kraken_details.error = str(exc)
+    else:
+        kraken_details = KrakenConnectionStatus(
+            authenticated=False, reachable=False,
+            error="API credentials not configured",
+        )
+
     return HealthResponse(
         status="healthy",
         version="0.1.0",
         services=ServiceStatus(
             database="connected",
-            agents="initializing"
-        )
+            agents="initializing",
+            kraken=kraken_status,
+        ),
+        kraken_details=kraken_details,
     )
+
+
+@router.get("/connection-status", response_model=KrakenConnectionStatus)
+async def connection_status():
+    """Check Kraken API connection status independently."""
+    if not kraken_service.is_authenticated:
+        return KrakenConnectionStatus(
+            authenticated=False, reachable=False,
+            error="API credentials not configured",
+        )
+
+    try:
+        start = asyncio.get_event_loop().time()
+        await kraken_service.get_server_time()
+        elapsed = (asyncio.get_event_loop().time() - start) * 1000
+        return KrakenConnectionStatus(
+            authenticated=True, reachable=True,
+            latency_ms=round(elapsed, 1),
+        )
+    except KrakenAPIError as exc:
+        return KrakenConnectionStatus(
+            authenticated=True, reachable=False,
+            error=str(exc),
+        )
+    except Exception as exc:
+        return KrakenConnectionStatus(
+            authenticated=True, reachable=False,
+            error=str(exc),
+        )
 
 
 @router.get("/logs", response_model=LogsResponse)

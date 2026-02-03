@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { tradesAPI } from '../services/api';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -55,6 +56,13 @@ const createInitialAdjustState = () => ({
   error: '',
 });
 
+const createInitialAddState = () => ({
+  tradeId: null,
+  quantity: '',
+  submitting: false,
+  error: '',
+});
+
 const PositionManager = () => {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +70,10 @@ const PositionManager = () => {
   const [statusMessage, setStatusMessage] = useState('');
   const [closeState, setCloseState] = useState(createInitialCloseState);
   const [adjustState, setAdjustState] = useState(createInitialAdjustState);
+  const [addState, setAddState] = useState(createInitialAddState);
+  const [aiToggling, setAiToggling] = useState(null);
+  const [cancellingOrder, setCancellingOrder] = useState(null);
+  const [refreshingOrder, setRefreshingOrder] = useState(null);
 
   const fetchPositions = async () => {
     setLoading(true);
@@ -92,19 +104,21 @@ const PositionManager = () => {
   }, [positions]);
 
   const openCloseForm = (tradeId) => {
-    setCloseState({
-      ...createInitialCloseState(),
-      tradeId,
-    });
+    setCloseState({ ...createInitialCloseState(), tradeId });
     setAdjustState(createInitialAdjustState());
+    setAddState(createInitialAddState());
   };
 
   const openAdjustForm = (tradeId) => {
-    setAdjustState({
-      ...createInitialAdjustState(),
-      tradeId,
-    });
+    setAdjustState({ ...createInitialAdjustState(), tradeId });
     setCloseState(createInitialCloseState());
+    setAddState(createInitialAddState());
+  };
+
+  const openAddForm = (tradeId) => {
+    setAddState({ ...createInitialAddState(), tradeId });
+    setCloseState(createInitialCloseState());
+    setAdjustState(createInitialAdjustState());
   };
 
   const handleCloseSubmit = async (event) => {
@@ -217,21 +231,109 @@ const PositionManager = () => {
     }
   };
 
+  const handleAddSubmit = async (event) => {
+    event.preventDefault();
+    if (!addState.tradeId) return;
+
+    const quantity = parseFloat(addState.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setAddState((prev) => ({ ...prev, error: 'Enter a valid quantity above zero.' }));
+      return;
+    }
+
+    setAddState((prev) => ({ ...prev, submitting: true, error: '' }));
+    try {
+      const response = await tradesAPI.addToPosition(addState.tradeId, quantity);
+      setStatusMessage(response?.data?.message || 'Position increased.');
+      setAddState(createInitialAddState());
+      await fetchPositions();
+    } catch (error) {
+      setAddState((prev) => ({
+        ...prev,
+        error: error.message || 'Unable to add to position.',
+      }));
+    } finally {
+      setAddState((prev) => ({ ...prev, submitting: false }));
+    }
+  };
+
+  const handleToggleAI = async (tradeId) => {
+    setAiToggling(tradeId);
+    try {
+      const response = await tradesAPI.toggleAI(tradeId);
+      setStatusMessage(response?.data?.message || 'AI management updated.');
+      await fetchPositions();
+    } catch (error) {
+      setStatusMessage('Failed to toggle AI: ' + (error.message || 'Unknown error'));
+    } finally {
+      setAiToggling(null);
+    }
+  };
+
+  const handleCancelOrder = async (orderId) => {
+    setCancellingOrder(orderId);
+    try {
+      const response = await tradesAPI.cancelOrder(orderId);
+      setStatusMessage(response?.data?.message || 'Order canceled.');
+      await fetchPositions();
+    } catch (error) {
+      setStatusMessage('Failed to cancel order: ' + (error.message || 'Unknown error'));
+    } finally {
+      setCancellingOrder(null);
+    }
+  };
+
+  const handleRefreshOrder = async (orderId) => {
+    setRefreshingOrder(orderId);
+    try {
+      await tradesAPI.getOrderStatus(orderId);
+      await fetchPositions();
+    } catch (_error) {
+      // Silently ignore — the badge will stay unchanged
+    } finally {
+      setRefreshingOrder(null);
+    }
+  };
+
   const renderOrders = (orders) => {
     if (!orders?.length) {
       return null;
     }
 
+    const cancellableStatuses = ['pending', 'open'];
+
     return (
       <div className="flex flex-wrap gap-2">
-        {orders.map((order) => (
-          <span
-            className="rounded-full border border-gray-700 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-300"
-            key={order.id}
-          >
-            {order.side} {order.order_type} · {order.status}
-          </span>
-        ))}
+        {orders.map((order) => {
+          const canCancel = cancellableStatuses.includes(order.status?.toLowerCase());
+          return (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-700 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-300"
+              key={order.id}
+            >
+              <button
+                type="button"
+                title="Refresh order status"
+                disabled={refreshingOrder === order.id}
+                onClick={() => handleRefreshOrder(order.id)}
+                className="hover:text-sky-400 transition disabled:opacity-50"
+              >
+                {order.side} {order.order_type} · {order.status}
+              </button>
+              {canCancel && (
+                <button
+                  type="button"
+                  title="Cancel order"
+                  disabled={cancellingOrder === order.id}
+                  onClick={() => handleCancelOrder(order.id)}
+                  className="ml-1 text-rose-400 hover:text-rose-300 transition disabled:opacity-50"
+                >
+                  {cancellingOrder === order.id ? '…' : '✕'}
+                </button>
+              )}
+            </span>
+          );
+        })}
       </div>
     );
   };
@@ -297,7 +399,7 @@ const PositionManager = () => {
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
                     <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
-                      {trade.strategy_id ? `Strategy #${trade.strategy_id}` : 'Manual Entry'}
+                      {trade.trade_source === 'manual' ? 'Manual Entry' : trade.trade_source?.startsWith('ai:') ? `AI · ${trade.trade_source.slice(3)}` : trade.strategy_id ? `Strategy #${trade.strategy_id}` : trade.is_manual ? 'Manual Entry' : 'AI Trade'}
                     </p>
                     <p className="text-2xl font-semibold text-white">{trade.symbol}</p>
                     <p className="text-sm text-gray-400">
@@ -320,7 +422,7 @@ const PositionManager = () => {
 
                 <div className="mt-4 space-y-3 text-xs text-gray-400">
                   {renderOrders(trade.orders)}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       className="rounded-full border border-indigo-500/60 bg-indigo-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-indigo-200 transition hover:border-indigo-400/80"
@@ -334,6 +436,25 @@ const PositionManager = () => {
                       onClick={() => openAdjustForm(trade.id)}
                     >
                       Adjust Levels
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-emerald-500/60 bg-emerald-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-200 transition hover:border-emerald-400/80"
+                      onClick={() => openAddForm(trade.id)}
+                    >
+                      Add to Position
+                    </button>
+                    <button
+                      type="button"
+                      disabled={aiToggling === trade.id}
+                      onClick={() => handleToggleAI(trade.id)}
+                      className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition disabled:opacity-50 ${
+                        trade.ai_managed
+                          ? 'border border-amber-500/60 bg-amber-500/10 text-amber-200 hover:border-amber-400/80'
+                          : 'border border-gray-600 bg-gray-800/40 text-gray-400 hover:border-gray-500'
+                      }`}
+                    >
+                      {aiToggling === trade.id ? '…' : trade.ai_managed ? 'AI: On' : 'AI: Off'}
                     </button>
                   </div>
                 </div>
@@ -469,6 +590,50 @@ const PositionManager = () => {
                         className="rounded-xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {adjustState.submitting ? 'Saving…' : 'Save Adjustments'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {addState.tradeId === trade.id && (
+                  <form onSubmit={handleAddSubmit} className="mt-5 space-y-3 rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-sm text-gray-300">
+                        Quantity to add
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={addState.quantity}
+                          onChange={(event) =>
+                            setAddState((prev) => ({
+                              ...prev,
+                              quantity: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500"
+                        />
+                      </label>
+                    </div>
+                    {addState.error && (
+                      <p className="text-xs font-semibold text-rose-300">
+                        {addState.error}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:border-gray-500"
+                        onClick={() => setAddState(createInitialAddState)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={addState.submitting}
+                        className="rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {addState.submitting ? 'Adding…' : 'Add to Position'}
                       </button>
                     </div>
                   </form>

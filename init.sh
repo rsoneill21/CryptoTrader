@@ -167,9 +167,55 @@ start_servers() {
     echo "Starting development servers..."
     echo ""
 
-    # Start backend in background
     local backend_host="${BACKEND_HOST:-127.0.0.1}"
     local backend_port="${BACKEND_PORT:-8000}"
+    local frontend_port="${FRONTEND_PORT:-3000}"
+    local backend_check_host="${backend_host}"
+    if [[ "${backend_check_host}" == "0.0.0.0" ]]; then
+        backend_check_host="127.0.0.1"
+    fi
+
+    wait_for_url() {
+        local url="$1"
+        local label="$2"
+        local retries="${3:-30}"
+        local delay="${4:-1}"
+
+        echo "Waiting for ${label} at ${url}..."
+        for i in $(seq 1 "$retries"); do
+            if command -v curl &> /dev/null; then
+                if curl -fsS "$url" > /dev/null 2>&1; then
+                    echo -e "${GREEN}✓${NC} ${label} is up"
+                    return 0
+                fi
+            else
+                python3 - <<PY >/dev/null 2>&1 && { echo -e "${GREEN}✓${NC} ${label} is up"; return 0; }
+import urllib.request
+urllib.request.urlopen("${url}", timeout=2)
+PY
+            fi
+            sleep "$delay"
+        done
+        echo -e "${RED}✗${NC} ${label} did not become ready"
+        return 1
+    }
+
+    run_tests() {
+        echo ""
+        echo "Running backend tests..."
+        cd backend
+        source venv/bin/activate
+        pytest
+        cd ..
+
+        echo ""
+        echo "Running frontend lint..."
+        cd frontend
+        npm run lint
+        cd ..
+    }
+
+    # Start backend in background
     echo "Starting FastAPI backend on ${backend_host}:${backend_port}..."
     cd backend
     source venv/bin/activate
@@ -181,20 +227,39 @@ start_servers() {
     sleep 2
 
     # Start frontend in background
-    echo "Starting React frontend on port 3000..."
+    echo "Starting React frontend on port ${frontend_port}..."
     cd frontend
     npm run dev &
     FRONTEND_PID=$!
     cd ..
+
+    # Ensure we clean up if anything fails
+    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit 1" ERR
+
+    # Wait for services to be ready
+    wait_for_url "http://${backend_check_host}:${backend_port}/docs" "Backend" 40 1
+    wait_for_url "http://localhost:${frontend_port}" "Frontend" 40 1
+
+    # Run validation tests
+    run_tests
 
     echo ""
     echo "============================================"
     echo -e "${GREEN}Servers Started Successfully!${NC}"
     echo "============================================"
     echo ""
-    echo "  Frontend:  http://localhost:3000"
-    echo "  Backend:   http://${backend_host}:${backend_port}"
-    echo "  API Docs:  http://${backend_host}:${backend_port}/docs"
+    echo "  Frontend:  http://localhost:${frontend_port}"
+    echo "  Backend:   http://${backend_check_host}:${backend_port}"
+    echo "  API Docs:  http://${backend_check_host}:${backend_port}/docs"
+    if [[ "${backend_host}" == "0.0.0.0" ]]; then
+        local lan_ip
+        lan_ip="$(hostname -I | awk '{print $1}')"
+        if [[ -n "${lan_ip}" ]]; then
+            echo "  Backend (LAN): http://${lan_ip}:${backend_port}"
+            echo "  API Docs (LAN): http://${lan_ip}:${backend_port}/docs"
+            echo "  Frontend (LAN): http://${lan_ip}:${frontend_port}"
+        fi
+    fi
     echo ""
     echo "Press Ctrl+C to stop all servers"
     echo ""
@@ -222,19 +287,7 @@ main() {
 
     load_env_file
 
-    local backend_host="${BACKEND_HOST:-127.0.0.1}"
-    local backend_port="${BACKEND_PORT:-8000}"
-
-    echo ""
-    read -p "Start development servers? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        BACKEND_HOST="$backend_host" BACKEND_PORT="$backend_port" start_servers
-    else
-        echo ""
-        echo "Setup complete! Run './init.sh' again to start servers."
-        echo ""
-    fi
+    BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}" BACKEND_PORT="${BACKEND_PORT:-8000}" start_servers
 }
 
 # Run main

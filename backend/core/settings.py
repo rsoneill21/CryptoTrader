@@ -75,6 +75,11 @@ class AppSettings(BaseSettings):
     database_backup_retention_days: int = Field(30, env="DATABASE_BACKUP_RETENTION_DAYS")
     database_restore_enabled: bool = Field(True, env="DATABASE_RESTORE_ENABLED")
 
+    # Extra environment variables often present
+    backend_host: Optional[str] = Field(None, env="BACKEND_HOST")
+    vite_api_url: Optional[str] = Field(None, env="VITE_API_URL")
+    vite_ws_url: Optional[str] = Field(None, env="VITE_WS_URL")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

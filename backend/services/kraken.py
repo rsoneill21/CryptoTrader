@@ -136,6 +136,9 @@ class _QueuedRequest:
     future: asyncio.Future[Any]
 
 
+ErrorCallback = Any  # Callable[[str, str, Dict[str, Any]], None]
+
+
 class KrakenService:
     """
     Async wrapper for Kraken exchange API.
@@ -218,6 +221,21 @@ class KrakenService:
         self._max_queue_delay = 30.0
         self._connection_healthy = True
 
+        # Error callbacks for alert integration
+        self._error_callbacks: List[Any] = []
+
+    def on_error(self, callback: Any) -> None:
+        """Register a callback invoked on API errors: callback(severity, title, details)."""
+        self._error_callbacks.append(callback)
+
+    def _notify_error(self, severity: str, title: str, details: Dict[str, Any]) -> None:
+        """Notify all registered error callbacks."""
+        for cb in self._error_callbacks:
+            try:
+                cb(severity, title, details)
+            except Exception as exc:
+                logger.warning("Error callback failed: %s", exc)
+
     @property
     def is_authenticated(self) -> bool:
         """Check if service has API credentials."""
@@ -278,12 +296,27 @@ class KrakenService:
 
         try:
             return await self._request_once(method_name, params, private)
-        except KrakenAPIError:
+        except KrakenAPIError as exc:
+            self._notify_error(
+                "warning",
+                f"Kraken API error: {method_name}",
+                {"method": method_name, "errors": exc.errors, "message": exc.message},
+            )
             raise
         except _CONNECTION_ERRORS as exc:
+            self._notify_error(
+                "critical",
+                f"Kraken connection failure: {method_name}",
+                {"method": method_name, "error": str(exc)},
+            )
             return await self._handle_connection_failure(method_name, params, private, exc)
         except Exception as exc:
             logger.error(f"Error querying Kraken API: {exc}")
+            self._notify_error(
+                "critical",
+                f"Kraken unexpected error: {method_name}",
+                {"method": method_name, "error": str(exc)},
+            )
             raise KrakenAPIError(f"Request failed: {str(exc)}")
 
     async def _handle_connection_failure(

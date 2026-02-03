@@ -17,6 +17,7 @@ from db.models import Order, Trade, User
 from backend.api.market import DecisionRecord, fetch_decisions_for_trade
 from backend.agents.market_analyst import market_analyst_agent
 from services.market_data import market_data_service
+from services.kraken import kraken_service, KrakenAPIError
 
 logger = logging.getLogger("cryptotrader.trades")
 router = APIRouter()
@@ -50,8 +51,13 @@ class ActiveTradeResponse(BaseModel):
     entry_time: Optional[datetime]
     is_paper: bool
     is_manual: bool
+    ai_model_used: Optional[str]
+    trade_source: str
+    current_price: Optional[float]
+    unrealized_pnl: Optional[float]
     pnl: Optional[float]
     market_conditions: Optional[Dict[str, Any]]
+    ai_managed: bool
     orders: List[OrderSummary]
     side_color: str
 
@@ -80,6 +86,20 @@ class CreateTradeRequest(BaseModel):
     side: str = Field(..., pattern="^(buy|sell)$", description="Order side")
     quantity: float = Field(..., gt=0)
     is_paper: bool = True
+
+
+class CreateSystemTradeRequest(BaseModel):
+    """Payload for creating an AI/system-originated trade."""
+
+    symbol: str = Field(..., description="Trading pair (e.g., BTC/USD)")
+    side: str = Field(..., pattern="^(buy|sell)$", description="Order side")
+    quantity: float = Field(..., gt=0)
+    entry_price: Optional[float] = Field(None, gt=0)
+    is_paper: bool = True
+    strategy_id: Optional[int] = None
+    ai_model_used: Optional[str] = None
+    entry_reasoning: Optional[Dict[str, Any]] = None
+    indicators: Optional[Dict[str, Any]] = None
 
 
 class TradeCandle(BaseModel):
@@ -161,6 +181,51 @@ async def create_manual_trade(
     return _serialize_trade(trade)
 
 
+@router.post(
+    "/system",
+    response_model=ActiveTradeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_system_trade(
+    request: CreateSystemTradeRequest,
+    db: Session = Depends(get_db),
+) -> ActiveTradeResponse:
+    """Record a trade originated by an AI agent or internal system process."""
+    now = datetime.utcnow()
+
+    trade = Trade(
+        symbol=request.symbol,
+        side=request.side,
+        quantity=request.quantity,
+        entry_price=request.entry_price,
+        is_paper=request.is_paper,
+        is_manual=False,
+        strategy_id=request.strategy_id,
+        ai_model_used=request.ai_model_used,
+        entry_time=now,
+        entry_reasoning_json=request.entry_reasoning,
+        indicators_json=request.indicators,
+    )
+
+    try:
+        db.add(trade)
+        db.commit()
+        db.refresh(trade)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to create system trade: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record system trade",
+        )
+
+    logger.info(
+        "System trade created: id=%s, symbol=%s, ai_model=%s, is_manual=False",
+        trade.id, trade.symbol, trade.ai_model_used,
+    )
+    return _serialize_trade(trade)
+
+
 class AdjustTradeRequest(BaseModel):
     """Payload for adjusting stop-loss/take-profit levels."""
 
@@ -192,7 +257,21 @@ def _build_order_summary(order: Order) -> OrderSummary:
     )
 
 
-def _serialize_trade(trade: Trade) -> ActiveTradeResponse:
+def _serialize_trade(
+    trade: Trade, current_price: Optional[float] = None
+) -> ActiveTradeResponse:
+    if trade.is_manual:
+        source = "manual"
+    elif trade.ai_model_used:
+        source = f"ai:{trade.ai_model_used}"
+    else:
+        source = "system"
+
+    unrealized_pnl = None
+    if current_price is not None and trade.entry_price is not None and trade.exit_time is None:
+        side_multiplier = 1 if trade.side.lower() == "buy" else -1
+        unrealized_pnl = (current_price - trade.entry_price) * trade.quantity * side_multiplier
+
     return ActiveTradeResponse(
         id=trade.id,
         strategy_id=trade.strategy_id,
@@ -203,8 +282,13 @@ def _serialize_trade(trade: Trade) -> ActiveTradeResponse:
         entry_time=trade.entry_time,
         is_paper=trade.is_paper,
         is_manual=trade.is_manual,
+        ai_model_used=trade.ai_model_used,
+        trade_source=source,
+        current_price=current_price,
+        unrealized_pnl=unrealized_pnl,
         pnl=trade.pnl,
         market_conditions=trade.market_conditions_json,
+        ai_managed=bool(trade.ai_managed),
         orders=[_build_order_summary(order) for order in trade.orders],
         side_color=side_color(trade.side),
     )
@@ -227,7 +311,7 @@ async def list_active_trades(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> List[ActiveTradeResponse]:
-    """Return all trades that have not been exited yet."""
+    """Return all trades that have not been exited yet, with live prices."""
     try:
         trades = (
             db.query(Trade)
@@ -243,7 +327,20 @@ async def list_active_trades(
             detail="Unable to retrieve active trades",
         )
 
-    return [_serialize_trade(trade) for trade in trades]
+    # Fetch current prices for all unique symbols in active trades
+    symbols = {trade.symbol for trade in trades}
+    price_map: Dict[str, float] = {}
+    for symbol in symbols:
+        try:
+            ticker = await kraken_service.get_ticker(symbol)
+            price_map[symbol] = float(ticker.last)
+        except Exception as exc:
+            logger.debug("Unable to fetch price for %s: %s", symbol, exc)
+
+    return [
+        _serialize_trade(trade, current_price=price_map.get(trade.symbol))
+        for trade in trades
+    ]
 
 
 @router.post(
@@ -442,4 +539,288 @@ async def explain_trade_reasoning(
         ai_decisions=decisions,
         recent_candles=[TradeCandle(**candle) for candle in candles],
         analyst_insights=analyst_insights,
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI-managed toggle
+# ---------------------------------------------------------------------------
+
+class AIToggleResponse(BaseModel):
+    trade_id: int
+    ai_managed: bool
+    message: str
+
+
+@router.put(
+    "/{trade_id}/ai-toggle",
+    response_model=AIToggleResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def toggle_ai_managed(
+    trade_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AIToggleResponse:
+    """Toggle the ai_managed flag on a trade."""
+    trade = db.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
+    if trade.exit_time is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trade is already closed")
+
+    trade.ai_managed = not bool(trade.ai_managed)
+
+    try:
+        db.commit()
+        db.refresh(trade)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to toggle ai_managed for trade %s: %s", trade_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update trade",
+        )
+
+    state = "enabled" if trade.ai_managed else "disabled"
+    logger.info("AI management %s for trade %s by %s", state, trade_id, current_user.email)
+    return AIToggleResponse(trade_id=trade.id, ai_managed=trade.ai_managed, message=f"AI management {state}")
+
+
+# ---------------------------------------------------------------------------
+# Add to position
+# ---------------------------------------------------------------------------
+
+class AddToPositionRequest(BaseModel):
+    quantity: float = Field(..., gt=0, description="Additional quantity to add")
+
+
+class AddToPositionResponse(BaseModel):
+    trade_id: int
+    new_quantity: float
+    new_entry_price: Optional[float]
+    message: str
+
+
+@router.post(
+    "/{trade_id}/add",
+    response_model=AddToPositionResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def add_to_position(
+    trade_id: int,
+    request: AddToPositionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AddToPositionResponse:
+    """Add quantity to an existing position, recomputing the weighted-average entry price."""
+    trade = db.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
+    if trade.exit_time is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trade is already closed")
+
+    # Fetch current price for the new leg
+    try:
+        ticker = await kraken_service.get_ticker(trade.symbol)
+        add_price = float(ticker.last)
+    except Exception as exc:
+        logger.warning("Unable to fetch live price for %s: %s", trade.symbol, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not fetch current price from exchange",
+        )
+
+    old_qty = trade.quantity or 0.0
+    new_qty = old_qty + request.quantity
+
+    # Weighted-average entry price
+    if trade.entry_price is not None:
+        trade.entry_price = (
+            (trade.entry_price * old_qty) + (add_price * request.quantity)
+        ) / new_qty
+    else:
+        trade.entry_price = add_price
+
+    trade.quantity = new_qty
+
+    try:
+        db.commit()
+        db.refresh(trade)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to add to position %s: %s", trade_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update position",
+        )
+
+    logger.info(
+        "Added %.4f to trade %s (new qty=%.4f) by %s",
+        request.quantity, trade_id, trade.quantity, current_user.email,
+    )
+    return AddToPositionResponse(
+        trade_id=trade.id,
+        new_quantity=trade.quantity,
+        new_entry_price=trade.entry_price,
+        message=f"Added {request.quantity} to position",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Order management
+# ---------------------------------------------------------------------------
+
+class OrderInfoResponse(BaseModel):
+    id: int
+    trade_id: Optional[int]
+    exchange_order_id: Optional[str]
+    status: str
+    order_type: str
+    side: str
+    price: Optional[float]
+    quantity: float
+    filled_quantity: float
+    created_at: datetime
+    updated_at: datetime
+    error_message: Optional[str]
+
+
+@router.get(
+    "/{trade_id}/orders",
+    response_model=List[OrderInfoResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_trade_orders(
+    trade_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[OrderInfoResponse]:
+    """Return orders for a trade, refreshing status from Kraken for open exchange orders."""
+    trade = db.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
+
+    orders = db.query(Order).filter(Order.trade_id == trade_id).order_by(Order.created_at.desc()).all()
+
+    # Sync status from exchange for orders that have an exchange_order_id and aren't terminal
+    terminal_statuses = {"closed", "canceled", "expired", "filled", "cancelled"}
+    for order in orders:
+        if order.exchange_order_id and order.status.lower() not in terminal_statuses:
+            try:
+                info = await kraken_service.get_order_status(order.exchange_order_id)
+                order.status = info.status.value
+                order.filled_quantity = float(info.filled_volume)
+            except Exception as exc:
+                logger.debug("Could not refresh order %s: %s", order.exchange_order_id, exc)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return [
+        OrderInfoResponse(
+            id=o.id,
+            trade_id=o.trade_id,
+            exchange_order_id=o.exchange_order_id,
+            status=o.status,
+            order_type=o.order_type,
+            side=o.side,
+            price=o.price,
+            quantity=o.quantity,
+            filled_quantity=o.filled_quantity,
+            created_at=o.created_at,
+            updated_at=o.updated_at,
+            error_message=o.error_message,
+        )
+        for o in orders
+    ]
+
+
+class CancelOrderResponse(BaseModel):
+    order_id: int
+    status: str
+    message: str
+
+
+@router.post(
+    "/orders/{order_id}/cancel",
+    response_model=CancelOrderResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def cancel_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CancelOrderResponse:
+    """Cancel an exchange order."""
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    if not order.exchange_order_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order has no exchange order ID — cannot cancel",
+        )
+
+    try:
+        await kraken_service.cancel_order(order.exchange_order_id)
+    except KrakenAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    order.status = "canceled"
+    try:
+        db.commit()
+        db.refresh(order)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to update canceled order %s: %s", order_id, exc)
+
+    logger.info("Order %s canceled by %s", order_id, current_user.email)
+    return CancelOrderResponse(order_id=order.id, status=order.status, message="Order canceled")
+
+
+@router.get(
+    "/orders/{order_id}/status",
+    response_model=OrderInfoResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_order_status(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OrderInfoResponse:
+    """Fetch the latest order status from the exchange and sync to DB."""
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    if order.exchange_order_id:
+        try:
+            info = await kraken_service.get_order_status(order.exchange_order_id)
+            order.status = info.status.value
+            order.filled_quantity = float(info.filled_volume)
+            db.commit()
+            db.refresh(order)
+        except KrakenAPIError as exc:
+            logger.warning("Unable to refresh order %s from exchange: %s", order_id, exc)
+        except Exception as exc:
+            db.rollback()
+            logger.error("DB error syncing order %s: %s", order_id, exc)
+
+    return OrderInfoResponse(
+        id=order.id,
+        trade_id=order.trade_id,
+        exchange_order_id=order.exchange_order_id,
+        status=order.status,
+        order_type=order.order_type,
+        side=order.side,
+        price=order.price,
+        quantity=order.quantity,
+        filled_quantity=order.filled_quantity,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+        error_message=order.error_message,
     )

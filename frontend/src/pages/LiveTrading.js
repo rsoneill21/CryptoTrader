@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Chart from '../components/Chart';
-import { marketAPI, tradesAPI } from '../services/api';
+import PositionManager from '../components/PositionManager';
+import { marketAPI, tradesAPI, systemAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
 const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
@@ -28,27 +29,12 @@ const formatCurrency = (value) => {
   }).format(normalized);
 };
 
-const formatPercent = (value, digits = 2) => {
-  if (typeof value !== 'number' && typeof value !== 'string') {
-    return '0%';
-  }
-
-  const normalized = Number(value);
-  if (!Number.isFinite(normalized)) {
-    return '0%';
-  }
-
-  const sign = normalized > 0 ? '+' : '';
-  return `${sign}${normalized.toFixed(digits)}%`;
-};
-
 const LiveTrading = () => {
   const [portfolio, setPortfolio] = useState(null);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
   const [priceTickers, setPriceTickers] = useState([]);
-  const [activeTrades, setActiveTrades] = useState([]);
-  const [tradesLoading, setTradesLoading] = useState(true);
   const [currentSymbol, setCurrentSymbol] = useState(TARGET_SYMBOL);
+  const [connectionStatus, setConnectionStatus] = useState(null);
 
   // Manual trade form state
   const [tradeSide, setTradeSide] = useState('buy');
@@ -57,20 +43,19 @@ const LiveTrading = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [portfolioRes, pricesRes, tradesRes] = await Promise.all([
+      const [portfolioRes, pricesRes, connRes] = await Promise.all([
         marketAPI.getPortfolio(),
         marketAPI.getPrices(PRICE_SYMBOLS),
-        tradesAPI.getActiveTrades(),
+        systemAPI.connectionStatus().catch(() => null),
       ]);
 
       setPortfolio(portfolioRes.data);
       setPriceTickers(pricesRes.data?.prices || []);
-      setActiveTrades(tradesRes.data || []);
+      if (connRes?.data) setConnectionStatus(connRes.data);
     } catch (error) {
       console.error('Failed to fetch live trading data', error);
     } finally {
       setPortfolioLoading(false);
-      setTradesLoading(false);
     }
   }, []);
 
@@ -114,18 +99,6 @@ const LiveTrading = () => {
     }
   };
 
-  const handleCloseTrade = async (tradeId, currentPrice) => {
-    if (!window.confirm(`Are you sure you want to close trade #${tradeId}?`)) return;
-
-    try {
-      await tradesAPI.closeTrade(tradeId, currentPrice, 'Manual close from dashboard');
-      fetchData();
-    } catch (error) {
-      console.error('Failed to close trade', error);
-      alert('Failed to close trade: ' + (error.message || 'Unknown error'));
-    }
-  };
-
   const livePositions = useMemo(() => {
     if (!portfolio?.holdings?.length) return [];
 
@@ -157,6 +130,16 @@ const LiveTrading = () => {
           <h1 className="text-3xl font-bold text-white">Execution Terminal</h1>
         </div>
         <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-800 bg-black/20">
+            <div className={`h-2 w-2 rounded-full ${connectionStatus?.reachable ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : connectionStatus?.authenticated ? 'bg-amber-400' : 'bg-gray-600'}`} />
+            <span className="text-[10px] uppercase tracking-widest text-gray-400">
+              {connectionStatus?.reachable ? 'Connected' : connectionStatus?.authenticated ? 'Disconnected' : 'No API Key'}
+            </span>
+            {connectionStatus?.latency_ms && (
+              <span className="text-[10px] text-gray-600">{connectionStatus.latency_ms}ms</span>
+            )}
+          </div>
+          <div className="h-8 w-px bg-gray-800" />
           <div className="text-right">
             <p className="text-gray-500 uppercase text-[10px] tracking-widest">Portfolio Value</p>
             <p className="text-white font-semibold">{portfolio ? formatCurrency(portfolio.total_value_usd) : '—'}</p>
@@ -216,78 +199,8 @@ const LiveTrading = () => {
             </div>
           </div>
 
-          {/* Active Trades */}
-          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-white">Active Trades</h2>
-              <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-widest">
-                {activeTrades.length} Positions
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-separate border-spacing-y-2">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-[0.2em] text-gray-500 px-4">
-                    <th className="pb-2 pl-4">Asset</th>
-                    <th className="pb-2">Side</th>
-                    <th className="pb-2">Entry Price</th>
-                    <th className="pb-2">Quantity</th>
-                    <th className="pb-2">Unrealized P&L</th>
-                    <th className="pb-2 pr-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tradesLoading ? (
-                    <tr><td colSpan="6" className="py-8 text-center text-sm text-gray-500">Loading active trades...</td></tr>
-                  ) : activeTrades.length === 0 ? (
-                    <tr><td colSpan="6" className="py-8 text-center text-sm text-gray-500">No active trades found.</td></tr>
-                  ) : (
-                    activeTrades.map(trade => {
-                      const ticker = priceMap.get(trade.symbol);
-                      const currentPrice = ticker ? parseNumber(ticker.last) : trade.entry_price;
-                      const pnl = trade.entry_price ? (currentPrice - trade.entry_price) * trade.quantity * (trade.side === 'buy' ? 1 : -1) : 0;
-                      const pnlPercent = trade.entry_price ? (pnl / (trade.entry_price * trade.quantity)) * 100 : 0;
-
-                      return (
-                        <tr key={trade.id} className="bg-black/20 hover:bg-black/40 transition group">
-                          <td className="py-4 pl-4 rounded-l-2xl">
-                            <div className="font-bold text-white">{trade.symbol}</div>
-                            <div className="text-[10px] text-gray-500 uppercase tracking-tighter">
-                              {trade.is_paper ? 'Paper' : 'Live'} · {trade.is_manual ? 'Manual' : 'AI'}
-                            </div>
-                          </td>
-                          <td className="py-4">
-                            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${trade.side === 'buy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                              {trade.side}
-                            </span>
-                          </td>
-                          <td className="py-4 text-sm text-gray-300">{formatCurrency(trade.entry_price)}</td>
-                          <td className="py-4 text-sm text-gray-300">{trade.quantity}</td>
-                          <td className="py-4">
-                            <div className={`text-sm font-bold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {formatCurrency(pnl)}
-                            </div>
-                            <div className={`text-[10px] ${pnl >= 0 ? 'text-emerald-500/60' : 'text-rose-500/60'}`}>
-                              {formatPercent(pnlPercent)}
-                            </div>
-                          </td>
-                          <td className="py-4 pr-4 text-right rounded-r-2xl">
-                            <button
-                              onClick={() => handleCloseTrade(trade.id, currentPrice)}
-                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-400 text-xs font-bold hover:bg-rose-500 hover:text-white transition"
-                            >
-                              Close
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* Active Trades — managed by PositionManager */}
+          <PositionManager />
         </div>
 
         {/* Sidebar */}
