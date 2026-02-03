@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.orm import Session
@@ -205,6 +205,54 @@ class MarketDataService:
             db.rollback()
             logger.exception("Failed to purge market data: %s", exc)
             return 0
+        finally:
+            db.close()
+
+    async def fetch_recent_candles(
+        self,
+        symbol: str,
+        reference: datetime,
+        lookback: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return the latest persisted candles for a symbol up to a reference time."""
+
+        if lookback <= 0:
+            lookback = 1
+        async with self._lock:
+            return await asyncio.to_thread(self._load_recent_candles, symbol, reference, lookback)
+
+    def _load_recent_candles(
+        self,
+        symbol: str,
+        reference: datetime,
+        lookback: int,
+    ) -> List[Dict[str, Any]]:
+        db = self._db_factory()
+        try:
+            rows = (
+                db.query(MarketData)
+                .filter(
+                    MarketData.symbol == symbol,
+                    MarketData.timestamp <= reference,
+                )
+                .order_by(MarketData.timestamp.desc())
+                .limit(lookback)
+                .all()
+            )
+            rows.reverse()
+            return [
+                {
+                    "timestamp": entry.timestamp,
+                    "open": entry.open,
+                    "high": entry.high,
+                    "low": entry.low,
+                    "close": entry.close,
+                    "volume": entry.volume,
+                    "source": entry.source,
+                    "timeframe": entry.timeframe,
+                }
+                for entry in rows
+            ]
         finally:
             db.close()
 

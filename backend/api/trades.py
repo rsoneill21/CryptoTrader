@@ -7,13 +7,16 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from core.auth import get_current_user
 from core.indicators import side_color
 from db.database import get_db
 from db.models import Order, Trade, User
+from backend.api.market import DecisionRecord, fetch_decisions_for_trade
+from backend.agents.market_analyst import market_analyst_agent
+from services.market_data import market_data_service
 
 logger = logging.getLogger("cryptotrader.trades")
 router = APIRouter()
@@ -77,6 +80,44 @@ class CreateTradeRequest(BaseModel):
     side: str = Field(..., pattern="^(buy|sell)$", description="Order side")
     quantity: float = Field(..., gt=0)
     is_paper: bool = True
+
+
+class TradeCandle(BaseModel):
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    source: str
+    timeframe: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TradeReasoningResponse(BaseModel):
+    """Detailed explanation describing why a trade was placed."""
+
+    trade_id: int
+    symbol: str
+    side: str
+    strategy_id: Optional[int]
+    entry_time: Optional[datetime]
+    exit_time: Optional[datetime]
+    entry_price: Optional[float]
+    exit_price: Optional[float]
+    quantity: float
+    is_paper: bool
+    is_manual: bool
+    entry_reasoning: Optional[Dict[str, Any]]
+    exit_reasoning: Optional[Dict[str, Any]]
+    market_conditions: Optional[Dict[str, Any]]
+    indicators: Optional[Dict[str, Any]]
+    ai_decisions: List[DecisionRecord] = Field(default_factory=list)
+    recent_candles: List[TradeCandle] = Field(default_factory=list)
+    analyst_insights: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post(
@@ -342,4 +383,63 @@ async def adjust_trade(
         adjustments=adjustment_entry,
         updated_at=now,
         message="Adjustment saved",
+    )
+
+
+@router.get(
+    "/{trade_id}/reasoning",
+    response_model=TradeReasoningResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def explain_trade_reasoning(
+    trade_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TradeReasoningResponse:
+    """Return AI reasoning, context, and analyst insights for a specific trade."""
+    trade = db.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade not found",
+        )
+
+    reference_time = trade.entry_time or trade.exit_time or datetime.utcnow()
+    candles: List[Dict[str, Any]] = []
+    try:
+        candles = await market_data_service.fetch_recent_candles(
+            trade.symbol,
+            reference_time,
+            lookback=20,
+        )
+    except Exception as exc:
+        logger.warning("Unable to load candles for trade %s: %s", trade_id, exc)
+
+    analyst_insights: List[Dict[str, Any]] = []
+    try:
+        analyst_insights = await market_analyst_agent.get_recent_insights(trade.symbol, limit=3)
+    except Exception as exc:
+        logger.warning("Analyst insights unavailable for %s: %s", trade.symbol, exc)
+
+    decisions = fetch_decisions_for_trade(db, trade_id)
+
+    return TradeReasoningResponse(
+        trade_id=trade.id,
+        symbol=trade.symbol,
+        side=trade.side,
+        strategy_id=trade.strategy_id,
+        entry_time=trade.entry_time,
+        exit_time=trade.exit_time,
+        entry_price=trade.entry_price,
+        exit_price=trade.exit_price,
+        quantity=trade.quantity,
+        is_paper=trade.is_paper,
+        is_manual=trade.is_manual,
+        entry_reasoning=trade.entry_reasoning_json,
+        exit_reasoning=trade.exit_reasoning_json,
+        market_conditions=trade.market_conditions_json,
+        indicators=trade.indicators_json,
+        ai_decisions=decisions,
+        recent_candles=[TradeCandle(**candle) for candle in candles],
+        analyst_insights=analyst_insights,
     )

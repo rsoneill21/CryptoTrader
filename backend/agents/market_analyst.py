@@ -19,6 +19,7 @@ from backend.services.kraken_ws import KrakenWSFeed, TickerUpdate, kraken_ws
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 128
+INSIGHT_HISTORY_SIZE = 24
 
 
 def _price_history() -> Deque[Decimal]:
@@ -88,6 +89,8 @@ class MarketAnalystAgent(BaseAgent):
         self._symbols = symbols or list(self.DEFAULT_SYMBOLS)
         self._symbol_states: Dict[str, SymbolState] = {}
         self._insight_channel = Channels.AI_DECISIONS
+        self._insight_history: Dict[str, Deque[Dict[str, Any]]] = {}
+        self._insight_lock = asyncio.Lock()
 
     async def on_start(self) -> None:
         try:
@@ -285,7 +288,6 @@ class MarketAnalystAgent(BaseAgent):
         if not published:
             logger.debug("Insight publish returned false: %s", insight_dict)
             return
-
         self._log_system_event(
             "info",
             "Market insight published",
@@ -296,6 +298,7 @@ class MarketAnalystAgent(BaseAgent):
                 "score": insight.score,
             },
         )
+        await self._archive_insight(insight.symbol, insight_dict)
 
     def _calculate_sma(self, prices: Deque[Decimal], window: int) -> Optional[Decimal]:
         if len(prices) < window:
@@ -303,6 +306,23 @@ class MarketAnalystAgent(BaseAgent):
         window_values = list(prices)[-window:]
         total = sum(window_values, Decimal("0"))
         return total / Decimal(window)
+
+    async def _archive_insight(self, symbol: str, insight: Dict[str, Any]) -> None:
+        if not symbol:
+            return
+        async with self._insight_lock:
+            storage = self._insight_history.setdefault(symbol, deque(maxlen=INSIGHT_HISTORY_SIZE))
+            storage.append(insight.copy())
+
+    async def get_recent_insights(self, symbol: str, limit: int = 3) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            limit = INSIGHT_HISTORY_SIZE
+        async with self._insight_lock:
+            history = list(self._insight_history.get(symbol, []))
+        if not history:
+            return []
+        window = history[-limit:]
+        return [entry.copy() for entry in window]
 
     def _calculate_momentum(self, prices: Deque[Decimal], lookback: int) -> Optional[Decimal]:
         if len(prices) < lookback + 1:

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from db.database import fetch_ai_decisions, get_db
+from db.models import AIDecision
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
 from services.kraken_ws import KrakenWSFeed, kraken_ws
 from services.portfolio import PortfolioSnapshot, portfolio_service
@@ -148,6 +149,21 @@ def _map_decision(record: Any) -> DecisionRecord:
         near_miss=bool(record.near_miss),
         near_miss_reason=record.near_miss_reason,
     )
+
+
+def fetch_decisions_for_trade(
+    db: Session,
+    trade_id: int,
+    limit: int = 10,
+) -> List[DecisionRecord]:
+    records = (
+        db.query(AIDecision)
+        .filter(AIDecision.related_trade_id == trade_id)
+        .order_by(AIDecision.timestamp.desc())
+        .limit(max(1, min(limit, 50)))
+        .all()
+    )
+    return [_map_decision(record) for record in records]
 
 def _handle_kraken_error(exc: KrakenAPIError) -> HTTPException:
     return HTTPException(
