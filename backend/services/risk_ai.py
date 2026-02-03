@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,17 @@ def _env_provider() -> "AIProvider":
         return AIProvider.OPENAI
 
 
+class TradingStyleProfile(BaseModel):
+    """Derived trading style summary used to bias AI adjustments."""
+
+    dominant_side: str
+    risk_tolerance: str
+    avg_trade_duration_minutes: Optional[float]
+    favorite_symbols: List[str]
+    aggressiveness_score: float
+    recent_trade_count: int
+
+
 class RiskContext(BaseModel):
     """Snapshot of the current risk posture that feeds into the AI prompt."""
 
@@ -64,6 +76,7 @@ class RiskContext(BaseModel):
     theme_mode: str
     theme_high_contrast: bool
     theme_auto_follow_system: bool
+    style_profile: TradingStyleProfile
 
 
 class RiskAdjustment(BaseModel):
@@ -312,32 +325,56 @@ class RiskAIService:
             return None
 
     def _build_heuristic_recommendation(self, context: RiskContext) -> RiskRecommendation:
-        adjustments: List[RiskAdjustment] = []
+        profile = context.style_profile
         suggestions: Dict[str, float] = {}
 
-        if context.daily_loss >= context.daily_loss_limit * 0.6:
-            suggestions["max_position_size_pct"] = max(0.5, context.max_position_size_pct * 0.85)
-            suggestions["max_concurrent_positions"] = max(1, context.max_concurrent_positions - 1)
+        if context.daily_loss_limit > 0 and context.daily_loss >= context.daily_loss_limit * 0.6:
+            suggestions["max_position_size_pct"] = max(
+                0.5,
+                context.max_position_size_pct * (0.85 + 0.05 * (1 - profile.aggressiveness_score)),
+            )
+            suggestions["max_concurrent_positions"] = max(
+                1,
+                context.max_concurrent_positions
+                - (1 if profile.risk_tolerance != "aggressive" else 0),
+            )
         elif context.win_rate >= 0.6 and context.current_risk_score <= context.max_risk_score * 0.5:
-            suggestions["max_position_size_pct"] = min(context.max_position_size_pct * 1.1, 20.0)
+            suggestions["max_position_size_pct"] = min(
+                context.max_position_size_pct * (1 + 0.05 * profile.aggressiveness_score),
+                20.0,
+            )
             suggestions["max_concurrent_positions"] = context.max_concurrent_positions + 1
 
-        if context.current_risk_score >= context.max_risk_score * 0.9:
+        if context.max_risk_score > 0 and context.current_risk_score >= context.max_risk_score * 0.9:
             suggestions["max_position_size_pct"] = min(
                 suggestions.get("max_position_size_pct", context.max_position_size_pct) * 0.9,
                 context.max_position_size_pct,
             )
 
-        if not suggestions:
-            suggestions["max_position_size_pct"] = min(context.max_position_size_pct * 1.05, 20.0)
+        suggestions = self._refine_suggestions_with_style(context, suggestions)
 
+        if not suggestions:
+            suggestions["max_position_size_pct"] = min(
+                context.max_position_size_pct * (1 + 0.02 * profile.aggressiveness_score),
+                20.0,
+            )
+
+        adjustments: List[RiskAdjustment] = []
+        symbol_note = (
+            f" Favorite symbols: {', '.join(profile.favorite_symbols)}."
+            if profile.favorite_symbols
+            else ""
+        )
         for parameter, suggested in suggestions.items():
             current = self._current_value_lookup(context).get(parameter)
             if current is None:
                 continue
             if abs(suggested - current) < 0.01:
                 continue
-            rationale = "Heuristic adjustment based on recent risk posture."
+            rationale = (
+                f"Heuristic adjustment aligned with your {profile.risk_tolerance} tolerance "
+                f"and {profile.dominant_side} bias.{symbol_note}"
+            )
             adjustments.append(
                 RiskAdjustment(
                     parameter=parameter,
@@ -359,8 +396,12 @@ class RiskAIService:
                 )
             )
 
+        summary = (
+            f"Fallback heuristic risk recommendation tuned to {profile.risk_tolerance} tolerance."
+        )
+
         return RiskRecommendation(
-            summary="Fallback heuristic risk recommendation",
+            summary=summary,
             timestamp=datetime.utcnow(),
             adjustments=adjustments,
             confidence=HEURISTIC_CONFIDENCE,
@@ -368,6 +409,61 @@ class RiskAIService:
             raw_response="",
             context=context,
         )
+
+    def _refine_suggestions_with_style(
+        self, context: RiskContext, suggestions: Dict[str, float]
+    ) -> Dict[str, float]:
+        if not suggestions:
+            return suggestions
+
+        profile = context.style_profile
+        refined = dict(suggestions)
+        pos_key = "max_position_size_pct"
+        concurrent_key = "max_concurrent_positions"
+        current_pos = refined.get(pos_key, context.max_position_size_pct)
+        current_concurrent = refined.get(
+            concurrent_key, context.max_concurrent_positions
+        )
+
+        if profile.risk_tolerance == "aggressive":
+            refined[concurrent_key] = max(
+                current_concurrent, context.max_concurrent_positions + 1
+            )
+            refined[pos_key] = min(
+                20.0,
+                max(
+                    current_pos,
+                    context.max_position_size_pct
+                    * (1 + 0.03 * profile.aggressiveness_score),
+                ),
+            )
+        elif profile.risk_tolerance == "conservative":
+            reduction = max(
+                0.9,
+                1.0 - 0.04 * (1.0 - profile.aggressiveness_score),
+            )
+            refined[pos_key] = min(
+                current_pos, context.max_position_size_pct * reduction
+            )
+            refined[concurrent_key] = max(
+                1,
+                min(
+                    current_concurrent,
+                    context.max_concurrent_positions
+                    - (1 if profile.aggressiveness_score < 0.4 else 0),
+                ),
+            )
+        else:
+            refined[pos_key] = min(
+                current_pos,
+                context.max_position_size_pct
+                * (1 + 0.02 * profile.aggressiveness_score),
+            )
+
+        if refined.get(pos_key) is not None:
+            refined[pos_key] = max(refined[pos_key], 0.0)
+
+        return refined
 
     def _persist_recommendation(self, db: Session, recommendation: RiskRecommendation) -> None:
         settings = self._ensure_risk_settings(db)
@@ -417,6 +513,9 @@ class RiskAIService:
         session_snapshot = store.session_snapshot()
         notification_snapshot = store.notification_snapshot()
         theme_snapshot = store.theme_snapshot()
+        style_profile = self._derive_style_profile(
+            recent_trades, settings, daily_loss
+        )
 
         return RiskContext(
             reference_time=now,
@@ -439,6 +538,7 @@ class RiskAIService:
             theme_mode=theme_snapshot["mode"],
             theme_high_contrast=bool(theme_snapshot["high_contrast"]),
             theme_auto_follow_system=bool(theme_snapshot["auto_follow_system"]),
+            style_profile=style_profile,
         )
 
     def _ensure_risk_settings(self, db: Session) -> RiskSettings:
@@ -451,3 +551,62 @@ class RiskAIService:
         db.commit()
         db.refresh(settings)
         return settings
+
+    def _derive_style_profile(
+        self,
+        trades: List[Trade],
+        settings: RiskSettings,
+        daily_loss: float,
+    ) -> TradingStyleProfile:
+        side_counts = Counter((trade.side or "").lower() for trade in trades if trade.side)
+        dominant_side = side_counts.most_common(1)[0][0] if side_counts else "neutral"
+        symbol_counts = Counter((trade.symbol or "").upper() for trade in trades if trade.symbol)
+        favorite_symbols = [symbol for symbol, _ in symbol_counts.most_common(3)]
+
+        durations = [
+            (trade.exit_time - trade.entry_time).total_seconds() / 60
+            for trade in trades
+            if trade.entry_time and trade.exit_time and trade.exit_time >= trade.entry_time
+        ]
+        avg_duration = sum(durations) / len(durations) if durations else None
+
+        max_risk_score = max(settings.max_risk_score or 1.0, 1.0)
+        risk_ratio = (settings.current_risk_score or 0.0) / max_risk_score
+        if risk_ratio <= 0.35:
+            risk_tolerance = "conservative"
+        elif risk_ratio <= 0.65:
+            risk_tolerance = "balanced"
+        else:
+            risk_tolerance = "aggressive"
+
+        aggressiveness = self._estimate_aggressiveness_score(
+            settings,
+            daily_loss,
+            len(trades),
+        )
+
+        return TradingStyleProfile(
+            dominant_side=dominant_side,
+            risk_tolerance=risk_tolerance,
+            avg_trade_duration_minutes=avg_duration,
+            favorite_symbols=favorite_symbols,
+            aggressiveness_score=aggressiveness,
+            recent_trade_count=len(trades),
+        )
+
+    def _estimate_aggressiveness_score(
+        self,
+        settings: RiskSettings,
+        daily_loss: float,
+        recent_trade_count: int,
+    ) -> float:
+        position_scale = min(1.0, (settings.max_position_size_pct or 0.0) / 25.0)
+        concurrency_scale = min(1.0, (settings.max_concurrent_positions or 0) / 5.0)
+        activity_scale = min(1.0, recent_trade_count / 25.0)
+        loss_penalty = min(
+            1.0,
+            daily_loss
+            / max(settings.daily_loss_limit or 1.0, 1.0),
+        )
+        raw_score = position_scale * 0.4 + concurrency_scale * 0.25 + activity_scale * 0.25 - loss_penalty * 0.3
+        return float(max(0.0, min(1.0, raw_score)))

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ChatWindow from '../components/ChatWindow';
+import api from '../services/api';
 
 const CHAT_TONE_EVENT = 'cryptotrader:chatTonePreferenceChanged';
 const CHAT_TONE_STORAGE_KEY = 'cryptotrader.ai_chat_tone';
@@ -98,12 +99,63 @@ if (typeof window !== 'undefined') {
   ensureChatToneFetchInterceptor();
 }
 
+const formatDurationMinutes = (value) => {
+  if (value == null || Number.isNaN(Number(value))) {
+    return '—';
+  }
+  return `${Math.round(Number(value))} min`;
+};
+
+const formatAggressivenessScore = (value) => {
+  if (value == null || Number.isNaN(Number(value))) {
+    return '—';
+  }
+  return `${Math.round(Number(value) * 100)}%`;
+};
+
+const formatFavoriteSymbols = (symbols) =>
+  symbols && symbols.length ? symbols.join(', ') : 'Gathering symbols';
+
 const AIChat = () => {
   const [tonePreference, setTonePreference] = useState(loadStoredChatTone);
+  const [styleProfile, setStyleProfile] = useState(null);
+  const [styleLoading, setStyleLoading] = useState(true);
+  const [styleError, setStyleError] = useState('');
 
   useEffect(() => {
     setGlobalChatTone(tonePreference);
   }, [tonePreference]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadStyleProfile = async () => {
+      setStyleLoading(true);
+      setStyleError('');
+      try {
+        const response = await api.get('/api/risk/settings/ai/context');
+        if (!isMounted) {
+          return;
+        }
+        const profile = response.data?.context?.style_profile ?? null;
+        setStyleProfile(profile);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+        setStyleError(error?.message || 'Unable to load AI preferences.');
+      } finally {
+        if (isMounted) {
+          setStyleLoading(false);
+        }
+      }
+    };
+
+    loadStyleProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -141,6 +193,57 @@ const AIChat = () => {
           <p className="text-xs text-gray-400 max-w-3xl">{currentToneDetails.description}</p>
         </div>
       </header>
+      <div className="rounded-[34px] border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/60 p-6 shadow-[0_28px_60px_rgba(2,6,23,0.9)]">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-sky-300">Learned preferences</p>
+            <h2 className="text-2xl font-semibold text-white">Trading style snapshot</h2>
+          </div>
+          <span className="text-[10px] uppercase tracking-[0.3em] text-gray-400">
+            {styleLoading ? 'Updating now' : 'Recent profile'}
+          </span>
+        </div>
+        {styleLoading ? (
+          <p className="mt-3 text-sm text-gray-400">Aligning recommendations with your habits…</p>
+        ) : styleError ? (
+          <p className="mt-3 text-sm text-rose-300">{styleError}</p>
+        ) : styleProfile ? (
+          <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {[
+              { label: 'Dominant bias', value: styleProfile.dominant_side ?? 'Neutral' },
+              { label: 'Risk tolerance', value: styleProfile.risk_tolerance ?? 'Balanced' },
+              {
+                label: 'Avg trade duration',
+                value: formatDurationMinutes(styleProfile.avg_trade_duration_minutes),
+              },
+              {
+                label: 'Favorite symbols',
+                value: formatFavoriteSymbols(styleProfile.favorite_symbols),
+              },
+              {
+                label: 'Aggressiveness',
+                value: formatAggressivenessScore(styleProfile.aggressiveness_score),
+              },
+              {
+                label: 'Recent trades',
+                value: styleProfile.recent_trade_count ?? 0,
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-2xl border border-slate-800/60 bg-black/40 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.45)]"
+              >
+                <dt className="text-[10px] uppercase tracking-[0.3em] text-gray-500">{item.label}</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="mt-3 text-sm text-gray-400">
+            The AI is still building your profile from recent trades and conversations.
+          </p>
+        )}
+      </div>
       <ChatWindow />
     </section>
   );
