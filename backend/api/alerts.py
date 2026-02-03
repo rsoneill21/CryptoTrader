@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,18 @@ from db.models import Alert
 router = APIRouter()
 
 ACTIONED_STATUSES = {"actioned", "dismissed"}
+VALID_SEVERITIES = {"info", "warning", "critical"}
+
+
+def _normalize_severity_value(value: Optional[str], *, default: Optional[str] = None) -> Optional[str]:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if not normalized:
+        raise ValueError("Severity cannot be blank.")
+    if normalized not in VALID_SEVERITIES:
+        raise ValueError(f"Severity must be one of {', '.join(sorted(VALID_SEVERITIES))}.")
+    return normalized
 
 
 class AlertResponse(BaseModel):
@@ -56,6 +68,13 @@ class AlertCreateRequest(BaseModel):
     actioned_at: Optional[datetime] = None
     ai_confidence: Optional[float] = None
 
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _validate_severity(cls, value: Optional[str]) -> str:
+        normalized = _normalize_severity_value(value, default="info")
+        assert normalized is not None
+        return normalized
+
 
 class AlertUpdateRequest(BaseModel):
     title: Optional[str] = None
@@ -65,6 +84,11 @@ class AlertUpdateRequest(BaseModel):
     action_taken: Optional[str] = None
     actioned_at: Optional[datetime] = None
     ai_confidence: Optional[float] = None
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _validate_severity(cls, value: Optional[str]) -> Optional[str]:
+        return _normalize_severity_value(value, default=None)
 
 
 class AlertStatusUpdateRequest(BaseModel):
@@ -148,10 +172,19 @@ async def list_alerts(
     db: Session = Depends(get_db),
 ) -> AlertListResponse:
     """List alerts with optional filtering and pagination."""
+    severity_filter = None
+    if severity:
+        try:
+            severity_filter = _normalize_severity_value(severity)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            )
     try:
         query = db.query(Alert)
-        if severity:
-            query = query.filter(Alert.severity == severity)
+        if severity_filter:
+            query = query.filter(Alert.severity == severity_filter)
         if status_filter:
             query = query.filter(Alert.status == status_filter)
         if alert_type:

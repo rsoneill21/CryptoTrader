@@ -40,3 +40,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 132 · Sell Actions Color
 - **Status**: Implemented in backend/trade API serialization.
 - **Details**: Order summaries now include the `side_color` payload, ensuring sell/short actions consistently surface the shared red tone (`backend/core/indicators.SIDE_COLOR_MAP`) for downstream UI use.
+
+### Feature 134 · Critical Alerts Color
+- **Status**: Implemented in backend alerts API and the alerts page.
+- **Details**: Severity values are now normalized to lowercase whenever alerts are created or updated so the UI can consistently recognize `critical`, and both the alert list rows and detail panel apply red borders/shadows when the normalized severity is critical so these warnings stand out from other severities.

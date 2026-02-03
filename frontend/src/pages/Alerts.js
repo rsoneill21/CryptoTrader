@@ -24,9 +24,45 @@ const STATUS_COLORS = {
 
 const SEVERITY_BADGE_BASE = 'rounded-full px-3 py-1 font-semibold uppercase tracking-wide';
 
+const normalizeSeverity = (value) => {
+  if (value == null) {
+    return '';
+  }
+  return String(value).trim().toLowerCase();
+};
+
+const isCriticalSeverity = (value) => normalizeSeverity(value) === 'critical';
+
 const getSeverityBadgeClasses = (severity, sizeClass = 'text-[11px]') => {
-  const severityClasses = severity ? SEVERITY_STYLES[severity] : 'bg-gray-700 text-white';
+  const normalized = normalizeSeverity(severity);
+  const severityClasses = normalized ? SEVERITY_STYLES[normalized] : 'bg-gray-700 text-white';
   return `${SEVERITY_BADGE_BASE} ${sizeClass} ${severityClasses}`;
+};
+
+const ALERT_BUTTON_BASE =
+  'flex w-full items-start justify-between rounded-2xl border px-4 py-3 text-left transition-all duration-150';
+const ALERT_BUTTON_SELECTED =
+  'border-blue-500 bg-blue-500/10 shadow-[0_0_0_1px_rgba(37,99,235,0.6)]';
+const ALERT_BUTTON_UNSELECTED =
+  'border-transparent hover:border-gray-600 hover:bg-white/5';
+const CRITICAL_ALERT_SELECTED =
+  'border-red-500 bg-red-500/15 shadow-[0_0_0_1px_rgba(234,88,12,0.8)]';
+const CRITICAL_ALERT_UNSELECTED =
+  'border-red-500/70 hover:border-red-400 hover:bg-red-500/10 shadow-[0_0_0_1px_rgba(248,113,113,0.6)]';
+
+const getAlertRowClasses = (alert, isSelected) => {
+  const critical = isCriticalSeverity(alert?.severity);
+  if (isSelected) {
+    return `${ALERT_BUTTON_BASE} ${critical ? CRITICAL_ALERT_SELECTED : ALERT_BUTTON_SELECTED}`;
+  }
+  return `${ALERT_BUTTON_BASE} ${critical ? CRITICAL_ALERT_UNSELECTED : ALERT_BUTTON_UNSELECTED}`;
+};
+
+const getDetailPanelClasses = (severity) => {
+  if (isCriticalSeverity(severity)) {
+    return 'rounded-2xl border border-red-600/80 bg-gradient-to-b from-red-900/80 to-red-950/70 shadow-lg shadow-red-900/70';
+  }
+  return 'rounded-2xl border border-gray-700 bg-gradient-to-b from-slate-900 to-gray-900/60 shadow-lg shadow-black/40';
 };
 
 const formatTimestamp = (value) => {
@@ -123,7 +159,7 @@ const AlertsPage = () => {
     let result = [...alerts];
 
     if (filters.severity !== 'all') {
-      result = result.filter((alert) => alert.severity === filters.severity);
+      result = result.filter((alert) => normalizeSeverity(alert.severity) === filters.severity);
     }
     if (filters.status !== 'all') {
       result = result.filter((alert) => alert.status === filters.status);
@@ -315,11 +351,7 @@ const AlertsPage = () => {
                 <button
                   key={alert.id}
                   type="button"
-                  className={`flex w-full items-start justify-between rounded-2xl border px-4 py-3 text-left transition-all duration-150 ${
-                    selectedAlert?.id === alert.id
-                      ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_0_1px_rgba(37,99,235,0.6)]'
-                      : 'border-transparent hover:border-gray-600 hover:bg-white/5'
-                  }`}
+                  className={getAlertRowClasses(alert, selectedAlert?.id === alert.id)}
                   onClick={() => setSelectedAlert(alert)}
                 >
                   <div className="max-w-[70%] space-y-1">
@@ -349,7 +381,7 @@ const AlertsPage = () => {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-2xl border border-gray-700 bg-gradient-to-b from-slate-900 to-gray-900/60 p-6 shadow-lg shadow-black/40">
+          <div className={`${getDetailPanelClasses(selectedAlert?.severity)} p-6`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-widest text-gray-400">Alert detail</p>
