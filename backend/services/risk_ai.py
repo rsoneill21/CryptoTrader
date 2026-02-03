@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.settings import get_user_settings_store
+from db.database import SessionLocal
 from db.models import RiskSettings, StrategyPerformance, Trade
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ class RiskAIService:
     async def recommend_adjustments(self, db: Session) -> RiskRecommendation:
         """Generate a new recommendation and save it to the risk_settings record."""
 
-        context = self._build_context(db)
+        context = await self._async_build_context()
         try:
             provider = self._select_provider()
             raw_response = await self._call_provider(provider, context)
@@ -130,6 +131,25 @@ class RiskAIService:
 
         self._persist_recommendation(db, recommendation)
         return recommendation
+
+    async def _async_build_context(self) -> RiskContext:
+        return await asyncio.to_thread(self._build_context_with_session)
+
+    def _build_context_with_session(self) -> RiskContext:
+        db = SessionLocal()
+        try:
+            return self._build_context(db)
+        finally:
+            db.close()
+
+    async def context_and_heuristic(self) -> tuple[RiskContext, RiskRecommendation]:
+        context = await self._async_build_context()
+        recommendation = self._build_heuristic_recommendation(context)
+        return context, recommendation
+
+    async def heuristics_recommendation(self) -> RiskRecommendation:
+        context = await self._async_build_context()
+        return self._build_heuristic_recommendation(context)
 
     def _select_provider(self, candidate: Optional[AIProvider] = None) -> AIProvider:
         """Choose an available AI provider."""

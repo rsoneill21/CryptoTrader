@@ -8,6 +8,7 @@ CHANNELS=(
   triad-cryptotrader-claude
   triad-cryptotrader-codex
   triad-cryptotrader-gemini
+  triad-cryptotrader-strategy
 )
 
 for c in "${CHANNELS[@]}"; do

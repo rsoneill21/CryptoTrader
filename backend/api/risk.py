@@ -5,13 +5,14 @@ import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, conint, confloat, model_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, conint, confloat, model_validator, validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.settings import ThemeMode, get_user_settings_store
 from db.database import get_db
 from db.models import RiskSettings
+from backend.services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
 router = APIRouter()
 
@@ -175,6 +176,15 @@ class APIKeyListResponse(BaseModel):
     keys: List[APIKeySummary]
 
 
+class RiskAIContextResponse(BaseModel):
+    """Current risk context plus heuristics for AI collaboration."""
+
+    context: RiskContext
+    heuristic_recommendation: RiskRecommendation
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 def _get_latest_settings(db: Session) -> RiskSettings:
     """Return the most recently written risk settings record, creating one if necessary."""
 
@@ -280,6 +290,22 @@ async def get_risk_score(db: Session = Depends(get_db)) -> RiskScoreResponse:
         ) from exc
 
     return _build_score_response(settings)
+
+
+@router.get("/settings/ai/context", response_model=RiskAIContextResponse)
+async def get_risk_ai_context() -> RiskAIContextResponse:
+    """Return the latest risk context plus heuristic guidance for strategy ideation."""
+
+    service = RiskAIService()
+    try:
+        context, heuristic = await service.context_and_heuristic()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to compute AI risk context at this time.",
+        ) from exc
+
+    return RiskAIContextResponse(context=context, heuristic_recommendation=heuristic)
 
 
 @router.get("/settings/session", response_model=SessionSettingsResponse)

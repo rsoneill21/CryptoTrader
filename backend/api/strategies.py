@@ -9,7 +9,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
-
 from core.auth import get_current_user
 from db.database import get_db
 from db.models import Strategy, StrategyPerformance, User, AIDecision
@@ -28,6 +27,7 @@ from backend.agents.market_analyst import market_analyst_agent
 from backend.agents.sentiment_agent import SentimentSummary, sentiment_agent
 from backend.services.market_data import market_data_service
 from backend.services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
+from backend.services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
 logger = logging.getLogger("cryptotrader.strategies")
 router = APIRouter()
@@ -222,6 +222,12 @@ class StrategySuggestionDetail(BaseModel):
     recommendations: List[str]
     ai_proposal: Optional[StrategyProposal]
     ai_error: Optional[str] = None
+    risk_context: Optional[RiskContext] = None
+    risk_recommendation: Optional[RiskRecommendation] = None
+    risk_summary: str = Field(
+        ...,
+        description="Human-readable summary of the current risk posture and suggestions.",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -361,10 +367,39 @@ def _compile_market_summary(
     return " ".join(fragments).strip()
 
 
+def _format_risk_summary(
+    context: Optional[RiskContext],
+    recommendation: Optional[RiskRecommendation],
+) -> str:
+    if not context:
+        return "Risk context unavailable."
+    pieces: List[str] = []
+    if context.max_risk_score > 0:
+        pieces.append(
+            f"Risk score {context.current_risk_score:.1f}"
+            f" / {context.max_risk_score:.1f} threshold"
+        )
+    else:
+        pieces.append(f"Risk score {context.current_risk_score:.1f}")
+    pieces.append(
+        f"Daily loss ${context.daily_loss:.2f} / limit ${context.daily_loss_limit:.2f}"
+    )
+    if context.max_drawdown_pct > 0:
+        pieces.append(
+            f"Drawdown {context.recent_drawdown_pct:.1f}% / "
+            f"{context.max_drawdown_pct:.1f}% limit"
+        )
+    if recommendation and recommendation.adjustments:
+        pieces.append(f"Suggested adjustment: {recommendation.summary}")
+
+    return " · ".join(pieces)
+
+
 def _build_strategy_proposal_input(
     symbol: str,
     payload: StrategySuggestionRequest,
     market_summary: str,
+    risk_summary: Optional[str] = None,
 ) -> StrategyProposalInput:
     indicators = [item.strip() for item in payload.preferred_indicators if item and item.strip()]
     request_kwargs: Dict[str, Any] = {
@@ -380,12 +415,23 @@ def _build_strategy_proposal_input(
         request_kwargs["max_positions"] = payload.max_positions
     if payload.notes:
         request_kwargs["notes"] = payload.notes
+    if risk_summary:
+        notes = request_kwargs.get("notes", "")
+        combined = "\n\n".join(
+            part
+            for part in (notes.strip() if notes else "", risk_summary)
+            if part
+        )
+        request_kwargs["notes"] = combined
 
     return StrategyProposalInput(**request_kwargs)
 
 
 async def _build_strategy_suggestion(
-    symbol: str, payload: StrategySuggestionRequest
+    symbol: str,
+    payload: StrategySuggestionRequest,
+    risk_context: Optional[RiskContext],
+    risk_recommendation: Optional[RiskRecommendation],
 ) -> StrategySuggestionDetail:
     technical_payload = await market_data_service.summarize_symbol(
         symbol, lookback=payload.lookback
@@ -414,10 +460,16 @@ async def _build_strategy_suggestion(
         sentiment_summary,
     )
 
+    risk_summary = _format_risk_summary(risk_context, risk_recommendation)
     proposal: Optional[StrategyProposal] = None
     ai_error: Optional[str] = None
     try:
-        request_payload = _build_strategy_proposal_input(symbol, payload, market_summary)
+        request_payload = _build_strategy_proposal_input(
+            symbol,
+            payload,
+            market_summary,
+            risk_summary=risk_summary,
+        )
         proposal = await strategy_ai_service.propose_strategy(request_payload)
     except Exception as exc:
         logger.warning("Strategy AI suggestion failed for %s: %s", symbol, exc)
@@ -433,6 +485,9 @@ async def _build_strategy_suggestion(
         recommendations=recommendations,
         ai_proposal=proposal,
         ai_error=ai_error,
+        risk_context=risk_context,
+        risk_recommendation=risk_recommendation,
+        risk_summary=risk_summary,
     )
 
 
@@ -443,12 +498,24 @@ async def suggest_strategies(
 ) -> StrategySuggestionResponse:
     """Generate AI-grounded strategy ideas for the requested market conditions."""
     suggestions: List[StrategySuggestionDetail] = []
+    risk_service = RiskAIService()
+    risk_context: Optional[RiskContext] = None
+    risk_recommendation: Optional[RiskRecommendation] = None
+    try:
+        risk_context, risk_recommendation = await risk_service.context_and_heuristic()
+    except Exception as exc:
+        logger.warning("Failed to collect risk context for suggestions: %s", exc)
 
     for raw_symbol in payload.symbols:
         normalized_symbol = _normalize_trading_pair(raw_symbol, parameter="symbol")
 
         try:
-            suggestion = await _build_strategy_suggestion(normalized_symbol, payload)
+            suggestion = await _build_strategy_suggestion(
+                normalized_symbol,
+                payload,
+                risk_context,
+                risk_recommendation,
+            )
             suggestions.append(suggestion)
         except HTTPException:
             raise

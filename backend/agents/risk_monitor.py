@@ -46,6 +46,7 @@ class RiskAlertPayload(BaseModel):
     threshold: float
     breakdown: RiskScoreBreakdown
     reasons: List[str]
+    guardrails: Dict[str, Any]
 
 
 @dataclass
@@ -358,6 +359,7 @@ class RiskMonitorAgent(BaseAgent):
             threshold=threshold,
             breakdown=breakdown,
             reasons=reasons,
+            guardrails=self._build_guardrails_context(snapshot, score, threshold),
         )
         await self._publish_alert(payload)
         self._last_alert_time = now
@@ -396,6 +398,23 @@ class RiskMonitorAgent(BaseAgent):
                 f"({breakdown.drawdown_pct:.1f}% >= {snapshot.max_drawdown_pct:.1f}%)."
             )
         return reasons
+
+    def _build_guardrails_context(
+        self, snapshot: RiskSnapshot, score: float, threshold: float
+    ) -> Dict[str, Any]:
+        return {
+            "max_position_size_pct": snapshot.max_position_size_pct,
+            "max_concurrent_positions": snapshot.max_concurrent_positions,
+            "daily_loss_limit": snapshot.daily_loss_limit,
+            "max_drawdown_pct": snapshot.max_drawdown_pct,
+            "max_risk_score": snapshot.max_risk_score,
+            "drawdown_pct": snapshot.drawdown_pct,
+            "daily_loss_value": snapshot.daily_loss_value,
+            "open_positions": len(snapshot.open_trades),
+            "equity_estimate": snapshot.equity_estimate,
+            "score": round(score, 2),
+            "threshold": threshold,
+        }
 
     async def _publish_alert(self, payload: RiskAlertPayload) -> bool:
         payload_dict = payload.model_dump()
