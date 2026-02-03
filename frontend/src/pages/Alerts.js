@@ -4,7 +4,7 @@ import api from '../services/api';
 
 const SEVERITY_STYLES = {
   info: 'bg-blue-500 text-black dark:text-white',
-  warning: 'bg-yellow-400 text-black',
+  warning: 'bg-yellow-400 text-black dark:text-gray-900',
   critical: 'bg-red-500 text-white',
 };
 
@@ -20,6 +20,13 @@ const STATUS_COLORS = {
   viewed: 'text-gray-300',
   actioned: 'text-green-400',
   dismissed: 'text-red-300',
+};
+
+const SEVERITY_BADGE_BASE = 'rounded-full px-3 py-1 font-semibold uppercase tracking-wide';
+
+const getSeverityBadgeClasses = (severity, sizeClass = 'text-[11px]') => {
+  const severityClasses = severity ? SEVERITY_STYLES[severity] : 'bg-gray-700 text-white';
+  return `${SEVERITY_BADGE_BASE} ${sizeClass} ${severityClasses}`;
 };
 
 const formatTimestamp = (value) => {
@@ -331,14 +338,14 @@ const AlertsPage = () => {
                     <span className={`text-xs font-semibold ${STATUS_COLORS[alert.status] || 'text-gray-300'}`}>
                       {STATUS_LABELS[alert.status] || alert.status}
                     </span>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-gray-200">
+                    <span className={getSeverityBadgeClasses(alert.severity)}>
                       {alert.severity?.toUpperCase()}
                     </span>
                   </div>
                 </button>
               ))}
+              </div>
             </div>
-          </div>
         </div>
 
         <div className="space-y-4">
@@ -348,9 +355,7 @@ const AlertsPage = () => {
                 <p className="text-sm font-semibold uppercase tracking-widest text-gray-400">Alert detail</p>
                 <h2 className="text-xl font-semibold text-white">{selectedAlert ? selectedAlert.title : 'Select an alert'}</h2>
               </div>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${selectedAlert ? SEVERITY_STYLES[selectedAlert.severity] || 'bg-gray-700 text-white' : 'bg-gray-700 text-white'}`}
-              >
+              <span className={getSeverityBadgeClasses(selectedAlert?.severity, 'text-xs')}>
                 {selectedAlert ? selectedAlert.severity : '—'}
               </span>
             </div>
