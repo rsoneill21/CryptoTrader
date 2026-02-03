@@ -154,3 +154,14 @@ Phase 11 ◄─────────────┘
 ```
 
 Tasks are only `available` when all their phase dependencies are satisfied.
+
+## Mobile Chart Checklist (Phase 9)
+
+When a task references trading charts or mobile-readability, follow these steps before claiming work:
+- Resize the Live Trading or chart page to a typical phone width (≈360–480px) and ensure the candlestick area still renders without overflow.
+- Confirm the chart container, axes, and timeframe selector stack or resize so axis labels and buttons remain legible and reachable.
+- Interact with the chart (pan/zoom/timeframe) using touch-like gestures or mouse drag to verify nothing breaks hiding on narrow screens.
+- Make sure any supporting controls, legends, or overlays (indicators, annotations, alerts) wrap or hide gracefully instead of clipping important data.
+- If any layout needs tweaking, target `frontend/src/pages/LiveTrading.js`, `frontend/src/components/Chart.js`, `ChartIndicators.js`, and `ChartAnnotations.js` alongside surrounding layout components.
+
+Mention this checklist in your status updates or review notes so future reviewers know the mobile layout was validated.

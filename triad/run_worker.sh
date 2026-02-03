@@ -52,6 +52,10 @@ build_task_prompt() {
     local TASK_ID="$1"
     local TASK_INFO
     TASK_INFO=$(python3 triad/bin/task_status.py "$TASK_ID" 2>&1)
+    local FEATURE_PROMPT=""
+    if [[ "$TASK_ID" == "feature-137" ]]; then
+        FEATURE_PROMPT=$'8. Extra Guidance for feature-137:\n   - Resize the relevant chart page to a typical phone width (≈360–480px) and keep the candlestick area visible without overflow.\n   - Check that axis labels, tooltips, and timeframe picker remain legible and touch friendly; adjust padding or layout as needed.\n   - Confirm chart interactions (pan/zoom/timeframe) still work on narrow screens and that supporting indicators/annotations wrap or hide gracefully.\n   - Mention in your response how the mobile layout was validated per the checklist in triad/WORKER_PROMPT.md.\n'
+    fi
 
     cat <<PROMPT
 You are the "$MODEL" worker in the Triad parallel coding system.
@@ -69,6 +73,7 @@ INSTRUCTIONS:
    - React: functional components with hooks
    - Styling: TailwindCSS, dark theme default
    - Error handling: try/catch on all API calls
+${FEATURE_PROMPT:+$FEATURE_PROMPT}
 5. When done, stage ONLY the task files and commit:
    git add <task files only>
    git commit -m "Task $TASK_ID: <description>"

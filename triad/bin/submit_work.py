@@ -103,6 +103,11 @@ def main():
         print(f"  {released} file lock(s) released")
         if commit_hash:
             print(f"  Commit: {commit_hash}")
+        if task_id == "feature-137":
+            print(
+                "  Mobile chart note: ensure the responsive layout checklist from WORKER_PROMPT.md "
+                "was validated (LiveTrading chart, axes, timeframe selector, and interactions at ~360px)."
+            )
 
     except Exception as e:
         conn.rollback()

@@ -125,6 +125,15 @@ def main():
                 print(f"        Files: {', '.join(files)}")
         if conflicting_count:
             print(f"\n  ({conflicting_count} additional tasks hidden due to file lock conflicts)")
+    # Mobile chart reminder for feature-137
+    mobile_chart_tasks = [t for t in available_tasks if t["id"] == "feature-137"]
+    if mobile_chart_tasks:
+        print(
+            "\n  Mobile chart reminder: feature-137 targets trading chart readability on phones. "
+            "Inspect LiveTrading/Chart components (`frontend/src/pages/LiveTrading.js`, "
+            "`frontend/src/components/Chart.js`, `ChartIndicators.js`, `ChartAnnotations.js`) "
+            "and verify the axes, timeframe selector, and touch interactions remain usable at ~360px width."
+        )
 
     # Display review opportunities
     print(f"\n=== Reviews Available ===")
