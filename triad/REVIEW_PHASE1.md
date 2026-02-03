@@ -36,6 +36,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Mobile Chart Guidance Log
 - Added Phase 9 mobile chart checklist to `triad/WORKER_PROMPT.md` so chart/mobile tasks explicitly remind workers about layout legibility, touch targets, and supporting controls.
 - Updated `triad/run_worker.sh`, `triad/bin/find_work.py`, and `triad/bin/submit_work.py` to surface this checklist during task prompting, discovery, and submission for `feature-137`, ensuring reviewers know the mobile layout was validated.
+- Logged the new mobile form guidance for `feature-138`, covering login/register/forgot-password/settings form flow checks so workers are reminded to validate stackability, touch targets, and validation messaging at ~360px.
 
 ### Feature 131 · Buy Actions Color
 - **Status**: Implemented in backend/trade API serialization.

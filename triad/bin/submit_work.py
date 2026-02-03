@@ -108,6 +108,11 @@ def main():
                 "  Mobile chart note: ensure the responsive layout checklist from WORKER_PROMPT.md "
                 "was validated (LiveTrading chart, axes, timeframe selector, and interactions at ~360px)."
             )
+        if task_id == "feature-138":
+            print(
+                "  Mobile form note: ensure the form checklist from WORKER_PROMPT.md was validated "
+                "(stacked fields, legible labels, touch-sized buttons, and dropdowns/toggles visible at ~360px)."
+            )
 
     except Exception as e:
         conn.rollback()

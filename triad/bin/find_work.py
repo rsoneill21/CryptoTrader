@@ -125,7 +125,7 @@ def main():
                 print(f"        Files: {', '.join(files)}")
         if conflicting_count:
             print(f"\n  ({conflicting_count} additional tasks hidden due to file lock conflicts)")
-    # Mobile chart reminder for feature-137
+    # Mobile reminders for specific tasks
     mobile_chart_tasks = [t for t in available_tasks if t["id"] == "feature-137"]
     if mobile_chart_tasks:
         print(
@@ -133,6 +133,13 @@ def main():
             "Inspect LiveTrading/Chart components (`frontend/src/pages/LiveTrading.js`, "
             "`frontend/src/components/Chart.js`, `ChartIndicators.js`, `ChartAnnotations.js`) "
             "and verify the axes, timeframe selector, and touch interactions remain usable at ~360px width."
+        )
+    mobile_form_tasks = [t for t in available_tasks if t["id"] == "feature-138"]
+    if mobile_form_tasks:
+        print(
+            "\n  Mobile form reminder: feature-138 targets input forms on phones. "
+            "Resize login/register/forgot-password/settings forms to ~360px, confirm fields stack, labels stay legible, buttons stay touch-friendly, "
+            "and interactive controls (toggles, dropdowns, validation states) remain visible."
         )
 
     # Display review opportunities

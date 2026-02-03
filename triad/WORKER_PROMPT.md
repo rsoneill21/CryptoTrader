@@ -165,3 +165,12 @@ When a task references trading charts or mobile-readability, follow these steps 
 - If any layout needs tweaking, target `frontend/src/pages/LiveTrading.js`, `frontend/src/components/Chart.js`, `ChartIndicators.js`, and `ChartAnnotations.js` alongside surrounding layout components.
 
 Mention this checklist in your status updates or review notes so future reviewers know the mobile layout was validated.
+
+## Mobile Form Checklist (Phase 9)
+
+When a task focuses on input forms, follow these steps before claiming work:
+- Resize the login, register, forgot-password, and settings forms to a phone width (≈360–480px) to confirm fields stack vertically without overflow.
+- Ensure labels, helper text, and validation errors remain legible and do not overlap or disappear when the viewport narrows.
+- Verify buttons, dropdowns, toggles, and selects keep enough padding for touch interactions and stay visible when layout collapses.
+- Exercise form behaviors (focus states, validation messaging, submissions, dropdown/selector interactions) to confirm controls are not hidden or broken on narrow screens.
+- Note any layout tweaks needed to keep the form usable on phones, and mention this checklist in status updates or reviews so downstream reviewers know it was validated.

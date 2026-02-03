@@ -56,6 +56,12 @@ build_task_prompt() {
     if [[ "$TASK_ID" == "feature-137" ]]; then
         FEATURE_PROMPT=$'8. Extra Guidance for feature-137:\n   - Resize the relevant chart page to a typical phone width (≈360–480px) and keep the candlestick area visible without overflow.\n   - Check that axis labels, tooltips, and timeframe picker remain legible and touch friendly; adjust padding or layout as needed.\n   - Confirm chart interactions (pan/zoom/timeframe) still work on narrow screens and that supporting indicators/annotations wrap or hide gracefully.\n   - Mention in your response how the mobile layout was validated per the checklist in triad/WORKER_PROMPT.md.\n'
     fi
+    if [[ "$TASK_ID" == "feature-138" ]]; then
+        FEATURE_PROMPT+=$'9. Extra Guidance for feature-138:\n   - Validate the mobile experience for key input forms (login, register, forgot password, settings, etc.) by resizing to ≈360–480px and ensuring fields stack, labels remain visible, and containers do not overflow.\n   - Make sure buttons, dropdowns, toggles, and error/helper text stay legible, wide enough for touch, and do not clip when the viewport narrows.\n   - Test form interactions (focus, validation states, submissions, and any dropdown or selector controls) with touch-like gestures to confirm nothing breaks or becomes hidden.\n   - Mention in your response how these forms were validated using the mobile form checklist in triad/WORKER_PROMPT.md.\n'
+    fi
+    if [[ "$TASK_ID" == "feature-138" ]]; then
+        FEATURE_PROMPT+=$'9. Extra Guidance for feature-138:\n   - Validate the mobile experience for key input forms (login, register, forgot password, settings, etc.) by resizing to ≈360–480px and ensuring fields stack, labels remain visible, and containers do not overflow.\n   - Make sure buttons, dropdowns, toggles, and error/helper text stay legible, wide enough for touch, and do not clip when the viewport narrows.\n   - Test form interactions (focus, validation states, submissions, and any dropdown or selector controls) with touch-like gestures to confirm nothing breaks or becomes hidden.\n   - Mention in your response how these forms were validated using the mobile form checklist in triad/WORKER_PROMPT.md.\n'
+    fi
 
     cat <<PROMPT
 You are the "$MODEL" worker in the Triad parallel coding system.
