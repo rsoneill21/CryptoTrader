@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from core.auth import get_current_user
+from core.indicators import side_color
 from db.database import get_db
 from db.models import Order, Trade, User
 
@@ -48,6 +49,7 @@ class ActiveTradeResponse(BaseModel):
     pnl: Optional[float]
     market_conditions: Optional[Dict[str, Any]]
     orders: List[OrderSummary]
+    side_color: str
 
 
 class CloseTradeRequest(BaseModel):
@@ -161,6 +163,7 @@ def _serialize_trade(trade: Trade) -> ActiveTradeResponse:
         pnl=trade.pnl,
         market_conditions=trade.market_conditions_json,
         orders=[_build_order_summary(order) for order in trade.orders],
+        side_color=side_color(trade.side),
     )
 
 

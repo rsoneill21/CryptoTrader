@@ -32,3 +32,7 @@
 1.  Add tests for the authentication system.
 
 Once the required fix is implemented, I will be able to approve this phase.
+
+### Feature 131 · Buy Actions Color
+- **Status**: Implemented in backend/trade API serialization.
+- **Details**: Trades now expose a `side_color` value derived from a shared palette (`backend/core/indicators.side_color`) so buy/long actions consistently surface the green accent required by the UI spec.

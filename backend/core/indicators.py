@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -53,6 +53,26 @@ def _prepare_series(values: Sequence[float]) -> Series:
 
     payload = _SeriesPayload(values=values)
     return pd.Series(payload.values, dtype=float)
+
+
+GREEN_SIDE = "#00d26a"
+RED_SIDE = "#ff4757"
+NEUTRAL_SIDE = "#9ca3af"
+SIDE_COLOR_MAP = {
+    "buy": GREEN_SIDE,
+    "long": GREEN_SIDE,
+    "sell": RED_SIDE,
+    "short": RED_SIDE,
+}
+
+
+def side_color(side: Optional[str]) -> str:
+    """Return a neutral color unless a known buy/long or sell/short side is provided."""
+
+    if not side:
+        return NEUTRAL_SIDE
+
+    return SIDE_COLOR_MAP.get(side.lower(), NEUTRAL_SIDE)
 
 
 def simple_moving_average(values: Sequence[float], window: int = 20) -> Series:
@@ -148,4 +168,5 @@ __all__ = [
     "relative_strength_index",
     "moving_average_convergence_divergence",
     "bollinger_bands",
+    "side_color",
 ]
