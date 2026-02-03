@@ -23,17 +23,11 @@ export const AuthProvider = ({ children }) => {
    */
   useEffect(() => {
     const checkSession = async () => {
-      const token = getToken();
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
       try {
         const response = await authAPI.getSession();
         setUser(response.data);
       } catch (_err) {
-        // Invalid/expired session - clear token
+        // Not authenticated or session expired
         removeToken();
         setUser(null);
       } finally {

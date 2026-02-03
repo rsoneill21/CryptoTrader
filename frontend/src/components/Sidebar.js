@@ -64,8 +64,8 @@ const navItems = [
 ];
 
 const Sidebar = ({ isOpen, onToggle }) => {
-  const handleNavClick = () => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024 && isOpen) {
+  const handleLinkClick = () => {
+    if (window.innerWidth < 1024 && isOpen) {
       onToggle();
     }
   };
@@ -83,7 +83,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 z-30 h-full bg-gray-800 dark:bg-gray-800 light:bg-white
+          fixed top-0 left-0 z-30 h-full bg-white dark:bg-gray-800
           transition-all duration-300 ease-in-out
           ${isOpen ? 'w-64' : 'w-0 lg:w-16'}
           overflow-hidden
@@ -91,9 +91,9 @@ const Sidebar = ({ isOpen, onToggle }) => {
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center h-16 px-4 border-b border-gray-700 dark:border-gray-700 light:border-gray-200">
+          <div className="flex items-center h-16 px-4 border-b border-gray-200 dark:border-gray-700">
             {isOpen ? (
-              <span className="text-xl font-bold text-white dark:text-white light:text-gray-900">
+              <span className="text-xl font-bold text-gray-900 dark:text-white">
                 CryptoTrader
               </span>
             ) : (
@@ -108,15 +108,15 @@ const Sidebar = ({ isOpen, onToggle }) => {
                 <li key={item.path}>
                   <NavLink
                     to={item.path}
+                    onClick={handleLinkClick}
                     className={({ isActive }) =>
                       `flex items-center px-3 py-2 rounded-lg transition-colors ${
                         isActive
                           ? 'bg-blue-600 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white dark:text-gray-300 dark:hover:bg-gray-700 light:text-gray-600 light:hover:bg-gray-100 light:hover:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
                       }`
                     }
                     title={!isOpen ? item.label : undefined}
-                    onClick={handleNavClick}
                   >
                     <span className="flex-shrink-0">{item.icon}</span>
                     {isOpen && <span className="ml-3">{item.label}</span>}
@@ -127,10 +127,10 @@ const Sidebar = ({ isOpen, onToggle }) => {
           </nav>
 
           {/* Toggle button (desktop) */}
-          <div className="hidden lg:block p-4 border-t border-gray-700 dark:border-gray-700 light:border-gray-200">
+          <div className="hidden lg:block p-4 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={onToggle}
-              className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+              className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:hover:text-white dark:hover:bg-gray-700 transition-colors"
               title={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             >
               <svg

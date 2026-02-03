@@ -66,6 +66,14 @@ CryptoTrader is a web-based AI trading platform that acts like a real human trad
    KRAKEN_API_SECRET=your_real_api_secret_here
    OPENAI_API_KEY=your_real_api_key_here
    ```
+   While you are configuring secrets, also set the dev-server values so the frontend proxy and Cloudflare tunnel resolve to the same backend endpoint:
+   ```
+   BACKEND_HOST=127.0.0.1
+   BACKEND_PORT=8000
+   VITE_API_URL=http://127.0.0.1:8000
+   VITE_WS_URL=ws://127.0.0.1:8000
+   ```
+   When exposing the app via `app.packnation.org` through Cloudflare Tunnel, make sure the tunnel forwards the public traffic to the matching `BACKEND_HOST`/`BACKEND_PORT` and that `VITE_API_URL` points at the loopback address so the tunnel can safely proxy API/WS requests without binding to `0.0.0.0`.
 
 4. **Start the development servers**
    ```bash

@@ -44,11 +44,15 @@ celery_app.conf.update(
 
     # Beat schedule for periodic tasks
     beat_schedule={
-        # Example: Check risk score every minute
-        # "check-risk-score": {
-        #     "task": "core.tasks.check_risk_score",
-        #     "schedule": 60.0,
-        # },
+        "cleanup-sessions": {
+            "task": "core.tasks.cleanup_expired_sessions",
+            "schedule": 3600.0,  # Every hour
+        },
+        "sync-manual-trades": {
+            "task": "core.tasks.sync_manual_trades",
+            "schedule": 300.0,  # Every 5 minutes
+            "args": (60,),  # 60 minute lookback
+        },
     },
 )
 

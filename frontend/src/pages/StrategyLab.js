@@ -25,10 +25,28 @@ const StrategyLab = () => {
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [capital, setCapital] = useState(12000);
   const [riskTolerance, setRiskTolerance] = useState(1.8);
   const [paperMode, setPaperMode] = useState(true);
   const [paperTrades, setPaperTrades] = useState([]);
+  const [paperPortfolio, setPaperPortfolio] = useState(null);
+
+  const fetchPaperPortfolio = useCallback(async () => {
+    try {
+      const response = await api.get('/api/strategies/paper-portfolio');
+      setPaperPortfolio(response.data);
+      // Map open positions to match paperTrades list if needed, or just use separate display
+    } catch (err) {
+      console.error('Failed to fetch paper portfolio:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPaperPortfolio();
+    const interval = setInterval(fetchPaperPortfolio, 5000);
+    return () => clearInterval(interval);
+  }, [fetchPaperPortfolio]);
 
   useEffect(() => {
     const fetchStrategies = async () => {
@@ -36,7 +54,11 @@ const StrategyLab = () => {
       setError('');
 
       try {
-        const response = await api.get('/api/strategies');
+        const params = {};
+        if (statusFilter !== 'all') {
+          params.status = statusFilter;
+        }
+        const response = await api.get('/api/strategies', { params });
         const list = Array.isArray(response.data) ? response.data : [];
         setStrategies(list);
       } catch (fetchError) {
@@ -48,7 +70,7 @@ const StrategyLab = () => {
     };
 
     fetchStrategies();
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     if (!selectedStrategyId && strategies.length) {
@@ -111,29 +133,126 @@ const StrategyLab = () => {
   }, [selectedStrategy]);
 
   const paperStats = useMemo(() => {
-    const total = paperTrades.length;
-    const winners = paperTrades.filter((trade) => trade.pnl > 0).length;
-    const losers = total - winners;
-    const totalPnl = Number(paperTrades.reduce((sum, trade) => sum + trade.pnl, 0).toFixed(2));
-    const winRate = total ? Math.round((winners / total) * 100) : 0;
-
-    return { total, winners, losers, totalPnl, winRate };
-  }, [paperTrades]);
-
-  const handlePaperTrade = (side) => {
-    const newTrade = {
-      id: Date.now(),
-      symbol: 'BTC/USDT',
-      side,
-      pnl: Number((Math.random() * 40 - 15).toFixed(2)),
-      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    if (!paperPortfolio) return { total: 0, winners: 0, losers: 0, totalPnl: 0, winRate: 0 };
+    
+    // We would ideally fetch trade history from DB too, but for now we use realized_pnl
+    return {
+      total: 0, // Need historical trade endpoint for accurate count
+      winners: 0,
+      losers: 0,
+      totalPnl: paperPortfolio.realized_pnl,
+      winRate: 0,
+      equity: paperPortfolio.equity,
+      cash: paperPortfolio.cash,
+      unrealized: paperPortfolio.unrealized_pnl
     };
+  }, [paperPortfolio]);
 
-    setPaperTrades((prev) => [newTrade, ...prev].slice(0, 5));
+  const handlePaperTrade = async (side) => {
+    if (!selectedStrategy) return;
+    
+    const symbol = 'BTC/USD'; // In real app, would be strategy-defined
+    const existingPosition = paperPortfolio?.open_positions?.find(
+      p => p.symbol === symbol && p.strategy_id === selectedStrategy.id
+    );
+
+    const intent = existingPosition ? 'exit' : 'entry';
+    
+    try {
+      await api.post(`/api/strategies/${selectedStrategy.id}/simulate`, {
+        symbol,
+        side,
+        intent,
+        quantity: 0.1, // Fixed for demo, should be from UI
+      });
+      fetchPaperPortfolio();
+    } catch (err) {
+      console.error('Simulation failed:', err);
+      alert('Simulation failed: ' + (err.message || 'Unknown error'));
+    }
   };
 
   const handleResetPaperTrades = () => {
     setPaperTrades([]);
+  };
+
+  const handleArchive = async () => {
+    if (!selectedStrategy || !window.confirm(`Archive strategy "${selectedStrategy.name}"?`)) {
+      return;
+    }
+    try {
+      await api.put(`/api/strategies/${selectedStrategy.id}`, { status: 'archived' });
+      // Refresh list
+      const response = await api.get('/api/strategies', {
+        params: statusFilter !== 'all' ? { status: statusFilter } : {}
+      });
+      setStrategies(response.data);
+    } catch (err) {
+      console.error('Failed to archive strategy:', err);
+      alert('Failed to archive strategy: ' + (err.message || 'Unknown error'));
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedStrategy || !window.confirm(`Permanently delete strategy "${selectedStrategy.name}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await api.delete(`/api/strategies/${selectedStrategy.id}`);
+      // Refresh list and clear selection
+      const response = await api.get('/api/strategies', {
+        params: statusFilter !== 'all' ? { status: statusFilter } : {}
+      });
+      const newList = response.data;
+      setStrategies(newList);
+      if (newList.length > 0) {
+        setSelectedStrategyId(newList[0].id);
+      } else {
+        setSelectedStrategyId(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete strategy:', err);
+      alert('Failed to delete strategy: ' + (err.message || 'Unknown error'));
+    }
+  };
+
+  const handleTogglePause = async () => {
+    if (!selectedStrategy) return;
+    const isLive = selectedStrategy.status === 'live';
+    const nextStatus = isLive ? 'paused' : 'live';
+    
+    try {
+      await api.put(`/api/strategies/${selectedStrategy.id}`, { status: nextStatus });
+      // Refresh list
+      const response = await api.get('/api/strategies', {
+        params: statusFilter !== 'all' ? { status: statusFilter } : {}
+      });
+      setStrategies(response.data);
+    } catch (err) {
+      console.error(`Failed to ${isLive ? 'pause' : 'resume'} strategy:`, err);
+      alert(`Failed to ${isLive ? 'pause' : 'resume'} strategy: ` + (err.message || 'Unknown error'));
+    }
+  };
+
+  const handleGithubImport = async () => {
+    const url = window.prompt('Enter GitHub Repository or File URL:');
+    if (!url) return;
+
+    setLoading(true);
+    try {
+      const response = await api.post('/api/strategies/import/github', { github_url: url });
+      alert(response.data.message);
+      // Refresh list
+      const listRes = await api.get('/api/strategies', {
+        params: statusFilter !== 'all' ? { status: statusFilter } : {}
+      });
+      setStrategies(listRes.data);
+    } catch (err) {
+      console.error('GitHub import failed:', err);
+      alert('GitHub import failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const strategyListContent = () => {
@@ -197,8 +316,30 @@ const StrategyLab = () => {
         <aside className="rounded-2xl border border-gray-700 bg-gray-900/60 p-5 shadow-inner shadow-black/40">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Strategy catalog</h2>
-            <span className="text-xs text-gray-500">{strategies.length} total</span>
+            <button
+              onClick={handleGithubImport}
+              className="text-[10px] font-bold uppercase tracking-wider text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Import
+            </button>
           </div>
+
+          <div className="mt-4 flex flex-wrap gap-1 border-b border-gray-800 pb-3">
+            {['all', 'paper', 'live', 'paused', 'archived'].map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition ${
+                  statusFilter === status
+                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-900/40'
+                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+
           <div className="mt-4 h-[560px] overflow-auto pr-1">{strategyListContent()}</div>
         </aside>
 
@@ -219,6 +360,33 @@ const StrategyLab = () => {
                   className={`rounded-full px-3 py-1 text-white transition-all ${paperMode ? 'bg-blue-500' : 'bg-gray-700'}`}
                 >
                   {paperMode ? 'Enabled' : 'Disabled'}
+                </button>
+                <div className="h-4 w-px bg-gray-700 mx-1" />
+                <button
+                  type="button"
+                  onClick={handleArchive}
+                  disabled={selectedStrategy?.status === 'archived'}
+                  className="text-gray-400 hover:text-amber-400 transition-colors disabled:opacity-30"
+                  title="Archive Strategy"
+                >
+                  Archive
+                </button>
+                {(selectedStrategy?.status === 'live' || selectedStrategy?.status === 'paused') && (
+                  <button
+                    type="button"
+                    onClick={handleTogglePause}
+                    className={`text-gray-400 hover:${selectedStrategy.status === 'live' ? 'text-amber-400' : 'text-emerald-400'} transition-colors`}
+                  >
+                    {selectedStrategy.status === 'live' ? 'Pause' : 'Resume'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="text-gray-400 hover:text-rose-400 transition-colors"
+                  title="Delete Strategy"
+                >
+                  Delete
                 </button>
               </div>
             </div>

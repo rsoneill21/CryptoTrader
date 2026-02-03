@@ -110,6 +110,16 @@ init_database() {
 }
 
 # Check environment variables
+load_env_file() {
+    if [ -f ".env" ]; then
+        echo "Loading environment variables from .env..."
+        set -a
+        # shellcheck disable=SC1091
+        source ".env"
+        set +a
+    fi
+}
+
 check_env_vars() {
     echo "Checking environment variables..."
 
@@ -131,9 +141,11 @@ APP_SECRET_KEY=generate_a_secure_random_key_here
 DATABASE_URL=sqlite:///./cryptotrader.db
 
 # Server Configuration
-BACKEND_HOST=localhost
+BACKEND_HOST=127.0.0.1
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
+VITE_API_URL=http://127.0.0.1:8000
+VITE_WS_URL=ws://127.0.0.1:8000
 
 # Session Settings
 SESSION_TIMEOUT_MINUTES=60
@@ -156,10 +168,12 @@ start_servers() {
     echo ""
 
     # Start backend in background
-    echo "Starting FastAPI backend on port 8000..."
+    local backend_host="${BACKEND_HOST:-127.0.0.1}"
+    local backend_port="${BACKEND_PORT:-8000}"
+    echo "Starting FastAPI backend on ${backend_host}:${backend_port}..."
     cd backend
     source venv/bin/activate
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
+    uvicorn main:app --reload --host "${backend_host}" --port "${backend_port}" &
     BACKEND_PID=$!
     cd ..
 
@@ -179,8 +193,8 @@ start_servers() {
     echo "============================================"
     echo ""
     echo "  Frontend:  http://localhost:3000"
-    echo "  Backend:   http://localhost:8000"
-    echo "  API Docs:  http://localhost:8000/docs"
+    echo "  Backend:   http://${backend_host}:${backend_port}"
+    echo "  API Docs:  http://${backend_host}:${backend_port}/docs"
     echo ""
     echo "Press Ctrl+C to stop all servers"
     echo ""
@@ -206,11 +220,16 @@ main() {
     setup_frontend
     init_database
 
+    load_env_file
+
+    local backend_host="${BACKEND_HOST:-127.0.0.1}"
+    local backend_port="${BACKEND_PORT:-8000}"
+
     echo ""
     read -p "Start development servers? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        start_servers
+        BACKEND_HOST="$backend_host" BACKEND_PORT="$backend_port" start_servers
     else
         echo ""
         echo "Setup complete! Run './init.sh' again to start servers."

@@ -22,16 +22,11 @@ const normalizeCandles = (entries) =>
     })
     .filter(Boolean); // remove invalid entries
 
-const buildWebSocketUrl = () => {
+const buildWebSocketUrl = (symbol) => {
   const baseUrl = import.meta.env.VITE_API_URL || window.location.origin;
-  try {
-    const parsed = new URL(baseUrl);
-    const scheme = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${scheme}//${parsed.host}/api/market/stream/ohlc`;
-  } catch (_error) {
-    const fallbackScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${fallbackScheme}//${window.location.host}/api/market/stream/ohlc`;
-  }
+  const url = new URL(baseUrl);
+  const scheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${scheme}//${url.host}/api/market/stream/ohlc?symbol=${encodeURIComponent(symbol)}`;
 };
 
 const formatLastUpdate = (date) =>
@@ -174,7 +169,7 @@ const Chart = ({ symbol = DEFAULT_SYMBOL }) => {
 
       setConnectionStatus('connecting');
 
-      const wsUrl = buildWebSocketUrl();
+      const wsUrl = buildWebSocketUrl(symbol);
       try {
         socket = new WebSocket(wsUrl);
       } catch (_err) {
@@ -214,14 +209,16 @@ const Chart = ({ symbol = DEFAULT_SYMBOL }) => {
             close: Number(payload.data.close),
           };
 
+          // Only update if it matches current timeframe (Kraken WS OHLC is usually 1m)
+          // For now we assume backend sends 1m updates
           if (timeframeRef.current === '1m') {
             seriesRef.current?.update(candle);
-                    }
-                    setLastUpdate(new Date(candle.time * 1000));
-                  } catch (_err) {
-                    // ignore malformed websocket payloads
-                  }
-                };
+          }
+          setLastUpdate(new Date(candle.time * 1000));
+        } catch (_err) {
+          // ignore malformed websocket payloads
+        }
+      };
 
       socket.onerror = () => {
         if (cancelled) {

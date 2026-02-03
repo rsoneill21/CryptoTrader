@@ -375,6 +375,10 @@ class KrakenWebSocket:
             # Broadcast to clients
             await self._broadcast("ticker", update.to_dict())
 
+            # Update paper trading engine with latest price
+            from services.paper_trading_service import paper_trading_engine
+            asyncio.create_task(paper_trading_engine.update_market_price(symbol, float(update.last)))
+
         except Exception as e:
             logger.error(f"Error handling ticker: {e}")
 
@@ -646,15 +650,11 @@ kraken_ws = KrakenWebSocket()
 
 
 async def start_kraken_ws() -> None:
-    """Start the Kraken WebSocket service with a timeout to prevent hanging startup."""
+    """Start the Kraken WebSocket service."""
     try:
-        # Give it 10 seconds to connect and subscribe
+        # Give it 10 seconds to connect
         await asyncio.wait_for(kraken_ws.connect(), timeout=10.0)
-
-        # Subscribe to default pairs
-        default_pairs = ["BTC/USD", "ETH/USD"]
-        await asyncio.wait_for(kraken_ws.subscribe_ticker(default_pairs), timeout=5.0)
-        await asyncio.wait_for(kraken_ws.subscribe_trades(default_pairs), timeout=5.0)
+        logger.info("Kraken WebSocket background service started")
     except asyncio.TimeoutError:
         logger.error("Timeout connecting to Kraken WebSocket. Continuing without real-time data.")
     except Exception as e:

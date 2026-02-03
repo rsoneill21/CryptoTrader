@@ -6,7 +6,13 @@ const MAX_PENDING_MESSAGES = 50;
 
 const buildWebSocketUrl = (feed = DEFAULT_FEED) => {
   const fallback = `ws://localhost:8000/api/market/stream/${feed}`;
+  const configWs = import.meta.env.VITE_WS_URL;
   const configUrl = import.meta.env.VITE_API_URL;
+
+  if (configWs) {
+    const trimmed = configWs.replace(/\/$/, '');
+    return `${trimmed}/api/market/stream/${feed}`;
+  }
 
   if (configUrl) {
     try {

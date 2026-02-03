@@ -24,7 +24,7 @@ class User(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     last_login = Column(DateTime, nullable=True)
     session_timeout_minutes = Column(Integer, default=60)
-    preferences_json = Column(JSON, default={})
+    preferences_json = Column(JSON, default=dict)
 
     sessions = relationship("Session", back_populates="user")
 

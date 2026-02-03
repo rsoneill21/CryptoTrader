@@ -27,6 +27,7 @@ from core.security import (
 from core.auth import get_current_user, get_current_session
 from services.email import email_service
 from services.password_reset import password_reset_service
+from core.rate_limit import RateLimiter, check_rate_limit
 
 logger = logging.getLogger("cryptotrader.auth")
 
@@ -149,7 +150,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=LoginResponse, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
 async def login(
     request: LoginRequest,
     response: Response,
@@ -164,6 +165,16 @@ async def login(
     - Returns token for subsequent requests
     """
     logger.info("Login attempt for email %s", request.email)
+
+    # Rate limit by email (5 attempts per 60 seconds)
+    email_limit_key = f"rate_limit:login:email:{request.email}"
+    allowed = await check_rate_limit(email_limit_key, 5, 60)
+    if not allowed:
+        logger.warning("Login rate limit exceeded for email %s", request.email)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later."
+        )
 
     # Find user by email
     user = db.query(User).filter(User.email == request.email).first()

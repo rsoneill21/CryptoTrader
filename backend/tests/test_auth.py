@@ -20,7 +20,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 import pytest
 from fastapi import HTTPException, Response
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch, AsyncMock
 
 # Mock core.settings because of pydantic version mismatch in environment
 mock_settings_module = MagicMock()
@@ -353,3 +353,20 @@ async def test_login_enforces_mfa(db_session):
         db=db_session
     )
     assert response.token
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_exceeded(db_session):
+    await _create_user(db_session)
+    # Patch check_rate_limit in api.auth to return False (limit exceeded)
+    with patch("api.auth.check_rate_limit", new_callable=AsyncMock) as mock_check:
+        mock_check.return_value = False
+        
+        with pytest.raises(HTTPException) as exc:
+            await login(
+                LoginRequest(email=VALID_EMAIL, password=VALID_PASSWORD),
+                response=Response(),
+                db=db_session
+            )
+        assert exc.value.status_code == 429
+        assert "Too many login attempts" in exc.value.detail

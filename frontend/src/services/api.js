@@ -21,6 +21,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 30000,
+  withCredentials: true,
 });
 
 // Token storage key
@@ -73,13 +74,9 @@ const normalizeAPIError = (errorResponseData) => {
   };
 };
 
-// Request interceptor - add auth token
+// Request interceptor - auth token no longer needed in header as we use HttpOnly cookies
 api.interceptors.request.use(
   (config) => {
-    const token = getToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
     return config;
   },
   (error) => {
