@@ -63,6 +63,10 @@ build_task_prompt() {
         FEATURE_PROMPT+=$'9. Extra Guidance for feature-138:\n   - Validate the mobile experience for key input forms (login, register, forgot password, settings, etc.) by resizing to ≈360–480px and ensuring fields stack, labels remain visible, and containers do not overflow.\n   - Make sure buttons, dropdowns, toggles, and error/helper text stay legible, wide enough for touch, and do not clip when the viewport narrows.\n   - Test form interactions (focus, validation states, submissions, and any dropdown or selector controls) with touch-like gestures to confirm nothing breaks or becomes hidden.\n   - Mention in your response how these forms were validated using the mobile form checklist in triad/WORKER_PROMPT.md.\n'
     fi
 
+    if [[ "$TASK_ID" == "feature-109" ]]; then
+        FEATURE_PROMPT+=$'9. Extra Guidance for feature-109:\n   - Step 1: Confirm OpenAI is the active provider by reviewing `/api/ai/models` and ensuring the response marks OpenAI as `active`. If it is not active, activate it via `/api/ai/models/active` before continuing.\n   - Step 2: Use the chat endpoint (`POST /api/ai/chat`) to ask a short question (for example, "Describe how CryptoTrader tracks OpenAI decisions.") and verify the stream completes with OpenAI as the responding provider.\n   - Step 3: Confirm the persisted chat history entry includes provider/model metadata so you can prove OpenAI answered.\n   - Step 4: Run `sqlite3 cryptotrader.db \"SELECT provider, model_name, timestamp FROM ai_decisions ORDER BY timestamp DESC LIMIT 1;\"` (or an equivalent query) and verify the latest decision shows `provider` as `openai` and the model in use is recorded.\n   - Step 5: Mention these confirmations in your final message so reviewers know the OpenAI integration criteria were met.\n'
+    fi
+
     cat <<PROMPT
 You are the "$MODEL" worker in the Triad parallel coding system.
 

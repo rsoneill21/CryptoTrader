@@ -127,6 +127,12 @@ This releases your locks and returns the task to the available pool.
 - **Error Handling**: All API calls in try/catch, user-friendly messages
 - **Testing**: Write tests for critical paths (auth, trading, risk)
 
+## OpenAI Decision Assurance
+
+- Confirm tasks touching AI logging or decision telemetry include the provider/model metadata added to `ai_decisions`.
+- When verifying OpenAI integration, check `/api/ai/models` to ensure OpenAI is the active provider, run a quick chat question via `/api/ai/chat`, and then confirm both chat history entries and recent `ai_decisions` rows record `provider: openai` plus the configured model name.
+- Mention these verification steps in worker responses for traceability.
+
 ## Architecture Reference
 
 - **Backend**: FastAPI + SQLite + Celery/Redis

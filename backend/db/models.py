@@ -4,7 +4,7 @@ SQLAlchemy database models for CryptoTrader.
 
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Boolean,
-    DateTime, ForeignKey, JSON
+    DateTime, ForeignKey, JSON, text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -156,6 +156,18 @@ class AIDecision(Base):
     reasoning_json = Column(JSON, nullable=True)
     confidence_score = Column(Float, nullable=True)
     action_taken = Column(String(255), nullable=True)
+    provider = Column(
+        String(50),
+        nullable=False,
+        default="openai",
+        server_default=text("'openai'"),
+    )
+    model_name = Column(
+        String(255),
+        nullable=True,
+        default="gpt-4",
+        server_default=text("'gpt-4'"),
+    )
     timestamp = Column(DateTime, server_default=func.now())
     related_strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
     related_trade_id = Column(Integer, ForeignKey("trades.id"), nullable=True)

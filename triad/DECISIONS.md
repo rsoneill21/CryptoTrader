@@ -166,3 +166,15 @@ Feature 47 demands that paper trading capture “entry/exit points and timing,�
 
 **Outcome:**
 Paper trading now keeps a normalized price history, computes volatility/momentum/indicator snapshots, marks near-miss conditions, and records that metadata alongside each signal. The richer metadata flows through trade persistence and the AI decision log that the new `/api/market/decisions` endpoint surfaces, giving analysts the structured context they need for review.
+
+## 2026-02-03 — OpenAI decision metadata
+
+**Decision:**
+Track the active provider and model on every `ai_decisions` row and instruct workers to verify OpenAI remains active, chat history entries include provider/model metadata, and the latest decision row records `provider: openai` plus the configured model name.
+
+**Context:**
+Feature 109 (“OpenAI model integration works”) calls for analysts to trust `ai_decisions` entries when auditing GPT usage, but the previous schema only relied on free-form `reasoning_json` data that did not consistently capture which vendor or model produced a decision. Structured columns make that metadata queriable, and worker prompts were updated so the implementation flow includes those verification steps.
+
+**Options Considered:**
+1. Keep the existing `AIDecision` schema and expect analysts to parse the provider/model from nested JSON. (Rejected because it was brittle and inconsistent.)
+2. Add provider/model columns and operationalize the check by requiring workers to confirm OpenAI is active and logging includes the provider/model values. (Chosen.)
