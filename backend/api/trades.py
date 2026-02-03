@@ -32,6 +32,8 @@ class OrderSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     error_message: Optional[str]
+    side_color: str
+    side_color: str
 
 
 class ActiveTradeResponse(BaseModel):
@@ -146,6 +148,7 @@ def _build_order_summary(order: Order) -> OrderSummary:
         created_at=order.created_at,
         updated_at=order.updated_at,
         error_message=order.error_message,
+        side_color=side_color(order.side),
     )
 
 

@@ -36,3 +36,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 131 · Buy Actions Color
 - **Status**: Implemented in backend/trade API serialization.
 - **Details**: Trades now expose a `side_color` value derived from a shared palette (`backend/core/indicators.side_color`) so buy/long actions consistently surface the green accent required by the UI spec.
+
+### Feature 132 · Sell Actions Color
+- **Status**: Implemented in backend/trade API serialization.
+- **Details**: Order summaries now include the `side_color` payload, ensuring sell/short actions consistently surface the shared red tone (`backend/core/indicators.SIDE_COLOR_MAP`) for downstream UI use.
