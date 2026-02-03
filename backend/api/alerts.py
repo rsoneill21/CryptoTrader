@@ -56,6 +56,22 @@ class AlertListResponse(BaseModel):
     page_size: int
 
 
+class AlertChatContextResponse(BaseModel):
+    alert_id: int
+    title: str
+    message: Optional[str]
+    severity: Optional[str]
+    status: Optional[str]
+    type: Optional[str]
+    related_strategy_id: Optional[int]
+    related_trade_id: Optional[int]
+    created_at: datetime
+    prompt: str
+
+    class Config:
+        from_attributes = True
+
+
 class AlertCreateRequest(BaseModel):
     type: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
@@ -110,6 +126,25 @@ class BulkStatusUpdateResponse(BaseModel):
 
 def _serialize_alert(alert: Alert) -> AlertResponse:
     return AlertResponse.from_orm(alert)
+
+
+def _build_alert_chat_prompt(alert: Alert) -> str:
+    title = alert.title or 'Untitled alert'
+    message = (alert.message or 'No additional details provided.').strip()
+    if not message:
+        message = 'No additional details provided.'
+    type_segment = f"Type: {alert.type}." if alert.type else ''
+    severity_segment = f"Severity: {alert.severity}." if alert.severity else ''
+    status_segment = f"Status: {alert.status}." if alert.status else ''
+    prompt_segments = [
+        f'Reviewing alert "{title}".',
+        type_segment,
+        severity_segment,
+        status_segment,
+        f'Summary: {message}',
+        'Provide next steps, risk considerations, and any follow-up questions.',
+    ]
+    return ' '.join(segment for segment in prompt_segments if segment)
 
 
 def _apply_actioned_timestamp(
@@ -239,6 +274,35 @@ async def get_alert(alert_id: int, db: Session = Depends(get_db)) -> AlertRespon
             detail="Alert not found",
         )
     return _serialize_alert(alert)
+
+
+@router.get("/{alert_id}/chat-context", response_model=AlertChatContextResponse)
+async def get_alert_chat_context(alert_id: int, db: Session = Depends(get_db)) -> AlertChatContextResponse:
+    """Return structured context for starting a chat about an alert."""
+    try:
+        alert = db.get(Alert, alert_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to fetch alert context",
+        )
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found",
+        )
+    return AlertChatContextResponse(
+        alert_id=alert.id,
+        title=alert.title,
+        message=alert.message,
+        severity=alert.severity,
+        status=alert.status,
+        type=alert.type,
+        related_strategy_id=alert.related_strategy_id,
+        related_trade_id=alert.related_trade_id,
+        created_at=alert.created_at,
+        prompt=_build_alert_chat_prompt(alert),
+    )
 
 
 @router.patch("/{alert_id}", response_model=AlertResponse)

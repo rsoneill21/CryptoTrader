@@ -83,6 +83,11 @@ def main():
                 "  Promotion reminder: confirm the strategy detail view surfaces the AI promotion recommendation, "
                 "includes reasoning + confidence, and the accept action is available before reviewing."
             )
+        if task["id"] == "feature-84":
+            print(
+                "  Alert chat reminder: confirm that starting a chat from an alert surfaces the alert summary, "
+                "fetches the backend prompt, and the AI chat request includes the related alert ID."
+            )
 
     except Exception as e:
         conn.rollback()

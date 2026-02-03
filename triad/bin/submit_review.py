@@ -118,6 +118,11 @@ def main():
                     "  Promotion reminder: validate the AI promotion recommendation includes reasoning, confidence, "
                     "and the accept path flags the strategy as promoted before approving."
                 )
+            if task_id == "feature-84":
+                print(
+                    "  Alert chat reminder: verify that initiating a chat from an alert brings in the alert context "
+                    "so the AI chat stream includes the right prompt and alert reference."
+                )
 
         else:  # request_changes
             conn.execute(
@@ -147,6 +152,11 @@ def main():
                 print(
                     "  Promotion reminder: ensure the AI recommendation view shows metrics, reasoning, confidence, "
                     "and that users can accept or reject the promotion recommendation before resubmitting."
+                )
+            if task_id == "feature-84":
+                print(
+                    "  Alert chat reminder: re-check the alert-driven context loading so the AI chat page still picks up "
+                    "the alert prompt and related ID before the next review."
                 )
 
     except Exception as e:

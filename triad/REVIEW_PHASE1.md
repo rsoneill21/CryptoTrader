@@ -61,3 +61,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 43 · View strategy comparison
 - **Status**: Implemented in `backend/api/strategies.py`.
 - **Details**: Added `GET /api/strategies/comparison` which gathers the latest performance metrics per strategy, supports status filters/defaults (paper/live), and allows optionally ordering the results via `strategy_id` query parameters so the UI can render side-by-side comparisons.
+
+### Feature 84 · Alert-driven conversation flow
+- **Status**: Implemented in `backend/api/alerts.py` and the AI chat workspace.
+- **Details**: Added `GET /api/alerts/{alert_id}/chat-context` so the UI can fetch a curated prompt/payload for any alert, and the AI Chat view now detects alert context (navigation state, query params, or stored session data), surfaces the alert summary, and injects the alert ID/prompt into streaming chat requests so the AI knows exactly which alert is being discussed.

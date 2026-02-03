@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import ChatWindow from '../components/ChatWindow';
 import api from '../services/api';
 
@@ -88,14 +89,75 @@ const ensureChatToneFetchInterceptor = () => {
     }
 
     const tone = window.__cryptotraderChatTone ?? DEFAULT_CHAT_TONE;
+    const alertContext = window.__cryptotraderAlertChatContext;
+    const alertIdValue = alertContext?.alert_id ?? alertContext?.alertId;
     const merged = { ...parsedBody, tone };
+    if (alertIdValue) {
+      merged.related_alert_id = alertIdValue;
+      const baseContext =
+        parsedBody.context_json && typeof parsedBody.context_json === 'object'
+          ? { ...parsedBody.context_json }
+          : {};
+      merged.context_json = {
+        ...baseContext,
+        alert_context: {
+          alert_id: alertIdValue,
+          title: alertContext?.title ?? null,
+          message: alertContext?.message ?? null,
+          severity: alertContext?.severity ?? null,
+          status: alertContext?.status ?? null,
+          type: alertContext?.type ?? null,
+          related_strategy_id: alertContext?.related_strategy_id ?? null,
+          related_trade_id: alertContext?.related_trade_id ?? null,
+          created_at: alertContext?.created_at ?? null,
+          prompt: alertContext?.prompt ?? null,
+        },
+      };
+    }
     const clonedInit = { ...(init || {}), body: JSON.stringify(merged) };
     return baseFetch(input, clonedInit);
   };
 };
 
+const ALERT_CHAT_STORAGE_KEY = 'cryptotrader_alert_chat_context';
+
+const loadStoredAlertChatContext = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = window.sessionStorage?.getItem(ALERT_CHAT_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    return JSON.parse(stored);
+  } catch (error) {
+    console.debug('Unable to read alert chat context:', error);
+    return null;
+  }
+};
+
+const clearStoredAlertChatContext = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.sessionStorage?.removeItem(ALERT_CHAT_STORAGE_KEY);
+  } catch (error) {
+    console.debug('Unable to clear alert chat context:', error);
+  }
+};
+
+const setGlobalAlertChatContext = (value) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.__cryptotraderAlertChatContext = value ?? null;
+};
+
 if (typeof window !== 'undefined') {
   window.__cryptotraderChatTone = window.__cryptotraderChatTone ?? loadStoredChatTone();
+  window.__cryptotraderAlertChatContext = window.__cryptotraderAlertChatContext ?? null;
   ensureChatToneFetchInterceptor();
 }
 
@@ -116,15 +178,138 @@ const formatAggressivenessScore = (value) => {
 const formatFavoriteSymbols = (symbols) =>
   symbols && symbols.length ? symbols.join(', ') : 'Gathering symbols';
 
+const formatAlertPromptPreview = (value, limit = 140) => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length <= limit) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, limit - 1)}…`;
+};
+
 const AIChat = () => {
   const [tonePreference, setTonePreference] = useState(loadStoredChatTone);
   const [styleProfile, setStyleProfile] = useState(null);
   const [styleLoading, setStyleLoading] = useState(true);
   const [styleError, setStyleError] = useState('');
+  const location = useLocation();
+  const [pendingAlertContext, setPendingAlertContext] = useState(null);
+  const [resolvedAlertContext, setResolvedAlertContext] = useState(null);
+  const [alertContextLoading, setAlertContextLoading] = useState(false);
+  const [alertContextError, setAlertContextError] = useState('');
 
   useEffect(() => {
     setGlobalChatTone(tonePreference);
   }, [tonePreference]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const searchParams = new URLSearchParams(location.search);
+    const queryAlertId = searchParams.get('alert_id');
+    const navContext = location.state?.alertContext;
+    const storedContext = loadStoredAlertChatContext();
+    let candidate = null;
+    if (navContext?.alertId || navContext?.alert_id) {
+      candidate = navContext;
+    } else if (storedContext?.alertId || storedContext?.alert_id) {
+      candidate = storedContext;
+    } else if (queryAlertId) {
+      const parsedId = Number(queryAlertId);
+      if (!Number.isNaN(parsedId)) {
+        candidate = { alert_id: parsedId };
+      }
+    }
+
+    if (!candidate) {
+      setPendingAlertContext(null);
+      setResolvedAlertContext(null);
+      setAlertContextError('');
+      return;
+    }
+
+    setPendingAlertContext(candidate);
+    setAlertContextError('');
+    if (storedContext) {
+      clearStoredAlertChatContext();
+    }
+  }, [location.search, location.state]);
+
+  useEffect(() => {
+    const alertIdValue = pendingAlertContext?.alert_id ?? pendingAlertContext?.alertId;
+    if (!alertIdValue) {
+      setResolvedAlertContext(null);
+      setAlertContextLoading(false);
+      setAlertContextError('');
+      return;
+    }
+
+    let isMounted = true;
+    setAlertContextLoading(true);
+    setAlertContextError('');
+
+    const loadAlertContext = async () => {
+      try {
+        const response = await api.get(`/api/alerts/${alertIdValue}/chat-context`);
+        if (!isMounted) {
+          return;
+        }
+        setResolvedAlertContext(response.data);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+        setAlertContextError(error?.message || 'Unable to load alert context.');
+        setResolvedAlertContext({
+          ...pendingAlertContext,
+          alert_id: alertIdValue,
+        });
+      } finally {
+        if (isMounted) {
+          setAlertContextLoading(false);
+        }
+      }
+    };
+
+    loadAlertContext();
+    return () => {
+      isMounted = false;
+    };
+  }, [pendingAlertContext]);
+
+  useEffect(() => {
+    const candidate = resolvedAlertContext || pendingAlertContext;
+    if (!candidate) {
+      setGlobalAlertChatContext(null);
+      return;
+    }
+    const normalized = {
+      alert_id: candidate.alert_id ?? candidate.alertId ?? null,
+      title: candidate.title ?? null,
+      message: candidate.message ?? null,
+      severity: candidate.severity ?? null,
+      status: candidate.status ?? null,
+      type: candidate.type ?? null,
+      related_strategy_id: candidate.related_strategy_id ?? candidate.relatedStrategyId ?? null,
+      related_trade_id: candidate.related_trade_id ?? candidate.relatedTradeId ?? null,
+      created_at:
+        candidate.created_at ?? candidate.createdAt ?? candidate.timestamp ?? null,
+      prompt: candidate.prompt ?? null,
+    };
+    setGlobalAlertChatContext(normalized);
+  }, [pendingAlertContext, resolvedAlertContext]);
+
+  useEffect(() => {
+    return () => {
+      setGlobalAlertChatContext(null);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -176,6 +361,27 @@ const AIChat = () => {
     [tonePreference]
   );
 
+  const activeAlertContext = resolvedAlertContext || pendingAlertContext;
+  const alertContextStatusLabel = alertContextLoading
+    ? 'Syncing alert context…'
+    : alertContextError
+    ? 'Context fallback: using the available alert summary'
+    : activeAlertContext
+    ? 'Alert context ready'
+    : '';
+  const alertPromptPreview = formatAlertPromptPreview(activeAlertContext?.prompt);
+  const alertContextMeta = [];
+  if (activeAlertContext?.type) {
+    alertContextMeta.push(activeAlertContext.type);
+  }
+  if (activeAlertContext?.related_strategy_id) {
+    alertContextMeta.push(`Strategy #${activeAlertContext.related_strategy_id}`);
+  }
+  if (activeAlertContext?.related_trade_id) {
+    alertContextMeta.push(`Trade #${activeAlertContext.related_trade_id}`);
+  }
+  const alertContextMetaLabel = alertContextMeta.length ? alertContextMeta.join(' · ') : 'Alert';
+
   return (
     <section className="space-y-6 text-white">
       <header className="space-y-2">
@@ -193,6 +399,46 @@ const AIChat = () => {
           <p className="text-xs text-gray-400 max-w-3xl">{currentToneDetails.description}</p>
         </div>
       </header>
+      {activeAlertContext && (
+        <div className="space-y-3 rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950/70 to-slate-900/60 p-5 text-sm text-white shadow-[0_20px_60px_rgba(2,4,20,0.85)]">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-sky-300">Alert context</p>
+              <h2 className="text-xl font-semibold text-white">
+                {activeAlertContext.title || `Alert #${activeAlertContext.alert_id || '—'}`}
+              </h2>
+              <p className="text-xs text-gray-400">{alertContextMetaLabel}</p>
+            </div>
+            {alertContextStatusLabel && (
+              <span className="text-[10px] uppercase tracking-[0.3em] text-gray-400">
+                {alertContextStatusLabel}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white">
+              {activeAlertContext.severity?.toUpperCase() || 'Severity unknown'}
+            </span>
+            <span className="rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white">
+              {activeAlertContext.status?.toUpperCase() || 'Status unknown'}
+            </span>
+            <span className="rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white">
+              #{activeAlertContext.alert_id ?? '—'}
+            </span>
+          </div>
+          <p className="text-sm leading-relaxed text-gray-300">
+            {activeAlertContext.message || 'No additional alert details were provided.'}
+          </p>
+          {alertPromptPreview && (
+            <p className="text-xs text-gray-400">
+              {alertPromptPreview}
+            </p>
+          )}
+          {alertContextError && (
+            <p className="text-xs text-rose-300">{alertContextError}</p>
+          )}
+        </div>
+      )}
       <div className="rounded-[34px] border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/60 p-6 shadow-[0_28px_60px_rgba(2,6,23,0.9)]">
         <div className="flex items-center justify-between">
           <div>
