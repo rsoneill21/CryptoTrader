@@ -4,11 +4,14 @@ Database configuration and initialization.
 
 import logging
 import os
+from collections import defaultdict
 from functools import lru_cache
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
 
 # Database URL - SQLite for development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./cryptotrader.db")
@@ -43,6 +46,7 @@ def init_db():
     from db.migrations import run_migrations
 
     run_migrations()
+    _register_user_email_listeners()
     print("Database schema verified via Alembic migrations")
 
 
@@ -122,3 +126,65 @@ def get_mobile_table_hints() -> MobileTableHints:
     )
     logger.debug("Mobile table hints loaded: %s", hints.model_dump())
     return hints
+
+
+_USER_EMAIL_LISTENERS_REGISTERED = False
+
+
+def _normalize_email(target: Any) -> str:
+    """Ensure emails are trimmed and lowercased."""
+
+    if not isinstance(target.email, str):
+        return target.email
+
+    normalized = target.email.strip().lower()
+    target.email = normalized
+    return normalized
+
+
+def _register_user_email_listeners() -> None:
+    """Attach SQLAlchemy events to keep emails normalized and unique."""
+
+    global _USER_EMAIL_LISTENERS_REGISTERED
+    if _USER_EMAIL_LISTENERS_REGISTERED:
+        return
+
+    from db.models import User
+
+    @event.listens_for(User, "before_insert")
+    def _on_before_insert(mapper, connection, target: User) -> None:
+        _normalize_email(target)
+
+    @event.listens_for(User, "before_update")
+    def _on_before_update(mapper, connection, target: User) -> None:
+        _normalize_email(target)
+
+    @event.listens_for(SessionLocal, "before_flush")
+    def _enforce_unique_email(session: Session, flush_context, instances) -> None:
+        if not session.new:
+            return
+
+        bucket: Dict[str, List[User]] = defaultdict(list)
+        for instance in session.new:
+            if isinstance(instance, User) and instance.email:
+                normalized = _normalize_email(instance)
+                bucket[normalized].append(instance)
+
+        for normalized_email, users in bucket.items():
+            if len(users) > 1:
+                raise IntegrityError(
+                    statement="duplicate_email",
+                    params={"email": normalized_email},
+                    orig=Exception("Email already registered"),
+                )
+
+            query = select(User.id).where(func.lower(User.email) == normalized_email)
+            exists = session.execute(query).scalar_one_or_none()
+            if exists is not None:
+                raise IntegrityError(
+                    statement="duplicate_email",
+                    params={"email": normalized_email},
+                    orig=Exception("Email already registered"),
+                )
+
+    _USER_EMAIL_LISTENERS_REGISTERED = True

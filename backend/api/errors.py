@@ -50,12 +50,19 @@ def _format_message(detail: Union[str, Mapping[str, Any], Sequence[Any], None]) 
     return None
 
 
-def _format_code(detail: Union[Mapping[str, Any], None], default_code: Optional[str] = None) -> str:
+def _format_code(
+    detail: Union[str, Mapping[str, Any], Sequence[Any], None],
+    default_code: Optional[str] = None,
+) -> str:
     if isinstance(detail, Mapping):
         if detail.get("code"):
             return detail["code"]
         if detail.get("error_code"):
             return detail["error_code"]
+    if isinstance(detail, str):
+        normalized = detail.strip().lower()
+        if "email already registered" in normalized:
+            return "duplicate_email"
     if default_code:
         return default_code
     return "http_error"
@@ -69,7 +76,7 @@ def build_error_payload(
     """Create a consistent API error response from the provided detail."""
 
     message = _format_message(detail) or _default_message(status_code)
-    code = _format_code(detail if isinstance(detail, Mapping) else None, default_code or f"http_{status_code}")
+    code = _format_code(detail, default_code or f"http_{status_code}")
     details = None
 
     if isinstance(detail, Mapping) and detail.get("details") is not None:
