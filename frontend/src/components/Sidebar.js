@@ -64,6 +64,12 @@ const navItems = [
 ];
 
 const Sidebar = ({ isOpen, onToggle }) => {
+  const handleNavClick = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024 && isOpen) {
+      onToggle();
+    }
+  };
+
   return (
     <>
       {/* Overlay for mobile */}
@@ -110,6 +116,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
                       }`
                     }
                     title={!isOpen ? item.label : undefined}
+                    onClick={handleNavClick}
                   >
                     <span className="flex-shrink-0">{item.icon}</span>
                     {isOpen && <span className="ml-3">{item.label}</span>}
