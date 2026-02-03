@@ -10,7 +10,7 @@ from typing import Callable, Iterable, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.orm import Session
 
-from db.database import SessionLocal
+from db.database import SessionLocal, get_mobile_table_hints
 from db.models import MarketData
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,36 @@ class MarketDataCandle(BaseModel):
         }
 
 
+class MobileTableColumn(BaseModel):
+    """Metadata describing a mobile-friendly table column."""
+
+    key: str
+    label: str
+    align: str = Field("right")
+
+
+class MarketDataTableLayout(BaseModel):
+    """Layout hints specific to the market data summary table."""
+
+    visible_columns: List[MobileTableColumn]
+    column_count: int
+    allow_horizontal_scroll: bool
+    max_visible_columns: int
+    min_viewport_width: int
+    gutter_spacing: int
+    data_precision: int
+
+
+MOBILE_TABLE_COLUMNS: List[MobileTableColumn] = [
+    MobileTableColumn(key="timestamp", label="Time", align="left"),
+    MobileTableColumn(key="symbol", label="Symbol", align="left"),
+    MobileTableColumn(key="close", label="Last", align="right"),
+    MobileTableColumn(key="volume", label="Vol", align="right"),
+    MobileTableColumn(key="high", label="High", align="right"),
+    MobileTableColumn(key="low", label="Low", align="right"),
+]
+
+
 class MarketDataService:
     """Stores OHLCV candles and enforces data retention."""
 
@@ -80,6 +110,23 @@ class MarketDataService:
         retention_days = retention_days if retention_days is not None else DEFAULT_RETENTION_DAYS
         self._retention_days = max(0, retention_days)
         self._lock = asyncio.Lock()
+
+    def get_mobile_table_layout(self) -> MarketDataTableLayout:
+        """Return layout hints for tabular market data tailored to narrow screens."""
+
+        hints = get_mobile_table_hints()
+        column_limit = min(hints.max_visible_columns, len(MOBILE_TABLE_COLUMNS))
+        if column_limit == 0:
+            column_limit = 1
+        return MarketDataTableLayout(
+            visible_columns=MOBILE_TABLE_COLUMNS[:column_limit],
+            column_count=column_limit,
+            allow_horizontal_scroll=hints.allow_horizontal_scroll,
+            max_visible_columns=hints.max_visible_columns,
+            min_viewport_width=hints.min_viewport_width,
+            gutter_spacing=hints.gutter_spacing,
+            data_precision=hints.data_precision,
+        )
 
     async def store_candle(self, candle: MarketDataCandle) -> int:
         """Store a single OHLCV candle."""

@@ -108,6 +108,11 @@ def main():
                 print(f"  Unblocked {len(unblocked)} task(s): {', '.join(unblocked)}")
             if notes:
                 print(f"  Notes: {notes}")
+            if task_id == "feature-139":
+                print(
+                    "  Mobile table reminder: confirm vertical stacking + horizontal scrolling still work "
+                    "for data tables on phones before closing the review."
+                )
 
         else:  # request_changes
             conn.execute(
@@ -128,6 +133,11 @@ def main():
             print(f"CHANGES REQUESTED: Task {task_id} sent back to {task['assigned_to']}")
             if notes:
                 print(f"  Feedback: {notes}")
+            if task_id == "feature-139":
+                print(
+                    "  Mobile table reminder: keep validating the responsive table layout (stacking and horizontal scrolling) "
+                    "before resubmitting."
+                )
 
     except Exception as e:
         conn.rollback()

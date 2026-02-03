@@ -73,6 +73,11 @@ def main():
         print(f"  Implemented by: {task['assigned_to']}")
         if task["commit_hash"]:
             print(f"  Commit: {task['commit_hash']}")
+        if task["id"] == "feature-139":
+            print(
+                "  Mobile table reminder: verify the data-table layouts stay readable at ≈360–480px and "
+                "scroll horizontally instead of overflowing the viewport."
+            )
 
     except Exception as e:
         conn.rollback()

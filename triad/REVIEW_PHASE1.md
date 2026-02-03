@@ -53,3 +53,7 @@ Once the required fix is implemented, I will be able to approve this phase.
 ### Feature 135 · Info Alerts Color
 - **Status**: Implemented in the alerts page.
 - **Details**: Informational alerts now carry blue accents in the alert list rows and detail panel so `info` severity entries use a blue border/shadow hover state just like critical alerts use red, keeping the UI consistent with the new design spec.
+
+### Feature 139 · Tables scroll horizontally on mobile
+- **Status**: Implemented across backend layout hints and Triad coordination scripts.
+- **Details**: Added `MobileTableHints`/`get_mobile_table_hints` to `backend/db/database.py` along with `MarketDataTableLayout` helpers so APIs can report how many columns to keep visible before horizontal scrolling kicks in; `MarketDataService` now exposes this metadata. Triad claim/submit scripts print mobile-table reminders so reviewers know the data tables were validated at ~360‑480px and scroll instead of breaking the layout.
