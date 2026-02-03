@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -162,6 +162,51 @@ def bollinger_bands(
     )
 
 
+def indicator_snapshot(values: Sequence[float]) -> Dict[str, Optional[float]]:
+    """Return the latest indicator values computed over the provided price history."""
+
+    snapshot: Dict[str, Optional[float]] = {}
+    if not values:
+        return snapshot
+
+    def _safe_value(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        if isinstance(result, float) and np.isnan(result):
+            return None
+        return result
+
+    def _last_series_value(series: Series) -> Optional[float]:
+        if series.empty:
+            return None
+        return _safe_value(series.iloc[-1])
+
+    def _last_dataframe_value(df: DataFrame, column: str) -> Optional[float]:
+        if column not in df.columns or df.empty:
+            return None
+        return _safe_value(df[column].iloc[-1])
+
+    snapshot["sma"] = _last_series_value(simple_moving_average(values, window=20))
+    snapshot["ema"] = _last_series_value(exponential_moving_average(values, window=20))
+    snapshot["rsi"] = _last_series_value(relative_strength_index(values, window=14))
+
+    macd_df = moving_average_convergence_divergence(values)
+    snapshot["macd"] = _last_dataframe_value(macd_df, "macd")
+    snapshot["macd_signal"] = _last_dataframe_value(macd_df, "signal")
+    snapshot["macd_histogram"] = _last_dataframe_value(macd_df, "histogram")
+
+    bollinger_df = bollinger_bands(values)
+    snapshot["bollinger_upper"] = _last_dataframe_value(bollinger_df, "upper")
+    snapshot["bollinger_middle"] = _last_dataframe_value(bollinger_df, "middle")
+    snapshot["bollinger_lower"] = _last_dataframe_value(bollinger_df, "lower")
+
+    return snapshot
+
+
 __all__ = [
     "simple_moving_average",
     "exponential_moving_average",
@@ -169,4 +214,5 @@ __all__ = [
     "moving_average_convergence_divergence",
     "bollinger_bands",
     "side_color",
+    "indicator_snapshot",
 ]

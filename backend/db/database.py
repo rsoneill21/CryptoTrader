@@ -5,8 +5,9 @@ Database configuration and initialization.
 import logging
 import os
 from collections import defaultdict
+from datetime import datetime
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, event, func, select
@@ -188,3 +189,28 @@ def _register_user_email_listeners() -> None:
                 )
 
     _USER_EMAIL_LISTENERS_REGISTERED = True
+
+
+def fetch_ai_decisions(
+    session: Session,
+    strategy_id: Optional[int] = None,
+    since: Optional[datetime] = None,
+    limit: int = 50,
+) -> Tuple[int, List["AIDecision"]]:
+    """Return recent AI decisions, optionally filtered by strategy or time window."""
+
+    from db.models import AIDecision
+
+    query = session.query(AIDecision)
+    if strategy_id is not None:
+        query = query.filter(AIDecision.related_strategy_id == strategy_id)
+    if since is not None:
+        query = query.filter(AIDecision.timestamp >= since)
+
+    total = query.count()
+    decisions = (
+        query.order_by(AIDecision.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    return total, decisions

@@ -1,139 +1,168 @@
-# DECISIONS — CryptoTrader
+# DECISIONS
 
-> Architecture decisions with context and rationale. Owned by Claude.
+## 2026-01-28 — Codex and Gemini CLI Selection
 
----
+**Decision:**
+Use Codex CLI (`codex`) for implementation and Gemini CLI (`gemini`) for code review within the Triad workflow.
 
-## Active Decisions
-
-### DEC-001: Session-Based Authentication
-
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** Need authentication system for single-user trading platform.
-
-**Options Considered:**
-1. **JWT tokens** — Stateless, scalable, but harder to revoke
-2. **Session tokens in DB** — Stateful, easy revocation, simpler for single user
-3. **OAuth/SSO** — Overkill for personal use app
-
-**Decision:** Session tokens stored in database (Option 2)
-**Rationale:** Single-user app doesn't need JWT scalability. DB sessions allow easy revocation, session timeout enforcement, and simpler implementation. Can migrate to JWT later if multi-user support needed.
-**Consequences:** Sessions table in DB. Token validation on each request. Periodic cleanup of expired sessions needed.
-
----
-
-### DEC-002: Redis for Agent Communication
-
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** Multi-agent architecture needs inter-agent messaging.
+**Context:**
+Triad requires three distinct agent roles. Claude (planning) is handled via Claude Code CLI. For implementation (Codex) and review (Gemini), CLI tools provide:
+- Scriptable automation
+- CI/CD integration capability
+- Consistent interface for wrapper scripts
 
 **Options Considered:**
-1. **Redis pub/sub** — Fast, simple, widely supported
-2. **RabbitMQ** — More features, more complexity
-3. **Database polling** — Simple but inefficient
-4. **Direct function calls** — Tight coupling, not scalable
+1. Web interfaces only (ChatGPT, AI Studio) — manual, not automatable
+2. Direct API calls — more control but more code to maintain
+3. Official CLI tools — balance of simplicity and automation
 
-**Decision:** Redis pub/sub with in-memory fallback (Option 1)
-**Rationale:** Redis is already needed for Celery. Pub/sub is simple and sufficient for agent communication. Fallback allows development without Redis running.
-**Consequences:** Redis dependency. Need graceful handling when Redis unavailable.
+**Outcome:**
+CLI tools selected. Wrapper scripts (`feed-codex.sh`, `review-diff.sh`) will abstract CLI usage. If CLIs prove limited, can fall back to direct API calls in Phase 3.
 
 ---
 
-### DEC-003: Celery for Background Tasks
+## 2026-01-28 — CI/CD Platform Selection
 
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** Need background task processing for agents and scheduled jobs.
+**Decision:**
+Use GitHub Actions for Triad automation.
+
+**Context:**
+Repo hosted on GitHub (`rsoneill21/triad`). Need automated triggers for:
+- Gemini review on PR open/update
+- Optional Codex task execution (manual trigger)
 
 **Options Considered:**
-1. **Celery + Redis** — Mature, feature-rich, good monitoring
-2. **FastAPI BackgroundTasks** — Simple but limited
-3. **Dramatiq** — Simpler than Celery but less ecosystem
-4. **asyncio only** — No persistence, lost on restart
+1. GitHub Actions — native integration, free for public repos
+2. GitLab CI — would require migration
+3. CircleCI/Jenkins — additional setup overhead
 
-**Decision:** Celery with Redis broker (Option 1)
-**Rationale:** Celery provides task persistence, retries, scheduling (beat), and monitoring. Redis already needed for agent messaging. Well-documented and battle-tested.
-**Consequences:** Additional worker process needed. Redis required for production.
+**Outcome:**
+GitHub Actions selected. Native `gh` CLI available in runners. PR comments straightforward via `gh pr comment`.
 
 ---
 
-### DEC-004: Dark Theme Default with Light Option
+## 2026-01-28 — OpenCode CLI as Implementation Agent
 
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** User preference for UI theme.
+**Decision:**
+Use OpenCode CLI (`opencode`) as an implementation agent alongside Codex CLI.
+
+**Context:**
+Testing revealed OpenCode is installed and functional. Provides an alternative implementation path with different model options.
+
+**Verified Setup:**
+- Path: `~/.opencode/bin/opencode`
+- Version: `1.1.36`
+- Working model: `opencode/big-pickle`
+
+**Usage:**
+```bash
+# Basic message
+opencode run -m opencode/big-pickle "your prompt here"
+
+# With file attachment
+opencode run -m opencode/big-pickle -f PLAN.md "implement task 1"
+
+# Continue previous session
+opencode run -c "follow up message"
+
+# JSON output for parsing
+opencode run -m opencode/big-pickle --format json "prompt"
+```
+
+**Available Models:**
+- `opencode/big-pickle` (verified working)
+- `opencode/gpt-5-nano`
+- `openai/gpt-5.1-codex`
+- `openai/gpt-5.1-codex-max`
+- `openai/gpt-5.1-codex-mini`
+- `openai/gpt-5.2`
+- `openai/gpt-5.2-codex`
+
+**Outcome:**
+OpenCode available as implementation option. Use `opencode run -m opencode/big-pickle` for tasks. Codex CLI remains primary; OpenCode provides backup/alternative.
+
+---
+
+## 2026-01-28 — AGENTS_STATE.md Ownership Model
+
+**Decision:**
+Hybrid ownership of AGENTS_STATE.md across agents.
+
+**Context:**
+Single-owner model causes state to lag behind reality. Multi-owner model distributes updates to those with direct knowledge.
 
 **Options Considered:**
-1. **Dark only** — Common for trading apps
-2. **Light only** — Traditional
-3. **Dark default + light option** — User choice
-4. **System preference detection** — Automatic
+1. Claude owns all — simpler but stale
+2. Codex owns all — misses planning context
+3. Hybrid — each agent owns relevant sections
 
-**Decision:** Dark theme default with light theme toggle (Option 3)
-**Rationale:** Trading apps traditionally use dark themes (easier on eyes during long sessions). User requested light option as well. Theme preference persisted in localStorage.
-**Consequences:** ThemeContext for state management. CSS variables or Tailwind dark: classes for styling.
+**Outcome:**
+Hybrid model adopted:
+- Claude owns: Goal, Constraints, Next
+- Codex owns: Completed, In Progress, How to Run
+- Gemini owns: Known Issues
 
 ---
 
-### DEC-005: Collapsible Sidebar Navigation
+## 2026-01-28 — Git Branching Strategy
 
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** Navigation UI layout for dashboard.
+**Decision:**
+Use agent-prefixed feature branches with protected main.
+
+**Context:**
+Working directly on main risks:
+- Untested changes reaching production
+- No review opportunity before merge
+- Unclear attribution of who changed what
+- Merge conflicts between agents
 
 **Options Considered:**
-1. **Fixed sidebar** — Always visible, takes space
-2. **Collapsible sidebar** — Toggle between full and icon-only
-3. **Top nav only** — Horizontal, limited items
-4. **Hamburger menu** — Hidden by default, mobile-style
+1. **Trunk-based (main only)** — simple but risky, no review gate
+2. **Feature branches** — `feature/<name>` — good isolation but unclear ownership
+3. **Agent-prefixed branches** — `claude/<task>`, `codex/<task>` — clear ownership + isolation
 
-**Decision:** Collapsible sidebar + top nav bar (Option 2 + 3 hybrid)
-**Rationale:** User requested "pop in/out" sidebar with nav bar. Sidebar state persisted. Works well on desktop and mobile.
-**Consequences:** Sidebar state in localStorage. Responsive breakpoints needed.
+**Outcome:**
+Agent-prefixed branching adopted:
+
+```
+main (protected)
+├── claude/<task>    ← Planning/documentation changes
+├── codex/<task>     ← Implementation work
+└── gemini/<task>    ← Review-driven fixes (rare)
+```
+
+**Branch Naming Convention:**
+- `claude/` — Documentation, PLAN.md, DECISIONS.md, architecture
+- `codex/` — Code implementation, scripts, configs
+- `gemini/` — Review-initiated fixes (when Gemini identifies issues)
+
+**Workflow:**
+1. Create branch: `git checkout -b <agent>/<short-description>`
+2. Make changes and commit
+3. Push and create PR against main
+4. Gemini reviews (for codex branches)
+5. Human approves and merges
+
+**Rules:**
+- Never commit directly to main
+- All changes via PR
+- Human approval required for merge
+- Delete branch after merge
 
 ---
 
-### DEC-006: Kraken as Primary Exchange
+## 2026-02-03 — Paper trading decision telemetry
 
-**Date:** 2026-01-29
-**Status:** accepted
-**Context:** Need to choose initial exchange integration.
+**Decision:**
+Enrich the paper trading engine with market, indicator, and near-miss context, persist that metadata with simulated trades, and expose the AI decision log via a new `/api/market/decisions` endpoint so analysts can query every logged choice.
+
+**Context:**
+Feature 47 demands that paper trading capture “entry/exit points and timing,” “market conditions at time of trade,” “indicators that triggered decisions,” and “near-misses.” The existing strategy endpoint only writes the raw signal dictionary to `ai_decisions` with minimal metadata, so downstream analysis lacks structured context when reviewing simulated decisions.
 
 **Options Considered:**
-1. **Kraken** — Good API, reliable, user's preference
-2. **Binance** — Largest volume, complex API
-3. **Coinbase** — US-friendly, simpler API
-4. **Multi-exchange from start** — More work upfront
+1. Leave the existing `AIDecision` logging untouched and rely on offline queries to reconstruct context from trade data. (Rejected because analysts still lacked consistent indicator snapshots and near-miss reasoning.)
+2. Expand the strategy API to comb through indicator services before each request. (Rejected because it duplicated logic already centralized in the paper trading engine and risked mismatched reasoning.)
+3. Extend the paper trading engine to build the context as trades execute, store it on the signal + trade metadata, and provide a dedicated endpoint to fetch recent `ai_decisions`. (Chosen.)
 
-**Decision:** Kraken first, architecture supports adding others (Option 1)
-**Rationale:** User specified Kraken. Good documentation and API. Architecture will use abstraction layer to allow adding Binance/Coinbase later.
-**Consequences:** krakenex library for API. Exchange abstraction layer needed for future exchanges.
-
----
-
-## Decision Template
-
-When adding a decision, use this format:
-
-### DEC-XXX: _Title_
-
-**Date:** YYYY-MM-DD
-**Status:** proposed | accepted | deprecated | superseded
-**Context:** _What situation prompted this decision?_
-
-**Options Considered:**
-1. _Option A_ — pros/cons
-2. _Option B_ — pros/cons
-3. _Option C_ — pros/cons
-
-**Decision:** _Which option was chosen?_
-**Rationale:** _Why this option over others?_
-**Consequences:** _What are the implications? Any follow-up work needed?_
-
----
-
-## Superseded Decisions
-
-_Decisions that have been replaced by newer ones._
+**Outcome:**
+Paper trading now keeps a normalized price history, computes volatility/momentum/indicator snapshots, marks near-miss conditions, and records that metadata alongside each signal. The richer metadata flows through trade persistence and the AI decision log that the new `/api/market/decisions` endpoint surfaces, giving analysts the structured context they need for review.

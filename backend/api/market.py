@@ -5,9 +5,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
 
+from db.database import fetch_ai_decisions, get_db
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
 from services.kraken_ws import KrakenWSFeed, kraken_ws
 from services.portfolio import PortfolioSnapshot, portfolio_service
@@ -107,6 +109,45 @@ class OrderbookResponse(BaseModel):
     symbol: str
     bids: List[OrderbookEntry]
     asks: List[OrderbookEntry]
+
+
+class DecisionRecord(BaseModel):
+    id: int
+    agent_name: str
+    decision_type: str
+    reasoning: Optional[Dict[str, Any]]
+    confidence_score: Optional[float]
+    action_taken: Optional[str]
+    timestamp: datetime
+    related_strategy_id: Optional[int]
+    related_trade_id: Optional[int]
+    near_miss: bool
+    near_miss_reason: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DecisionLogResponse(BaseModel):
+    decisions: List[DecisionRecord]
+    total: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def _map_decision(record: Any) -> DecisionRecord:
+    return DecisionRecord(
+        id=record.id,
+        agent_name=record.agent_name,
+        decision_type=record.decision_type,
+        reasoning=record.reasoning_json,
+        confidence_score=record.confidence_score,
+        action_taken=record.action_taken,
+        timestamp=record.timestamp,
+        related_strategy_id=record.related_strategy_id,
+        related_trade_id=record.related_trade_id,
+        near_miss=bool(record.near_miss),
+        near_miss_reason=record.near_miss_reason,
+    )
 
 def _handle_kraken_error(exc: KrakenAPIError) -> HTTPException:
     return HTTPException(
@@ -321,6 +362,33 @@ async def get_portfolio(force_refresh: bool = Query(False, description="Skip cac
         raise _handle_kraken_error(exc)
 
 
+@router.get("/decisions", response_model=DecisionLogResponse)
+async def list_ai_decisions(
+    strategy_id: Optional[int] = Query(
+        None, description="Return decisions tied to a specific strategy ID"
+    ),
+    since: Optional[datetime] = Query(
+        None,
+        description="Earliest timestamp (inclusive) to include in the response",
+    ),
+    limit: int = Query(
+        50, ge=1, le=200, description="Maximum number of decision records to return"
+    ),
+    db: Session = Depends(get_db),
+) -> DecisionLogResponse:
+    """Return AI decision log entries for auditing paper trading choices."""
+    total, records = fetch_ai_decisions(
+        db,
+        strategy_id=strategy_id,
+        since=since,
+        limit=limit,
+    )
+    return DecisionLogResponse(
+        total=total,
+        decisions=[_map_decision(record) for record in records],
+    )
+
+
 ALLOWED_WS_FEEDS = {
     KrakenWSFeed.TICKER.value,
     KrakenWSFeed.TRADE.value,
@@ -329,10 +397,14 @@ ALLOWED_WS_FEEDS = {
 
 
 @router.websocket("/stream/{feed}")
-async def market_stream(websocket: WebSocket, feed: str):
+async def market_stream(
+    websocket: WebSocket,
+    feed: str,
+    symbol: Optional[str] = Query(None)
+):
     """
     WebSocket endpoint that streams Kraken updates to connected clients.
-    Clients pick a feed (ticker, trade, ohlc) and receive matching events.
+    Clients pick a feed (ticker, trade, ohlc) and optionally a symbol.
     """
     feed = feed.lower()
     if feed not in ALLOWED_WS_FEEDS:
@@ -340,9 +412,24 @@ async def market_stream(websocket: WebSocket, feed: str):
         return
 
     await websocket.accept()
+
+    # Trigger on-demand subscription if symbol is provided
+    if symbol:
+        try:
+            normalized = _normalize_trading_pair(symbol)
+            if feed == KrakenWSFeed.TICKER.value:
+                await kraken_ws.subscribe_ticker([normalized])
+            elif feed == KrakenWSFeed.TRADE.value:
+                await kraken_ws.subscribe_trades([normalized])
+            elif feed == KrakenWSFeed.OHLC.value:
+                await kraken_ws.subscribe_ohlc([normalized])
+        except Exception as e:
+            logger.error(f"Failed to subscribe to {feed} for {symbol}: {e}")
+
     kraken_ws.add_client(websocket, feeds={feed})
     try:
         while True:
+            # Keep connection alive
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass

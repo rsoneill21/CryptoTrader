@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 from db.database import SessionLocal
 from db.models import Trade
 
+from core.indicators import indicator_snapshot
+
+_PRICE_HISTORY_MAXLEN = 200
+_NEAR_MISS_THRESHOLD = 0.002
+
 logger = logging.getLogger(__name__)
 
 
@@ -166,6 +171,9 @@ class PaperTradingEngine:
         self._unrealized_pnl = 0.0
         self._positions: Dict[str, List[_MutablePosition]] = defaultdict(list)
         self._price_book: Dict[str, float] = {}
+        self._price_history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=_PRICE_HISTORY_MAXLEN)
+        )
         self._strategy_metrics: Dict[int, _StrategyMetricsState] = {}
         self._db_factory = db_factory
 
@@ -174,10 +182,13 @@ class PaperTradingEngine:
 
         async with self._lock:
             price = self._resolve_price(signal.symbol, signal.price)
+            context = self._build_decision_context(signal, price)
+            self._apply_decision_context(signal, context)
+            self._record_price(signal.symbol, price)
             if signal.intent == TradeIntent.ENTRY:
                 self._open_position(signal, price)
                 return []
-            return self._close_positions(signal, price)
+            return self._close_positions(signal, price, context)
 
     async def update_market_price(self, symbol: str, price: float) -> None:
         """Refresh the last known market price for a symbol."""
@@ -189,6 +200,7 @@ class PaperTradingEngine:
 
         async with self._lock:
             self._price_book[normalized_symbol] = normalized_price
+            self._record_price(normalized_symbol, normalized_price)
             self._recalculate_unrealized()
 
     async def persist_closed_trades(self, trades: Iterable[PaperTradeResult]) -> int:
@@ -233,7 +245,9 @@ class PaperTradingEngine:
         self._positions[entry.symbol].append(entry)
         self._recalculate_unrealized()
 
-    def _close_positions(self, signal: PaperTradeSignal, price: float) -> List[PaperTradeResult]:
+    def _close_positions(
+        self, signal: PaperTradeSignal, price: float, context: Dict[str, Any]
+    ) -> List[PaperTradeResult]:
         symbol_positions = self._positions.get(signal.symbol)
         if not symbol_positions:
             raise ValueError("no open positions to close for %s" % signal.symbol)
@@ -249,6 +263,12 @@ class PaperTradingEngine:
             self._realized_pnl += pnl
             self._cash += pnl
 
+            exit_metadata = dict(position.metadata)
+            exit_metadata["exit_reasoning"] = context.get("reasoning", {})
+            exit_metadata["market_conditions_exit"] = context.get("market_conditions")
+            exit_metadata["indicators_exit"] = context.get("indicators")
+            exit_metadata["near_miss_exit"] = context.get("near_miss")
+
             result = PaperTradeResult(
                 symbol=signal.symbol,
                 side=position.side,
@@ -259,7 +279,7 @@ class PaperTradingEngine:
                 exit_time=now,
                 pnl=pnl,
                 strategy_id=position.strategy_id,
-                metadata=dict(position.metadata),
+                metadata=exit_metadata,
             )
             results.append(result)
             self._record_strategy_metrics(result)
@@ -297,6 +317,102 @@ class PaperTradingEngine:
         metrics.last_trade_at = result.exit_time
         metrics.pnl_sum_of_squares += result.pnl * result.pnl
         metrics.recent_trade_pnls.append(result.pnl)
+
+    def _build_decision_context(self, signal: PaperTradeSignal, price: float) -> Dict[str, Any]:
+        symbol = self._normalize_symbol(signal.symbol)
+        history = list(self._price_history.get(symbol, []))
+        recent_slice = history[-10:]
+        last_price = recent_slice[-1] if recent_slice else None
+        momentum: Optional[float] = None
+        if last_price:
+            if last_price != 0:
+                momentum = (price - last_price) / last_price
+
+        volatility = self._calculate_volatility(recent_slice)
+        snapshot = indicator_snapshot(history[-60:])
+
+        direction = "flat"
+        if momentum is not None:
+            if momentum > 0:
+                direction = "bullish"
+            elif momentum < 0:
+                direction = "bearish"
+
+        recent_low = min(recent_slice) if recent_slice else None
+        recent_high = max(recent_slice) if recent_slice else None
+        range_pct = None
+        if recent_low and recent_high and recent_low > 0:
+            range_pct = (recent_high - recent_low) / recent_low
+
+        summary = f"{signal.intent.value.capitalize()} {signal.quantity} {signal.side.value if signal.side else 'position'} @ {price:.2f}"
+
+        near_miss_flag = momentum is not None and abs(momentum) < _NEAR_MISS_THRESHOLD
+        near_miss_reason = (
+            f"momentum of {momentum:.4f} was within the {int(_NEAR_MISS_THRESHOLD * 100)}% threshold"
+            if near_miss_flag
+            else "price movement decisively moved beyond the threshold"
+        )
+
+        reasoning = {
+            "intent": signal.intent.value,
+            "side": signal.side.value if signal.side else None,
+            "price": price,
+            "quantity": signal.quantity,
+            "momentum": momentum,
+            "last_price": last_price,
+            "summary": summary,
+            "recent_prices": recent_slice,
+        }
+
+        market_conditions = {
+            "direction": direction,
+            "volatility": volatility,
+            "recent_price_low": recent_low,
+            "recent_price_high": recent_high,
+            "range_pct": range_pct,
+            "history_length": len(history),
+        }
+
+        near_miss = {
+            "flag": near_miss_flag,
+            "threshold": _NEAR_MISS_THRESHOLD,
+            "reason": near_miss_reason,
+            "change_pct": momentum,
+        }
+
+        return {
+            "reasoning": reasoning,
+            "market_conditions": market_conditions,
+            "indicators": snapshot,
+            "near_miss": near_miss,
+        }
+
+    def _apply_decision_context(self, signal: PaperTradeSignal, context: Dict[str, Any]) -> None:
+        metadata = signal.metadata
+        if signal.intent == TradeIntent.ENTRY:
+            metadata["entry_reasoning"] = context["reasoning"]
+            metadata["market_conditions_entry"] = context["market_conditions"]
+            metadata["indicators_entry"] = context["indicators"]
+            metadata["near_miss_entry"] = context["near_miss"]
+        else:
+            metadata["exit_reasoning"] = context["reasoning"]
+            metadata["market_conditions_exit"] = context["market_conditions"]
+            metadata["indicators_exit"] = context["indicators"]
+            metadata["near_miss_exit"] = context["near_miss"]
+        metadata["market_conditions"] = context["market_conditions"]
+        metadata["indicators"] = context["indicators"]
+        metadata["near_miss"] = context["near_miss"]
+
+    def _record_price(self, symbol: str, price: float) -> None:
+        normalized = self._normalize_symbol(symbol)
+        self._price_history[normalized].append(float(price))
+
+    def _calculate_volatility(self, values: List[float]) -> Optional[float]:
+        if len(values) < 2:
+            return None
+        average = sum(values) / len(values)
+        variance = sum((value - average) ** 2 for value in values) / len(values)
+        return math.sqrt(variance)
 
     def _calculate_pnl(
         self, side: TradeSide, entry_price: float, exit_price: float, quantity: float
@@ -373,6 +489,30 @@ class PaperTradingEngine:
         persisted = 0
         try:
             for trade in trades:
+                entry_market = trade.metadata.get("market_conditions_entry")
+                exit_market = trade.metadata.get("market_conditions_exit")
+                market_conditions_payload: Any = None
+                if entry_market is not None or exit_market is not None:
+                    market_conditions_payload = {}
+                    if entry_market is not None:
+                        market_conditions_payload["entry"] = entry_market
+                    if exit_market is not None:
+                        market_conditions_payload["exit"] = exit_market
+                if market_conditions_payload is None:
+                    market_conditions_payload = trade.metadata.get("market_conditions")
+
+                entry_indicators = trade.metadata.get("indicators_entry")
+                exit_indicators = trade.metadata.get("indicators_exit")
+                indicators_payload: Any = None
+                if entry_indicators is not None or exit_indicators is not None:
+                    indicators_payload = {}
+                    if entry_indicators is not None:
+                        indicators_payload["entry"] = entry_indicators
+                    if exit_indicators is not None:
+                        indicators_payload["exit"] = exit_indicators
+                if indicators_payload is None:
+                    indicators_payload = trade.metadata.get("indicators")
+
                 db_trade = Trade(
                     strategy_id=trade.strategy_id,
                     is_paper=True,
@@ -387,8 +527,8 @@ class PaperTradingEngine:
                     exit_time=trade.exit_time,
                     entry_reasoning_json=trade.metadata.get("entry_reasoning"),
                     exit_reasoning_json=trade.metadata.get("exit_reasoning"),
-                    market_conditions_json=trade.metadata.get("market_conditions"),
-                    indicators_json=trade.metadata.get("indicators"),
+                    market_conditions_json=market_conditions_payload,
+                    indicators_json=indicators_payload,
                 )
                 db.add(db_trade)
                 persisted += 1
