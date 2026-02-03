@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from db.database import fetch_ai_decisions, get_db
 from db.models import AIDecision
+from core.auth import get_current_session_ws
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
 from services.kraken_ws import KrakenWSFeed, kraken_ws
 from services.market_data import market_data_service
@@ -620,7 +621,8 @@ ALLOWED_WS_FEEDS = {
 async def market_stream(
     websocket: WebSocket,
     feed: str,
-    symbol: Optional[str] = Query(None)
+    symbol: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """
     WebSocket endpoint that streams Kraken updates to connected clients.
@@ -629,6 +631,12 @@ async def market_stream(
     feed = feed.lower()
     if feed not in ALLOWED_WS_FEEDS:
         await websocket.close(code=1003)
+        return
+
+    try:
+        await get_current_session_ws(websocket, db)
+    except HTTPException:
+        await websocket.close(code=1008)
         return
 
     await websocket.accept()

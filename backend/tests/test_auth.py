@@ -63,11 +63,19 @@ from api.auth import (
 from db.database import Base, engine, SessionLocal
 from db.models import User, Session as UserSession
 from core.security import compute_totp
+from core.auth import get_current_session_ws
 from services.password_reset import password_reset_service
 from services.email import email_service
 
 VALID_EMAIL = "tester@example.com"
 VALID_PASSWORD = "Str0ngPass!"
+
+
+class DummyWebSocket:
+    def __init__(self, cookies=None, headers=None, query_params=None):
+        self.cookies = cookies or {}
+        self.headers = headers or {}
+        self.query_params = query_params or {}
 
 
 @pytest.fixture(autouse=True)
@@ -370,3 +378,32 @@ async def test_login_rate_limit_exceeded(db_session):
             )
         assert exc.value.status_code == 429
         assert "Too many login attempts" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_accepts_cookie_session(db_session):
+    await _create_user(db_session)
+    login_response = await _authenticate(db_session)
+
+    ws = DummyWebSocket(cookies={mock_settings.session_cookie_name: login_response.token})
+    session = await get_current_session_ws(ws, db_session)
+    assert session.user_id == 1
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_accepts_bearer_header(db_session):
+    await _create_user(db_session)
+    login_response = await _authenticate(db_session)
+
+    ws = DummyWebSocket(headers={"authorization": f"Bearer {login_response.token}"})
+    session = await get_current_session_ws(ws, db_session)
+    assert session.user_id == 1
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_rejects_missing_token(db_session):
+    await _create_user(db_session)
+    ws = DummyWebSocket()
+    with pytest.raises(HTTPException) as exc:
+        await get_current_session_ws(ws, db_session)
+    assert exc.value.status_code == 401
