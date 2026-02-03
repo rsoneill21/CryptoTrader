@@ -33,7 +33,6 @@ class OrderSummary(BaseModel):
     updated_at: datetime
     error_message: Optional[str]
     side_color: str
-    side_color: str
 
 
 class ActiveTradeResponse(BaseModel):
