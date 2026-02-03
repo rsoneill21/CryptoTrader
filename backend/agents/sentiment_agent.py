@@ -73,6 +73,22 @@ class SentimentPayload(BaseModel):
     )
 
 
+class SentimentSummary(BaseModel):
+    """Aggregated sentiment metrics for a symbol."""
+
+    symbol: str
+    average_score: float
+    positive_mentions: int
+    negative_mentions: int
+    neutral_mentions: int
+    data_points: int
+    latest_summary: Optional[str]
+    last_updated: Optional[datetime]
+    sources: Dict[str, int] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="ignore")
+
+
 DEFAULT_MOCK_FEEDS: Dict[str, List[SentimentFeedItem]] = {
     "twitter": [
         SentimentFeedItem(
@@ -192,6 +208,17 @@ class SentimentAgent(BaseAgent):
                 "type": getattr(message, "message_type", "unknown"),
             },
         )
+
+    async def summarize_symbol(
+        self,
+        symbol: Optional[str],
+        limit: int = 5,
+    ) -> Optional[SentimentSummary]:
+        normalized = self._normalize_symbol(symbol)
+        if not normalized:
+            return None
+        sanitized = max(1, min(limit, 50))
+        return await asyncio.to_thread(self._build_sentiment_summary, normalized, sanitized)
 
     async def _poll_sources(self) -> None:
         try:
@@ -353,6 +380,58 @@ class SentimentAgent(BaseAgent):
             summary=summary,
             raw_data=raw_data,
         )
+
+    def _build_sentiment_summary(self, symbol: str, limit: int) -> Optional[SentimentSummary]:
+        db = self._db_factory()
+        try:
+            rows = (
+                db.query(SentimentData)
+                .filter(SentimentData.symbol == symbol)
+                .order_by(SentimentData.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            if not rows:
+                return None
+
+            positive = negative = neutral = 0
+            total_score = 0.0
+            sources: Dict[str, int] = {}
+            latest_summary: Optional[str] = None
+            last_updated: Optional[datetime] = None
+
+            for index, row in enumerate(rows):
+                score = float(row.sentiment_score or 0.0)
+                total_score += score
+                if score > 0.05:
+                    positive += 1
+                elif score < -0.05:
+                    negative += 1
+                else:
+                    neutral += 1
+                if row.source:
+                    key = row.source.lower()
+                else:
+                    key = "unknown"
+                sources[key] = sources.get(key, 0) + 1
+                if index == 0:
+                    latest_summary = row.summary
+                    last_updated = row.timestamp
+
+            average_score = _clamp_score(total_score / len(rows))
+            return SentimentSummary(
+                symbol=symbol,
+                average_score=average_score,
+                positive_mentions=positive,
+                negative_mentions=negative,
+                neutral_mentions=neutral,
+                data_points=len(rows),
+                latest_summary=latest_summary,
+                last_updated=last_updated,
+                sources=sources,
+            )
+        finally:
+            db.close()
 
     def _filter_by_symbols(
         self,

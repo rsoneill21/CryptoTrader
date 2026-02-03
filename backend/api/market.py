@@ -1,5 +1,6 @@
 """Market data API routes backed by Kraken public endpoints."""
 
+import logging
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -13,9 +14,13 @@ from db.database import fetch_ai_decisions, get_db
 from db.models import AIDecision
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
 from services.kraken_ws import KrakenWSFeed, kraken_ws
+from services.market_data import market_data_service
 from services.portfolio import PortfolioSnapshot, portfolio_service
+from backend.agents.market_analyst import market_analyst_agent
+from backend.agents.sentiment_agent import SentimentSummary, sentiment_agent
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_INTERVALS = list(KrakenService.INTERVAL_MAP.keys())
 
@@ -135,6 +140,47 @@ class DecisionLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TechnicalSnapshot(BaseModel):
+    symbol: str
+    data_points: int
+    direction: str
+    last_price: Optional[Decimal]
+    previous_price: Optional[Decimal]
+    average: Optional[Decimal]
+    high: Optional[Decimal]
+    low: Optional[Decimal]
+    momentum: Optional[Decimal]
+    volatility: Optional[Decimal]
+    price_range: Optional[Decimal]
+    range_pct: Optional[Decimal]
+    last_updated: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AnalystIndicatorSnapshot(BaseModel):
+    short_sma: Optional[Decimal]
+    long_sma: Optional[Decimal]
+    momentum: Optional[Decimal]
+    volatility: Optional[Decimal]
+    price_count: int
+    last_price: Optional[Decimal]
+    last_timestamp: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MarketAnalysisResponse(BaseModel):
+    symbol: str
+    technical: TechnicalSnapshot
+    analyst_indicators: AnalystIndicatorSnapshot
+    insights: List[Dict[str, Any]]
+    sentiment: Optional[SentimentSummary]
+    recommendations: List[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 def _map_decision(record: Any) -> DecisionRecord:
     return DecisionRecord(
         id=record.id,
@@ -149,6 +195,79 @@ def _map_decision(record: Any) -> DecisionRecord:
         near_miss=bool(record.near_miss),
         near_miss_reason=record.near_miss_reason,
     )
+
+
+def _build_technical_snapshot(symbol: str, payload: Dict[str, Any]) -> TechnicalSnapshot:
+    return TechnicalSnapshot(
+        symbol=symbol,
+        data_points=int(payload.get("data_points") or 0),
+        direction=str(payload.get("direction") or "unknown"),
+        last_price=_safe_decimal(payload.get("last_price")),
+        previous_price=_safe_decimal(payload.get("previous_price")),
+        average=_safe_decimal(payload.get("average")),
+        high=_safe_decimal(payload.get("high")),
+        low=_safe_decimal(payload.get("low")),
+        momentum=_safe_decimal(payload.get("momentum")),
+        volatility=_safe_decimal(payload.get("volatility")),
+        price_range=_safe_decimal(payload.get("price_range")),
+        range_pct=_safe_decimal(payload.get("range_pct")),
+        last_updated=payload.get("last_updated"),
+    )
+
+
+def _build_indicator_snapshot(payload: Dict[str, Any]) -> AnalystIndicatorSnapshot:
+    return AnalystIndicatorSnapshot(
+        short_sma=_safe_decimal(payload.get("short_sma")),
+        long_sma=_safe_decimal(payload.get("long_sma")),
+        momentum=_safe_decimal(payload.get("momentum")),
+        volatility=_safe_decimal(payload.get("volatility")),
+        price_count=int(payload.get("price_count") or 0),
+        last_price=_safe_decimal(payload.get("last_price")),
+        last_timestamp=payload.get("last_timestamp"),
+    )
+
+
+def _build_recommendations(
+    symbol: str,
+    technical: TechnicalSnapshot,
+    indicator: AnalystIndicatorSnapshot,
+    insights: List[Dict[str, Any]],
+    sentiment: Optional[SentimentSummary],
+) -> List[str]:
+    recommendations: List[str] = []
+    if technical.direction == "rising":
+        recommendations.append(f"{symbol}: Price has been trending higher on recent candles.")
+    elif technical.direction == "falling":
+        recommendations.append(f"{symbol}: Price is slipping lower; monitor for support.")
+    elif technical.direction == "flat":
+        recommendations.append(f"{symbol}: Price action is range-bound; wait for a breakout.")
+
+    if indicator.momentum is not None:
+        threshold = Decimal("0.015")
+        if indicator.momentum > threshold:
+            recommendations.append("Momentum remains positive; follow-through action is likely.")
+        elif indicator.momentum < -threshold:
+            recommendations.append("Momentum flipped negative; a retracement may continue.")
+
+    if sentiment:
+        if sentiment.average_score >= 0.2:
+            recommendations.append("Community sentiment is bullish; buyers dominate the chatter.")
+        elif sentiment.average_score <= -0.2:
+            recommendations.append("Sentiment tone is bearish; respect resistance levels.")
+        else:
+            recommendations.append("Sentiment stays neutral; let technicals lead the next move.")
+
+    for insight in insights[:2]:
+        summary = insight.get("summary")
+        if summary:
+            snippet = str(summary).strip()
+            if snippet and snippet not in recommendations:
+                recommendations.append(f"Insight: {snippet}")
+
+    if not recommendations:
+        recommendations.append(f"{symbol}: No strong signals; keep watching price and sentiment.")
+
+    return recommendations
 
 
 def fetch_decisions_for_trade(
@@ -342,6 +461,91 @@ async def get_orderbook(
         symbol=symbol,
         bids=bids,
         asks=asks,
+    )
+
+
+@router.get("/analysis/{symbol}", response_model=MarketAnalysisResponse)
+async def get_market_analysis(
+    symbol: str,
+    lookback: int = Query(
+        20,
+        ge=3,
+        le=200,
+        description="Number of recent candles used for the technical snapshot",
+    ),
+    insight_limit: int = Query(
+        3,
+        ge=1,
+        le=6,
+        description="Maximum number of market insights to include",
+    ),
+    sentiment_limit: int = Query(
+        5,
+        ge=1,
+        le=20,
+        description="How many sentiment samples to summarize",
+    ),
+) -> MarketAnalysisResponse:
+    """Provide a blended market analysis for a symbol, including technical, insight, and sentiment cues."""
+    normalized_symbol = _normalize_trading_pair(symbol, parameter="symbol")
+    try:
+        technical_payload = await market_data_service.summarize_symbol(
+            normalized_symbol,
+            lookback=lookback,
+        )
+    except Exception as exc:  # pragma: no cover - best effort summary
+        logger.exception("Failed to summarize technical data for %s: %s", normalized_symbol, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to gather technical data for analysis",
+        ) from exc
+
+    indicator_payload: Dict[str, Any] = {
+        "short_sma": None,
+        "long_sma": None,
+        "momentum": None,
+        "volatility": None,
+        "price_count": 0,
+        "last_price": None,
+        "last_timestamp": None,
+    }
+    try:
+        indicator_payload = await market_analyst_agent.get_indicator_summary(normalized_symbol)
+    except Exception as exc:
+        logger.warning("Indicator summary unavailable for %s: %s", normalized_symbol, exc)
+
+    insights: List[Dict[str, Any]] = []
+    try:
+        insights = await market_analyst_agent.get_recent_insights(normalized_symbol, limit=insight_limit)
+    except Exception as exc:
+        logger.warning("Failed to fetch analyst insights for %s: %s", normalized_symbol, exc)
+
+    sentiment_summary: Optional[SentimentSummary] = None
+    try:
+        sentiment_summary = await sentiment_agent.summarize_symbol(
+            normalized_symbol,
+            limit=sentiment_limit,
+        )
+    except Exception as exc:
+        logger.warning("Sentiment summary unavailable for %s: %s", normalized_symbol, exc)
+
+    technical_snapshot = _build_technical_snapshot(normalized_symbol, technical_payload)
+    indicator_snapshot = _build_indicator_snapshot(indicator_payload)
+    recommendations = _build_recommendations(
+        normalized_symbol,
+        technical_snapshot,
+        indicator_snapshot,
+        insights,
+        sentiment_summary,
+    )
+
+    return MarketAnalysisResponse(
+        symbol=normalized_symbol,
+        technical=technical_snapshot,
+        analyst_indicators=indicator_snapshot,
+        insights=insights,
+        sentiment=sentiment_summary,
+        recommendations=recommendations,
     )
 
 

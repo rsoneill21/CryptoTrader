@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from api import market as market_module
+from backend.agents.sentiment_agent import SentimentSummary
 from services.kraken import KrakenAPIError, OHLC, Ticker
 
 
@@ -109,3 +110,73 @@ async def test_get_market_prices_invalid_symbol():
 
     assert exc.value.status_code == 400
     assert "BASE/QUOTE" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_get_market_analysis_success(monkeypatch):
+    now = datetime.now(timezone.utc)
+    technical_payload = {
+        "data_points": 4,
+        "direction": "rising",
+        "last_price": Decimal("100"),
+        "previous_price": Decimal("98"),
+        "average": Decimal("99"),
+        "high": Decimal("101"),
+        "low": Decimal("97"),
+        "momentum": Decimal("0.02"),
+        "volatility": Decimal("0.04"),
+        "price_range": Decimal("4"),
+        "range_pct": Decimal("0.04"),
+        "last_updated": now,
+    }
+
+    async def fake_summarize(symbol: str, lookback: int, reference=None):
+        return technical_payload
+
+    async def fake_indicator(symbol: str):
+        return {
+            "short_sma": Decimal("99"),
+            "long_sma": Decimal("95"),
+            "momentum": Decimal("0.02"),
+            "volatility": Decimal("0.04"),
+            "price_count": 20,
+            "last_price": Decimal("100"),
+            "last_timestamp": now,
+        }
+
+    async def fake_insights(symbol: str, limit: int):
+        return [{"summary": "Short SMA crossed above long SMA"}]
+
+    async def fake_sentiment(symbol: str, limit: int):
+        return SentimentSummary(
+            symbol=symbol,
+            average_score=0.3,
+            positive_mentions=2,
+            negative_mentions=0,
+            neutral_mentions=0,
+            data_points=2,
+            latest_summary="Bullish chatter",
+            last_updated=now,
+            sources={"twitter": 2},
+        )
+
+    monkeypatch.setattr(market_module.market_data_service, "summarize_symbol", fake_summarize)
+    monkeypatch.setattr(market_module.market_analyst_agent, "get_indicator_summary", fake_indicator)
+    monkeypatch.setattr(market_module.market_analyst_agent, "get_recent_insights", fake_insights)
+    monkeypatch.setattr(market_module.sentiment_agent, "summarize_symbol", fake_sentiment)
+
+    response = await market_module.get_market_analysis("btc/usd")
+    assert response.symbol == "BTC/USD"
+    assert response.technical.data_points == 4
+    assert response.technical.last_price == Decimal("100")
+    assert response.analyst_indicators.price_count == 20
+    assert response.sentiment is not None
+    assert response.sentiment.average_score == 0.3
+    assert any("Insight" in rec for rec in response.recommendations)
+
+
+@pytest.mark.asyncio
+async def test_get_market_analysis_invalid_symbol():
+    with pytest.raises(HTTPException) as exc:
+        await market_module.get_market_analysis("not-a-pair")
+    assert exc.value.status_code == 400

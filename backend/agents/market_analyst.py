@@ -11,7 +11,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from backend.agents.base import BaseAgent
+from backend.agents.base import AgentMessage, BaseAgent
 from backend.core.message_queue import Channels, message_queue
 from backend.core.tasks import log_system_event
 from backend.services.kraken_ws import KrakenWSFeed, TickerUpdate, kraken_ws
@@ -133,6 +133,13 @@ class MarketAnalystAgent(BaseAgent):
 
     async def run(self) -> None:
         await asyncio.sleep(0.1)
+
+    async def process_message(self, message: AgentMessage) -> None:
+        self._log_system_event(
+            "debug",
+            "Market analyst ignored message",
+            {"sender": message.sender, "message_type": message.message_type},
+        )
 
     async def _handle_ticker_update(self, update: TickerUpdate) -> None:
         try:
@@ -323,6 +330,27 @@ class MarketAnalystAgent(BaseAgent):
             return []
         window = history[-limit:]
         return [entry.copy() for entry in window]
+
+    async def get_indicator_summary(self, symbol: str) -> Dict[str, Any]:
+        """
+        Return the most recent indicator values computed for a symbol.
+        """
+        state = self._symbol_state(symbol)
+        short_sma = self._calculate_sma(state.prices, self.SHORT_WINDOW)
+        long_sma = self._calculate_sma(state.prices, self.LONG_WINDOW)
+        momentum = self._calculate_momentum(state.prices, self.MOMENTUM_WINDOW)
+        volatility = self._calculate_volatility(state.prices, self.VOLATILITY_WINDOW)
+        last_price = state.prices[-1] if state.prices else None
+        last_timestamp = state.timestamps[-1] if state.timestamps else None
+        return {
+            "short_sma": short_sma,
+            "long_sma": long_sma,
+            "momentum": momentum,
+            "volatility": volatility,
+            "price_count": len(state.prices),
+            "last_price": last_price,
+            "last_timestamp": last_timestamp,
+        }
 
     def _calculate_momentum(self, prices: Deque[Decimal], lookback: int) -> Optional[Decimal]:
         if len(prices) < lookback + 1:

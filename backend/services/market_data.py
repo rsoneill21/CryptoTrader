@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.orm import Session
@@ -255,6 +255,128 @@ class MarketDataService:
             ]
         finally:
             db.close()
+
+
+    async def summarize_symbol(
+        self,
+        symbol: str,
+        lookback: int = 20,
+        reference: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Produce lightweight technical highlights for a symbol."""
+
+        target_reference = reference or datetime.utcnow()
+        sanitized = max(1, min(lookback, 200))
+        candles = await self.fetch_recent_candles(symbol, target_reference, sanitized)
+        return self._build_summary(symbol, candles)
+
+    def _build_summary(self, symbol: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+        data_points = len(candles)
+        if data_points == 0:
+            return {
+                "symbol": symbol,
+                "data_points": 0,
+                "direction": "unknown",
+                "last_price": None,
+                "previous_price": None,
+                "average": None,
+                "high": None,
+                "low": None,
+                "momentum": None,
+                "volatility": None,
+                "price_range": None,
+                "range_pct": None,
+                "last_updated": None,
+            }
+
+        close_values: List[Decimal] = []
+        high_values: List[Decimal] = []
+        low_values: List[Decimal] = []
+        last_updated = None
+
+        for entry in candles:
+            close_val = self._to_decimal(entry.get("close"))
+            if close_val is not None:
+                close_values.append(close_val)
+            high_val = self._to_decimal(entry.get("high"))
+            if high_val is not None:
+                high_values.append(high_val)
+            low_val = self._to_decimal(entry.get("low"))
+            if low_val is not None:
+                low_values.append(low_val)
+            if entry.get("timestamp"):
+                last_updated = entry["timestamp"]
+
+        if not close_values:
+            return {
+                "symbol": symbol,
+                "data_points": data_points,
+                "direction": "unknown",
+                "last_price": None,
+                "previous_price": None,
+                "average": None,
+                "high": max(high_values) if high_values else None,
+                "low": min(low_values) if low_values else None,
+                "momentum": None,
+                "volatility": None,
+                "price_range": None,
+                "range_pct": None,
+                "last_updated": last_updated,
+            }
+
+        last_price = close_values[-1]
+        previous_price = close_values[-2] if len(close_values) > 1 else last_price
+        average = sum(close_values, Decimal("0")) / Decimal(len(close_values))
+        high = max(high_values) if high_values else None
+        low = min(low_values) if low_values else None
+        direction = "unknown"
+        if last_price is not None and previous_price is not None:
+            if last_price > previous_price:
+                direction = "rising"
+            elif last_price < previous_price:
+                direction = "falling"
+            else:
+                direction = "flat"
+
+        momentum = None
+        if previous_price and previous_price != Decimal("0"):
+            momentum = (last_price - previous_price) / previous_price
+
+        price_range = None
+        if high is not None and low is not None:
+            price_range = high - low
+
+        volatility = None
+        range_pct = None
+        if average and price_range is not None:
+            if average != Decimal("0"):
+                volatility = price_range / average
+                range_pct = volatility
+
+        return {
+            "symbol": symbol,
+            "data_points": data_points,
+            "direction": direction,
+            "last_price": last_price,
+            "previous_price": previous_price,
+            "average": average,
+            "high": high,
+            "low": low,
+            "momentum": momentum,
+            "volatility": volatility,
+            "price_range": price_range,
+            "range_pct": range_pct,
+            "last_updated": last_updated,
+        }
+
+    @staticmethod
+    def _to_decimal(value: Any) -> Optional[Decimal]:
+        if value is None:
+            return None
+        try:
+            return Decimal(str(value))
+        except (TypeError, ValueError, ArithmeticError):
+            return None
 
 
 market_data_service = MarketDataService()
