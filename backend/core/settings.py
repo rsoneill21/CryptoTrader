@@ -58,6 +58,7 @@ class AppSettings(BaseSettings):
     notification_digest_minutes: int = Field(60, env="NOTIFICATION_DIGEST_MINUTES")
     notification_dnd_start: Optional[str] = Field(None, env="NOTIFICATION_DND_START")
     notification_dnd_end: Optional[str] = Field(None, env="NOTIFICATION_DND_END")
+    mock_email_log_tokens: bool = Field(False, env="MOCK_EMAIL_LOG_TOKENS")
 
     theme_default_mode: ThemeMode = Field(ThemeMode.DARK.value, env="THEME_DEFAULT_MODE")
     theme_high_contrast: bool = Field(False, env="THEME_HIGH_CONTRAST")

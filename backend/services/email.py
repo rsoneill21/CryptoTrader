@@ -7,7 +7,10 @@ Currently uses mock implementation - replace with real SMTP/SendGrid/etc in prod
 import logging
 from typing import Optional
 
+from core.settings import get_app_settings
+
 logger = logging.getLogger(__name__)
+settings = get_app_settings()
 
 
 class EmailService:
@@ -57,9 +60,12 @@ If you did not request this reset, please ignore this email.
             "reset_url": reset_url,
         }
 
-        # Log for development
-        logger.info(f"[MOCK EMAIL] Password reset email to {to_email}")
-        logger.info(f"[MOCK EMAIL] Reset URL: {reset_url}")
+        # Log for development (avoid leaking tokens unless explicitly enabled)
+        logger.info("[MOCK EMAIL] Password reset email to %s", to_email)
+        if settings.mock_email_log_tokens:
+            logger.info("[MOCK EMAIL] Reset URL: %s", reset_url)
+        else:
+            logger.info("[MOCK EMAIL] Reset URL: [REDACTED]")
 
         # Store for testing
         self.sent_emails.append(email_content)
@@ -68,8 +74,12 @@ If you did not request this reset, please ignore this email.
         print(f"\n{'='*50}")
         print(f"MOCK EMAIL - Password Reset")
         print(f"To: {to_email}")
-        print(f"Reset URL: {reset_url}")
-        print(f"Token: {reset_token}")
+        if settings.mock_email_log_tokens:
+            print(f"Reset URL: {reset_url}")
+            print(f"Token: {reset_token}")
+        else:
+            print("Reset URL: [REDACTED]")
+            print("Token: [REDACTED]")
         print(f"{'='*50}\n")
 
         return True
