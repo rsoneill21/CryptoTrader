@@ -1,15 +1,18 @@
 """
 Password reset token management.
 
-Uses in-memory storage for development.
-For production, use database table or Redis.
+Backed by the database for persistence across worker processes.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from dataclasses import dataclass
+
+from sqlalchemy import or_
 
 from core.security import generate_reset_token
+from db.database import SessionLocal
+from db.models import PasswordResetToken as PasswordResetTokenModel
 
 
 @dataclass
@@ -49,12 +52,28 @@ class PasswordResetService:
         token = generate_reset_token()
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.token_lifetime_minutes)
 
-        self.tokens[token] = ResetToken(
+        record = ResetToken(
             token=token,
             user_id=user_id,
             email=email,
             expires_at=expires_at,
         )
+
+        session = SessionLocal()
+        try:
+            db_token = PasswordResetTokenModel(
+                token=token,
+                user_id=user_id,
+                email=email,
+                expires_at=expires_at,
+                used=False,
+            )
+            session.add(db_token)
+            session.commit()
+        finally:
+            session.close()
+
+        self.tokens[token] = record
 
         # Clean up expired tokens
         self._cleanup_expired()
@@ -71,18 +90,31 @@ class PasswordResetService:
         Returns:
             ResetToken if valid, None if invalid/expired/used
         """
-        reset_token = self.tokens.get(token)
+        session = SessionLocal()
+        try:
+            db_token = (
+                session.query(PasswordResetTokenModel)
+                .filter(PasswordResetTokenModel.token == token)
+                .first()
+            )
+            if not db_token:
+                return None
+            if db_token.used:
+                return None
+            if db_token.expires_at < datetime.now(timezone.utc):
+                return None
 
-        if not reset_token:
-            return None
-
-        if reset_token.used:
-            return None
-
-        if reset_token.expires_at < datetime.now(timezone.utc):
-            return None
-
-        return reset_token
+            reset_token = ResetToken(
+                token=db_token.token,
+                user_id=db_token.user_id,
+                email=db_token.email,
+                expires_at=db_token.expires_at,
+                used=db_token.used,
+            )
+            self.tokens[token] = reset_token
+            return reset_token
+        finally:
+            session.close()
 
     def mark_used(self, token: str) -> bool:
         """
@@ -94,14 +126,37 @@ class PasswordResetService:
         Returns:
             True if token was marked, False if not found
         """
+        session = SessionLocal()
+        try:
+            db_token = (
+                session.query(PasswordResetTokenModel)
+                .filter(PasswordResetTokenModel.token == token)
+                .first()
+            )
+            if not db_token:
+                return False
+            db_token.used = True
+            session.commit()
+        finally:
+            session.close()
+
         reset_token = self.tokens.get(token)
         if reset_token:
             reset_token.used = True
-            return True
-        return False
+        return True
 
     def _invalidate_user_tokens(self, user_id: int) -> None:
         """Invalidate all tokens for a user."""
+        session = SessionLocal()
+        try:
+            session.query(PasswordResetTokenModel).filter(
+                PasswordResetTokenModel.user_id == user_id,
+                PasswordResetTokenModel.used == False,  # noqa: E712
+            ).update({"used": True})
+            session.commit()
+        finally:
+            session.close()
+
         for token in self.tokens.values():
             if token.user_id == user_id:
                 token.used = True
@@ -115,6 +170,18 @@ class PasswordResetService:
         ]
         for token in expired:
             del self.tokens[token]
+
+        session = SessionLocal()
+        try:
+            session.query(PasswordResetTokenModel).filter(
+                or_(
+                    PasswordResetTokenModel.expires_at < now,
+                    PasswordResetTokenModel.used == True,  # noqa: E712
+                )
+            ).delete()
+            session.commit()
+        finally:
+            session.close()
 
 
 # Singleton instance

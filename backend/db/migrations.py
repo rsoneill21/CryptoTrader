@@ -27,3 +27,8 @@ def run_migrations() -> None:
 
     config = _alembic_config()
     command.upgrade(config, "head")
+
+    # Ensure new tables are created even without an explicit Alembic revision.
+    from db.database import Base, engine
+
+    Base.metadata.create_all(bind=engine)

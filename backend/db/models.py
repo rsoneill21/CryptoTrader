@@ -42,6 +42,21 @@ class Session(Base):
     user = relationship("User", back_populates="sessions")
 
 
+class PasswordResetToken(Base):
+    """Password reset token model."""
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token = Column(String(255), unique=True, index=True, nullable=False)
+    email = Column(String(255), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User")
+
+
 class Strategy(Base):
     """Trading strategy model."""
     __tablename__ = "strategies"
