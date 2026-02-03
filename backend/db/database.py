@@ -4,10 +4,12 @@ Database configuration and initialization.
 
 import logging
 import os
+import shutil
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, event, func, select
@@ -214,3 +216,115 @@ def fetch_ai_decisions(
         .all()
     )
     return total, decisions
+
+
+class DatabaseBackupResult(NamedTuple):
+    """Metadata returned after creating a database backup."""
+
+    path: Path
+    file_name: str
+    timestamp: datetime
+    size_bytes: int
+
+
+def _resolve_sqlite_database_path(database_url: str) -> Path:
+    """Return the filesystem path backing the configured SQLite database."""
+
+    const_prefix = "sqlite:///"
+    if not database_url.startswith(const_prefix):
+        raise ValueError("Database backups only supported for sqlite databases")
+
+    relative_path = database_url[len(const_prefix) :]
+    if not relative_path:
+        raise ValueError("SQLite database path is missing")
+
+    if relative_path == ":memory:":
+        raise ValueError("In-memory sqlite databases cannot be backed up")
+
+    candidate = Path(relative_path)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.resolve()
+
+
+def _ensure_directory_exists(path: Path) -> None:
+    """Create the requested directory tree if missing."""
+
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _normalize_backup_prefix(prefix: str) -> str:
+    """Sanitize the prefix used for backup filenames."""
+
+    return prefix.strip().replace(" ", "_")
+
+
+def _prune_old_backups(
+    backup_dir: Path,
+    prefix: str,
+    retention_days: int,
+    now: datetime,
+) -> None:
+    """Remove backup files older than the retention window."""
+
+    cutoff = now - timedelta(days=retention_days)
+    for entry in backup_dir.iterdir():
+        if not entry.is_file():
+            continue
+        if not entry.name.startswith(f"{_normalize_backup_prefix(prefix)}-"):
+            continue
+        if datetime.utcfromtimestamp(entry.stat().st_mtime) < cutoff:
+            try:
+                entry.unlink()
+            except OSError:
+                logger.warning("Failed to remove stale backup %s", entry)
+
+
+def _build_backup_filename(prefix: str, timestamp: datetime) -> str:
+    """Generate a timestamped filename for the backup."""
+
+    safe_prefix = _normalize_backup_prefix(prefix)
+    return f"{safe_prefix}-{timestamp.strftime('%Y%m%dT%H%M%SZ')}.db"
+
+
+def backup_sqlite_database(
+    *,
+    backup_dir: Path,
+    prefix: str,
+    retention_days: int,
+    database_url: str = DATABASE_URL,
+) -> DatabaseBackupResult:
+    """
+    Copy the sqlite database file into the configured backup directory.
+
+    Raises:
+        FileNotFoundError: if the sqlite database file is missing.
+        ValueError: if the URL is not a sqlite file or retention is invalid.
+    """
+
+    if retention_days < 1:
+        raise ValueError("retention_days must be at least 1")
+
+    db_path = _resolve_sqlite_database_path(database_url)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database file not found at {db_path}")
+
+    resolved_dir = backup_dir.expanduser().resolve(strict=False)
+    _ensure_directory_exists(resolved_dir)
+
+    now = datetime.utcnow()
+    _prune_old_backups(resolved_dir, prefix, retention_days, now)
+
+    filename = _build_backup_filename(prefix, now)
+    destination = resolved_dir / filename
+    shutil.copy2(db_path, destination)
+
+    size_bytes = destination.stat().st_size
+    logger.info("Database backup created at %s (%s bytes)", destination, size_bytes)
+
+    return DatabaseBackupResult(
+        path=destination,
+        file_name=filename,
+        timestamp=now,
+        size_bytes=size_bytes,
+    )

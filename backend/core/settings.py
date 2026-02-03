@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import Field, validator
@@ -65,6 +66,11 @@ class AppSettings(BaseSettings):
     triad_slack_channel: Optional[str] = Field(None, env="TRIAD_SLACK_CHANNEL")
     kraken_api_key: Optional[str] = Field(None, env="KRAKEN_API_KEY")
     kraken_api_secret: Optional[str] = Field(None, env="KRAKEN_API_SECRET")
+
+    database_backup_enabled: bool = Field(True, env="DATABASE_BACKUP_ENABLED")
+    database_backup_dir: Path = Field(Path("./backups"), env="DATABASE_BACKUP_DIR")
+    database_backup_prefix: str = Field("cryptotrader", env="DATABASE_BACKUP_PREFIX")
+    database_backup_retention_days: int = Field(30, env="DATABASE_BACKUP_RETENTION_DAYS")
 
     class Config:
         env_file = ".env"
@@ -142,6 +148,16 @@ class AppSettings(BaseSettings):
         if self.allow_insecure_cookies:
             return False
         return self.session_cookie_secure or self.is_production
+
+    @validator("database_backup_retention_days")
+    def _validate_backup_retention(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("DATABASE_BACKUP_RETENTION_DAYS must be at least 1")
+        return value
+
+    @property
+    def backup_dir_path(self) -> Path:
+        return self.database_backup_dir.expanduser().resolve(strict=False)
 
 
 @lru_cache(maxsize=1)
