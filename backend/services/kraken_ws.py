@@ -17,6 +17,8 @@ from enum import Enum
 import websockets
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 
+from services.kraken import KrakenService
+
 logger = logging.getLogger(__name__)
 
 
@@ -648,12 +650,16 @@ class KrakenWebSocket:
 # Singleton instance
 kraken_ws = KrakenWebSocket()
 
+DEFAULT_TICKER_PAIRS = sorted(KrakenService.PAIR_MAPPINGS.keys())
+
 
 async def start_kraken_ws() -> None:
     """Start the Kraken WebSocket service."""
     try:
         # Give it 10 seconds to connect
         await asyncio.wait_for(kraken_ws.connect(), timeout=10.0)
+        if DEFAULT_TICKER_PAIRS:
+            await kraken_ws.subscribe_ticker(DEFAULT_TICKER_PAIRS)
         logger.info("Kraken WebSocket background service started")
     except asyncio.TimeoutError:
         logger.error("Timeout connecting to Kraken WebSocket. Continuing without real-time data.")
