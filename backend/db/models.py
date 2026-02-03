@@ -120,6 +120,7 @@ class Trade(Base):
     exit_reasoning_json = Column(JSON, nullable=True)
     market_conditions_json = Column(JSON, nullable=True)
     indicators_json = Column(JSON, nullable=True)
+    ai_managed = Column(Boolean, default=False)
 
     strategy = relationship("Strategy", back_populates="trades")
     orders = relationship("Order", back_populates="trade")
@@ -253,6 +254,16 @@ class ModelPerformance(Base):
     total_pnl = Column(Float, default=0.0)
     win_rate = Column(Float, nullable=True)
     avg_confidence = Column(Float, nullable=True)
+
+
+class AISettings(Base):
+    """Global AI configuration settings."""
+    __tablename__ = "ai_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    active_provider = Column(String(50), nullable=False, default="openai")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class DataSourceConfig(Base):

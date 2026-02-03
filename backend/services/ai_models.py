@@ -14,6 +14,9 @@ from anthropic import Anthropic
 from pydantic import BaseModel, Field, HttpUrl, validator
 from pydantic_settings import BaseSettings
 
+from db.database import SessionLocal
+from db.models import AISettings
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,7 +123,6 @@ class AIModelsService:
         settings: Optional[AIModelsSettings] = None,
     ) -> None:
         self._settings = settings or AIModelsSettings()
-        self._active_provider = self._settings.default_provider
         self._model_map: Dict[AIProvider, str] = {
             AIProvider.OPENAI: self._settings.openai_model,
             AIProvider.CLAUDE: self._settings.claude_model,
@@ -131,6 +133,7 @@ class AIModelsService:
         self._openai_model = self._model_map[AIProvider.OPENAI]
         self._claude_model = self._model_map[AIProvider.CLAUDE]
         self._ollama_model = self._model_map[AIProvider.OLLAMA]
+        self._active_provider = self._load_active_provider() or self._settings.default_provider
 
         if self._openai_api_key:
             openai.api_key = self._openai_api_key
@@ -166,6 +169,7 @@ class AIModelsService:
         if not self._is_provider_available(provider):
             raise RuntimeError(f"{provider.value} is not currently available")
         self._active_provider = provider
+        self._persist_active_provider(provider)
 
     def set_model_for_provider(self, provider: AIProvider, model: str) -> None:
         """Override the configured model name for a provider."""
@@ -224,10 +228,46 @@ class AIModelsService:
         if provider == AIProvider.OPENAI:
             return bool(self._openai_api_key)
         if provider == AIProvider.CLAUDE:
-            return bool(self._anthropic_api_key and self._anthropic_client)
+            return bool(self._anthropic_api_key)
         if provider == AIProvider.OLLAMA:
             return bool(self._settings.ollama_base_url)
         return False
+
+    def _load_active_provider(self) -> Optional[AIProvider]:
+        session = SessionLocal()
+        try:
+            settings = session.query(AISettings).order_by(AISettings.updated_at.desc()).first()
+            if settings and settings.active_provider:
+                try:
+                    provider = AIProvider(settings.active_provider.strip().lower())
+                    if self._is_provider_available(provider):
+                        return provider
+                    logger.warning("Stored AI provider %s is not available", provider.value)
+                    return None
+                except ValueError:
+                    logger.warning("Unknown stored AI provider %s; ignoring", settings.active_provider)
+            return None
+        except Exception as exc:
+            logger.warning("Failed to load AI settings: %s", exc)
+            return None
+        finally:
+            session.close()
+
+    def _persist_active_provider(self, provider: AIProvider) -> None:
+        session = SessionLocal()
+        try:
+            settings = session.query(AISettings).order_by(AISettings.updated_at.desc()).first()
+            if settings is None:
+                settings = AISettings(active_provider=provider.value)
+                session.add(settings)
+            else:
+                settings.active_provider = provider.value
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            logger.warning("Failed to persist AI provider %s: %s", provider.value, exc)
+        finally:
+            session.close()
 
     async def _call_openai(
         self, model: str, request: AIModelRequest
