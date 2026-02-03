@@ -8,13 +8,18 @@ from typing import Optional, List
 
 from datetime import datetime
 from fastapi import APIRouter, Query, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from core.auth import get_current_user
 from core.settings import get_app_settings
-from db.database import get_db, backup_sqlite_database
+from db.database import (
+    get_db,
+    backup_sqlite_database,
+    list_sqlite_backups,
+    restore_sqlite_database,
+)
 from db.models import SystemLog, User
 
 router = APIRouter()
@@ -59,6 +64,29 @@ class DatabaseBackupResponse(BaseModel):
     path: str
     size_bytes: int
     timestamp: datetime
+    message: str
+
+
+class DatabaseBackupEntry(BaseModel):
+    file_name: str
+    path: str
+    size_bytes: int
+    timestamp: datetime
+
+
+class DatabaseBackupsResponse(BaseModel):
+    backups: List[DatabaseBackupEntry]
+
+
+class DatabaseRestoreRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+
+
+class DatabaseRestoreResponse(BaseModel):
+    file_name: str
+    path: str
+    size_bytes: int
+    restored_at: datetime
     message: str
 
 
@@ -177,4 +205,99 @@ async def create_database_backup(user: User = Depends(get_current_user)):
         size_bytes=result.size_bytes,
         timestamp=result.timestamp,
         message="Database backup completed successfully",
+    )
+
+
+@router.get("/backups", response_model=DatabaseBackupsResponse)
+async def list_database_backups(user: User = Depends(get_current_user)):
+    """List available sqlite database backups."""
+    settings = get_app_settings()
+    if not settings.database_backup_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database backups are disabled",
+        )
+
+    try:
+        results = await asyncio.to_thread(
+            list_sqlite_backups,
+            backup_dir=settings.backup_dir_path,
+            prefix=settings.database_backup_prefix,
+        )
+    except ValueError as exc:
+        logger.error("Invalid backup configuration: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception:
+        logger.exception("Unexpected error while listing database backups")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read database backups",
+        )
+
+    entries = [
+        DatabaseBackupEntry(
+            file_name=result.file_name,
+            path=str(result.path),
+            size_bytes=result.size_bytes,
+            timestamp=result.timestamp,
+        )
+        for result in results
+    ]
+
+    return DatabaseBackupsResponse(backups=entries)
+
+
+@router.post("/backups/restore", response_model=DatabaseRestoreResponse)
+async def restore_database_backup(
+    payload: DatabaseRestoreRequest,
+    user: User = Depends(get_current_user),
+):
+    """Restore a sqlite database from a selected backup."""
+    settings = get_app_settings()
+    if not settings.database_backup_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database backups are disabled",
+        )
+    if not settings.database_restore_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database restores are disabled",
+        )
+
+    try:
+        result = await asyncio.to_thread(
+            restore_sqlite_database,
+            backup_dir=settings.backup_dir_path,
+            prefix=settings.database_backup_prefix,
+            file_name=payload.file_name,
+        )
+    except ValueError as exc:
+        logger.error("Invalid restore request: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except FileNotFoundError:
+        logger.warning("Requested backup missing: %s", payload.file_name)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Backup file not found",
+        )
+    except Exception:
+        logger.exception("Unexpected error while restoring database backup")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to restore database backup",
+        )
+
+    return DatabaseRestoreResponse(
+        file_name=result.file_name,
+        path=str(result.path),
+        size_bytes=result.size_bytes,
+        restored_at=result.restored_at,
+        message="Database restored successfully",
     )

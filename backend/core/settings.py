@@ -71,6 +71,7 @@ class AppSettings(BaseSettings):
     database_backup_dir: Path = Field(Path("./backups"), env="DATABASE_BACKUP_DIR")
     database_backup_prefix: str = Field("cryptotrader", env="DATABASE_BACKUP_PREFIX")
     database_backup_retention_days: int = Field(30, env="DATABASE_BACKUP_RETENTION_DAYS")
+    database_restore_enabled: bool = Field(True, env="DATABASE_RESTORE_ENABLED")
 
     class Config:
         env_file = ".env"

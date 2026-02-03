@@ -227,6 +227,15 @@ class DatabaseBackupResult(NamedTuple):
     size_bytes: int
 
 
+class DatabaseRestoreResult(NamedTuple):
+    """Metadata returned after restoring a backup."""
+
+    path: Path
+    file_name: str
+    restored_at: datetime
+    size_bytes: int
+
+
 def _resolve_sqlite_database_path(database_url: str) -> Path:
     """Return the filesystem path backing the configured SQLite database."""
 
@@ -326,5 +335,82 @@ def backup_sqlite_database(
         path=destination,
         file_name=filename,
         timestamp=now,
+        size_bytes=size_bytes,
+    )
+
+
+def list_sqlite_backups(
+    *,
+    backup_dir: Path,
+    prefix: str,
+) -> List[DatabaseBackupResult]:
+    """Return metadata for backups that match the configured prefix."""
+
+    resolved_dir = backup_dir.expanduser().resolve(strict=False)
+    if not resolved_dir.exists():
+        return []
+
+    normalized_prefix = _normalize_backup_prefix(prefix)
+    backups: List[DatabaseBackupResult] = []
+
+    for entry in resolved_dir.iterdir():
+        if not entry.is_file() or entry.suffix.lower() != ".db":
+            continue
+        if not entry.name.startswith(f"{normalized_prefix}-"):
+            continue
+        stat = entry.stat()
+        backups.append(
+            DatabaseBackupResult(
+                path=entry.resolve(),
+                file_name=entry.name,
+                timestamp=datetime.utcfromtimestamp(stat.st_mtime),
+                size_bytes=stat.st_size,
+            )
+        )
+
+    backups.sort(key=lambda entry: entry.timestamp, reverse=True)
+    return backups
+
+
+def restore_sqlite_database(
+    *,
+    backup_dir: Path,
+    prefix: str,
+    file_name: str,
+    database_url: str = DATABASE_URL,
+) -> DatabaseRestoreResult:
+    """Replace the active sqlite database with the selected backup."""
+
+    resolved_dir = backup_dir.expanduser().resolve(strict=False)
+    normalized_prefix = _normalize_backup_prefix(prefix)
+    target = resolved_dir / file_name
+
+    try:
+        target_resolved = target.resolve(strict=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Backup file not found: {file_name}")
+
+    if not target_resolved.is_relative_to(resolved_dir):
+        raise ValueError("Backup file must reside in the configured backup directory")
+    if not target_resolved.name.startswith(f"{normalized_prefix}-"):
+        raise ValueError("Backup file name is invalid")
+    if target_resolved.suffix.lower() != ".db":
+        raise ValueError("Only .db backup files can be restored")
+
+    db_path = _resolve_sqlite_database_path(database_url)
+    shutil.copy2(target_resolved, db_path)
+
+    size_bytes = target_resolved.stat().st_size
+    restored_at = datetime.utcnow()
+    logger.info(
+        "Database restored from backup %s into %s",
+        target_resolved,
+        db_path,
+    )
+
+    return DatabaseRestoreResult(
+        path=db_path,
+        file_name=target_resolved.name,
+        restored_at=restored_at,
         size_bytes=size_bytes,
     )

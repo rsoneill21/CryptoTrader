@@ -115,6 +115,20 @@ const formatTimestamp = (value) => {
   });
 };
 
+const formatBytes = (value) => {
+  if (value == null || Number.isNaN(Number(value))) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = Number(value);
+  let exponent = 0;
+  while (size >= 1024 && exponent < units.length - 1) {
+    size /= 1024;
+    exponent += 1;
+  }
+  return `${size.toFixed(2)} ${units[exponent]}`;
+};
+
 const SettingsPage = () => {
   const { user } = useAuth();
   const [sources, setSources] = useState(
@@ -127,6 +141,12 @@ const SettingsPage = () => {
   const [visibleKeyId, setVisibleKeyId] = useState(null);
   const [tonePreference, setTonePreference] = useState(() => loadStoredChatTone());
   const [toneFeedback, setToneFeedback] = useState({ type: '', text: '' });
+  const [backups, setBackups] = useState([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupListError, setBackupListError] = useState('');
+  const [backupMessage, setBackupMessage] = useState({ type: '', text: '' });
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(null);
 
   const broadcastTonePreference = useCallback((value) => {
     if (typeof window === 'undefined') {
@@ -253,6 +273,81 @@ const SettingsPage = () => {
   useEffect(() => {
     loadSources();
   }, [loadSources]);
+
+  const loadDatabaseBackups = useCallback(async () => {
+    setBackupsLoading(true);
+    setBackupListError('');
+    try {
+      const response = await api.get('/api/system/backups');
+      const data = Array.isArray(response.data?.backups) ? response.data.backups : [];
+      setBackups(data);
+    } catch (err) {
+      console.error('Database backup list failed:', err);
+      setBackups([]);
+      setBackupListError(err.message || 'Unable to load database backups.');
+    } finally {
+      setBackupsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDatabaseBackups();
+  }, [loadDatabaseBackups]);
+
+  const handleCreateBackup = useCallback(async () => {
+    if (creatingBackup) {
+      return;
+    }
+    setBackupMessage({ type: '', text: '' });
+    setCreatingBackup(true);
+    try {
+      await api.post('/api/system/backups');
+      setBackupMessage({
+        type: 'success',
+        text: 'Snapshot created successfully. The backup list has been refreshed.',
+      });
+      await loadDatabaseBackups();
+    } catch (err) {
+      console.error('Unable to create backup:', err);
+      setBackupMessage({
+        type: 'error',
+        text: err.message || 'Failed to create database backup.',
+      });
+    } finally {
+      setCreatingBackup(false);
+    }
+  }, [creatingBackup, loadDatabaseBackups]);
+
+  const handleRestoreBackup = useCallback(async (backup) => {
+    if (!backup?.file_name) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        'Restoring this backup will replace the active database. Continue?'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    setBackupMessage({ type: '', text: '' });
+    setRestoringBackup(backup.file_name);
+    try {
+      await api.post('/api/system/backups/restore', { file_name: backup.file_name });
+      setBackupMessage({
+        type: 'success',
+        text: `${backup.file_name} restored. Please refresh the app to pick up the restored data.`,
+      });
+    } catch (err) {
+      console.error('Database restore failed:', err);
+      setBackupMessage({
+        type: 'error',
+        text: err.message || 'Failed to restore the selected backup.',
+      });
+    } finally {
+      setRestoringBackup(null);
+    }
+  }, []);
 
   const updateSource = useCallback((id, changes) => {
     setSources((prev) =>
@@ -382,6 +477,14 @@ const SettingsPage = () => {
     });
   }, [statusSummary.counts]);
 
+  const backupSummary = useMemo(
+    () => ({
+      total: backups.length,
+      latest: backups.length ? formatTimestamp(backups[0].timestamp) : 'No backups yet',
+    }),
+    [backups]
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       {/* MFA Configuration Section */}
@@ -461,6 +564,89 @@ const SettingsPage = () => {
             mfaMessage.type === 'error' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
           }`}>
             {mfaMessage.text}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/40 p-6 shadow-xl shadow-black/60">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-slate-400">Data export</p>
+            <h2 className="text-2xl font-semibold text-white">Database backups</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Snapshot the SQLite database before sensitive updates or restore a prior state instantly.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleCreateBackup}
+              disabled={creatingBackup}
+              className="inline-flex items-center justify-center rounded-lg border border-emerald-400/80 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingBackup ? 'Creating snapshot...' : 'Create snapshot'}
+            </button>
+            <button
+              type="button"
+              onClick={loadDatabaseBackups}
+              disabled={backupsLoading}
+              className="inline-flex items-center justify-center rounded-lg border border-sky-500/80 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {backupsLoading ? 'Refreshing...' : 'Refresh list'}
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+          <span>Total snapshots: {backupSummary.total}</span>
+          <span>Latest: {backupSummary.latest}</span>
+        </div>
+        {backupMessage.text && (
+          <p className={`mt-4 text-sm ${backupMessage.type === 'error' ? 'text-rose-300' : 'text-emerald-300'}`}>
+            {backupMessage.text}
+          </p>
+        )}
+        {backupListError && (
+          <div className="mt-4 rounded-2xl border border-rose-400/70 bg-rose-400/10 p-3 text-xs text-rose-200">
+            {backupListError}
+          </div>
+        )}
+        {backupsLoading && !backups.length && (
+          <div className="mt-6 rounded-2xl border border-dashed border-gray-700/60 bg-gray-900/60 p-6 text-center text-sm text-gray-300">
+            Loading backups...
+          </div>
+        )}
+        {!backupsLoading && !backups.length && (
+          <div className="mt-6 rounded-2xl border border-dashed border-gray-700/60 bg-gray-900/60 p-6 text-center text-sm text-gray-300">
+            No backups yet. Use "Create snapshot" to capture the current data state.
+          </div>
+        )}
+        {backups.length > 0 && (
+          <div className="mt-6 grid gap-3">
+            {backups.map((backup) => (
+              <div
+                key={backup.file_name}
+                className="rounded-2xl border border-gray-700/50 bg-gray-900/80 p-4 shadow-sm shadow-black/30"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{backup.file_name}</p>
+                  <span className="text-xs uppercase tracking-wide text-gray-400">
+                    {formatTimestamp(backup.timestamp)}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 break-all">{backup.path}</p>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-400">
+                  <span>{formatBytes(backup.size_bytes)}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRestoreBackup(backup)}
+                    disabled={restoringBackup === backup.file_name}
+                    className="inline-flex items-center justify-center rounded-lg border border-rose-500/70 bg-rose-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {restoringBackup === backup.file_name ? 'Restoring...' : 'Restore backup'}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
