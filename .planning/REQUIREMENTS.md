@@ -181,80 +181,80 @@ Deferred to future release. Not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | TBD | Pending |
-| INFRA-02 | TBD | Pending |
-| INFRA-03 | TBD | Pending |
-| INFRA-04 | TBD | Pending |
-| INFRA-05 | TBD | Pending |
-| INFRA-06 | TBD | Pending |
-| LOOP-01 | TBD | Pending |
-| LOOP-02 | TBD | Pending |
-| LOOP-03 | TBD | Pending |
-| LOOP-04 | TBD | Pending |
-| LOOP-05 | TBD | Pending |
-| LOOP-06 | TBD | Pending |
-| LOOP-07 | TBD | Pending |
-| LOOP-08 | TBD | Pending |
-| RISK-01 | TBD | Pending |
-| RISK-02 | TBD | Pending |
-| RISK-03 | TBD | Pending |
-| RISK-04 | TBD | Pending |
-| RISK-05 | TBD | Pending |
-| RISK-06 | TBD | Pending |
-| RISK-07 | TBD | Pending |
-| POS-01 | TBD | Pending |
-| POS-02 | TBD | Pending |
-| POS-03 | TBD | Pending |
-| POS-04 | TBD | Pending |
-| POS-05 | TBD | Pending |
-| POS-06 | TBD | Pending |
-| POS-07 | TBD | Pending |
-| PERF-01 | TBD | Pending |
-| PERF-02 | TBD | Pending |
-| PERF-03 | TBD | Pending |
-| PERF-04 | TBD | Pending |
-| PERF-05 | TBD | Pending |
-| PERF-06 | TBD | Pending |
-| MON-01 | TBD | Pending |
-| MON-02 | TBD | Pending |
-| MON-03 | TBD | Pending |
-| MON-04 | TBD | Pending |
-| MON-05 | TBD | Pending |
-| MON-06 | TBD | Pending |
-| SAFE-01 | TBD | Pending |
-| SAFE-02 | TBD | Pending |
-| SAFE-03 | TBD | Pending |
-| SAFE-04 | TBD | Pending |
-| SAFE-05 | TBD | Pending |
-| SAFE-06 | TBD | Pending |
-| SIG-01 | TBD | Pending |
-| SIG-02 | TBD | Pending |
-| SIG-03 | TBD | Pending |
-| SIG-04 | TBD | Pending |
-| SIG-05 | TBD | Pending |
-| SIG-06 | TBD | Pending |
-| ARISK-01 | TBD | Pending |
-| ARISK-02 | TBD | Pending |
-| BACK-01 | TBD | Pending |
-| BACK-02 | TBD | Pending |
-| BACK-03 | TBD | Pending |
-| BACK-04 | TBD | Pending |
-| TAX-01 | TBD | Pending |
-| EXCH-01 | TBD | Pending |
-| EXCH-02 | TBD | Pending |
-| EXCH-03 | TBD | Pending |
-| DASH-01 | TBD | Pending |
-| DASH-02 | TBD | Pending |
-| DASH-03 | TBD | Pending |
-| DASH-04 | TBD | Pending |
-| DASH-05 | TBD | Pending |
-| DASH-06 | TBD | Pending |
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
+| INFRA-04 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Pending |
+| INFRA-06 | Phase 1 | Pending |
+| LOOP-01 | Phase 2 | Pending |
+| LOOP-02 | Phase 2 | Pending |
+| LOOP-03 | Phase 2 | Pending |
+| LOOP-04 | Phase 2 | Pending |
+| LOOP-05 | Phase 2 | Pending |
+| LOOP-06 | Phase 2 | Pending |
+| LOOP-07 | Phase 2 | Pending |
+| LOOP-08 | Phase 2 | Pending |
+| RISK-01 | Phase 3 | Pending |
+| RISK-02 | Phase 3 | Pending |
+| RISK-03 | Phase 3 | Pending |
+| RISK-04 | Phase 3 | Pending |
+| RISK-05 | Phase 3 | Pending |
+| RISK-06 | Phase 3 | Pending |
+| RISK-07 | Phase 3 | Pending |
+| POS-01 | Phase 4 | Pending |
+| POS-02 | Phase 4 | Pending |
+| POS-03 | Phase 4 | Pending |
+| POS-04 | Phase 4 | Pending |
+| POS-05 | Phase 4 | Pending |
+| POS-06 | Phase 4 | Pending |
+| POS-07 | Phase 4 | Pending |
+| PERF-01 | Phase 5 | Pending |
+| PERF-02 | Phase 5 | Pending |
+| PERF-03 | Phase 5 | Pending |
+| PERF-04 | Phase 5 | Pending |
+| PERF-05 | Phase 5 | Pending |
+| PERF-06 | Phase 5 | Pending |
+| MON-01 | Phase 6 | Pending |
+| MON-02 | Phase 6 | Pending |
+| MON-03 | Phase 6 | Pending |
+| MON-04 | Phase 6 | Pending |
+| MON-05 | Phase 6 | Pending |
+| MON-06 | Phase 6 | Pending |
+| SIG-01 | Phase 7 | Pending |
+| SIG-02 | Phase 7 | Pending |
+| SIG-03 | Phase 7 | Pending |
+| SIG-04 | Phase 7 | Pending |
+| SIG-05 | Phase 7 | Pending |
+| SIG-06 | Phase 7 | Pending |
+| ARISK-01 | Phase 7 | Pending |
+| ARISK-02 | Phase 7 | Pending |
+| BACK-01 | Phase 8 | Pending |
+| BACK-02 | Phase 8 | Pending |
+| BACK-03 | Phase 8 | Pending |
+| BACK-04 | Phase 8 | Pending |
+| EXCH-01 | Phase 9 | Pending |
+| EXCH-02 | Phase 9 | Pending |
+| EXCH-03 | Phase 9 | Pending |
+| SAFE-01 | Phase 10 | Pending |
+| SAFE-02 | Phase 10 | Pending |
+| SAFE-03 | Phase 10 | Pending |
+| SAFE-04 | Phase 10 | Pending |
+| SAFE-05 | Phase 10 | Pending |
+| SAFE-06 | Phase 10 | Pending |
+| DASH-01 | Phase 11 | Pending |
+| DASH-02 | Phase 11 | Pending |
+| DASH-03 | Phase 11 | Pending |
+| DASH-04 | Phase 11 | Pending |
+| DASH-05 | Phase 11 | Pending |
+| DASH-06 | Phase 11 | Pending |
+| TAX-01 | Phase 11 | Pending |
 
 **Coverage:**
 - v1 requirements: 63 total
-- Mapped to phases: 0
-- Unmapped: 63 ⚠️
+- Mapped to phases: 63
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-04*
-*Last updated: 2026-02-04 after initial definition*
+*Last updated: 2026-02-04 after roadmap creation*
