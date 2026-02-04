@@ -15,42 +15,11 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import ForgotPassword from './pages/ForgotPassword';
 import SystemLogs from './pages/SystemLogs';
-
-// Placeholder pages (to be implemented)
-const StrategyLab = () => (
-  <div className="text-white">
-    <h1 className="text-2xl font-bold mb-4">AI Strategy Lab</h1>
-    <p className="text-gray-400">Coming in Phase 4...</p>
-  </div>
-);
-
-const LiveTrading = () => (
-  <div className="text-white">
-    <h1 className="text-2xl font-bold mb-4">Live Trading</h1>
-    <p className="text-gray-400">Coming in Phase 5...</p>
-  </div>
-);
-
-const AIChat = () => (
-  <div className="text-white">
-    <h1 className="text-2xl font-bold mb-4">AI Chat</h1>
-    <p className="text-gray-400">Coming in Phase 7...</p>
-  </div>
-);
-
-const Alerts = () => (
-  <div className="text-white">
-    <h1 className="text-2xl font-bold mb-4">Alerts & Activity</h1>
-    <p className="text-gray-400">Coming in Phase 8...</p>
-  </div>
-);
-
-const Settings = () => (
-  <div className="text-white">
-    <h1 className="text-2xl font-bold mb-4">Settings</h1>
-    <p className="text-gray-400">Coming soon...</p>
-  </div>
-);
+import StrategyLab from './pages/StrategyLab';
+import LiveTrading from './pages/LiveTrading';
+import AIChat from './pages/AIChat';
+import Alerts from './pages/Alerts';
+import Settings from './pages/Settings';
 
 function App() {
   console.log('Rendering App component');

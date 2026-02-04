@@ -169,7 +169,7 @@ start_servers() {
 
     local backend_host="${BACKEND_HOST:-127.0.0.1}"
     local backend_port="${BACKEND_PORT:-8000}"
-    local frontend_port="${FRONTEND_PORT:-3000}"
+    local frontend_port="${FRONTEND_PORT:-5173}"
     local backend_check_host="${backend_host}"
     if [[ "${backend_check_host}" == "0.0.0.0" ]]; then
         backend_check_host="127.0.0.1"
@@ -205,7 +205,7 @@ PY
         echo "Running backend tests..."
         cd backend
         source venv/bin/activate
-        pytest
+        PYTHONPATH="$(pwd)/.." pytest
         cd ..
 
         echo ""
@@ -219,7 +219,7 @@ PY
     echo "Starting FastAPI backend on ${backend_host}:${backend_port}..."
     cd backend
     source venv/bin/activate
-    uvicorn main:app --reload --host "${backend_host}" --port "${backend_port}" &
+    PYTHONPATH="$(pwd)/.." uvicorn main:app --reload --host "${backend_host}" --port "${backend_port}" &
     BACKEND_PID=$!
     cd ..
 
@@ -229,7 +229,7 @@ PY
     # Start frontend in background
     echo "Starting React frontend on port ${frontend_port}..."
     cd frontend
-    npm run dev &
+    npm run dev -- --port "${frontend_port}" &
     FRONTEND_PID=$!
     cd ..
 

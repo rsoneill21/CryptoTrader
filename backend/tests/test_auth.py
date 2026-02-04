@@ -28,6 +28,7 @@ mock_settings = MagicMock()
 mock_settings.session_cookie_name = "cryptotrader_session"
 mock_settings.secure_cookies = False
 mock_settings.session_cookie_same_site = "lax"
+mock_settings.allow_email_enumeration = True
 mock_settings_module.get_app_settings.return_value = mock_settings
 sys.modules["core.settings"] = mock_settings_module
 

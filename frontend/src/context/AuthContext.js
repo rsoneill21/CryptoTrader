@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useState, useEffect, useCallback } from 'react';
-import { authAPI, setToken, removeToken, getToken } from '../services/api';
+import { authAPI, setToken, removeToken } from '../services/api';
 
 // Create context
 export const AuthContext = createContext(null);

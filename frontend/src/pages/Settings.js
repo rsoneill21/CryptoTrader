@@ -617,7 +617,7 @@ const SettingsPage = () => {
         )}
         {!backupsLoading && !backups.length && (
           <div className="mt-6 rounded-2xl border border-dashed border-gray-700/60 bg-gray-900/60 p-6 text-center text-sm text-gray-300">
-            No backups yet. Use "Create snapshot" to capture the current data state.
+            No backups yet. Use &quot;Create snapshot&quot; to capture the current data state.
           </div>
         )}
         {backups.length > 0 && (

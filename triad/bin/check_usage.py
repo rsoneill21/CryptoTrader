@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = PROJECT_ROOT.parent
+sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 from db_helpers import get_connection, validate_model
@@ -84,12 +86,7 @@ def main():
             print("ERROR: --requests requires a value")
             sys.exit(1)
 
-    if tokens == 0 and requests == 0:
-        _log_usage_error(
-            "No usage counts provided to check_usage", {"model": model}
-        )
-        print("ERROR: Provide at least --tokens or --requests")
-        sys.exit(1)
+    # check_usage is often called with just the model name; tokens/requests are optional
 
     conn = get_connection(readonly=True)
     try:

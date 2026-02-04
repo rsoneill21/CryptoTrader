@@ -1,6 +1,6 @@
 """
 Database configuration and initialization.
-"""
+"""00
 
 import json
 import logging

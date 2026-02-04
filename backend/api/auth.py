@@ -326,7 +326,7 @@ async def request_password_reset(
 
     if user:
         # Generate reset token
-        token = password_reset_service.create_token(user.id, user.email)
+        token = password_reset_service.create_token(user.id, user.email, db=db)
 
         # Send reset email
         await email_service.send_password_reset_email(
@@ -355,7 +355,7 @@ async def confirm_password_reset(
     """
     logger.info("Confirming password reset token")
     # Validate token
-    reset_token = password_reset_service.validate_token(request.token)
+    reset_token = password_reset_service.validate_token(request.token, db=db)
     if not reset_token:
         logger.warning("Password reset confirmation failed: invalid token")
         raise HTTPException(
@@ -387,7 +387,7 @@ async def confirm_password_reset(
     db.query(UserSession).filter(UserSession.user_id == user.id).delete()
 
     # Mark token as used
-    password_reset_service.mark_used(request.token)
+    password_reset_service.mark_used(request.token, db=db)
 
     db.commit()
     logger.info("Password reset completed for user %s", user.email)
