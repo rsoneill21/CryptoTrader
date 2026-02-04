@@ -1,79 +1,145 @@
 # Technology Stack
 
-**Analysis Date:** 2025-03-04
+**Analysis Date:** 2026-02-04
 
 ## Languages
 
 **Primary:**
-- Python 3.10+ - Backend logic, AI agents, and API service.
-- JavaScript/JSX - Frontend React application.
+- Python 3.12.3 - Backend API, services, agents
+- JavaScript (ES2022) - React frontend UI
+- SQL - Database queries and migrations
 
 **Secondary:**
-- SQL (SQLite) - Database schema and queries.
-- HTML/CSS - UI structure and styling (via Tailwind).
-- Shell (Bash) - Initialization and deployment scripts.
+- Shell scripts - Worker processes, deployment
 
 ## Runtime
 
 **Environment:**
-- Node.js 18+ (Frontend build/dev)
-- Python 3.10+ (Backend runtime)
+- Python 3.12.3 via venv at `backend/venv`
+- Node.js v24.13.0 - Frontend dev and build
 
 **Package Manager:**
-- npm - Frontend dependency management.
-- pip - Backend dependency management.
-- Lockfiles: `package-lock.json` and `backend/requirements.txt` (no lockfile for pip) are present.
+- pip - Python dependencies
+- npm - JavaScript dependencies
+- Both projects use lock mechanisms (pip freeze, package-lock.json)
 
 ## Frameworks
 
-**Core:**
-- FastAPI (v0.109+) - Backend web framework.
-- React (v18.2.0) - Frontend UI library.
-- Vite (v7.3.1) - Frontend build tool and dev server.
+**Backend:**
+- FastAPI 0.109.0+ - HTTP API framework, WebSocket support
+- uvicorn[standard] 0.27.0+ - ASGI server
+- Starlette - Middleware, exception handling (via FastAPI)
+
+**Frontend:**
+- React 18.2.0 - UI library
+- React Router 6.21.2 - Client-side routing
+- Vite 7.3.1 - Build tool and dev server
 
 **Testing:**
-- pytest (v7.4.4) - Backend testing framework.
-- React Testing Library - Frontend component testing.
+- pytest 7.4.4 - Python test runner
+- pytest-asyncio 0.23.3 - Async test support
+- Testing Library + Jest DOM - Frontend test utilities
+
+**Database & ORM:**
+- SQLAlchemy 2.0.25+ - Python ORM
+- Alembic 1.13.1 - Database migrations
+- SQLite (development) - Default database via `sqlite:///./cryptotrader.db`
+
+**Task Queue:**
+- Celery 5.3.6 - Distributed task processing
+- Redis 5.0.1 - Message broker for Celery
 
 **Build/Dev:**
-- Tailwind CSS (v3.4.1) - Utility-first CSS framework.
-- PostCSS / Autoprefixer - CSS processing.
-- ESLint - Frontend linting.
+- Vite 7.3.1 - Frontend bundling and dev server
+- ESLint 9.10.0 - JavaScript linting
+- Tailwind CSS 3.4.1 - Utility-first CSS framework
+- PostCSS 8.4.33 - CSS transformation
+- Autoprefixer 10.4.17 - CSS vendor prefixes
 
 ## Key Dependencies
 
 **Critical:**
-- SQLAlchemy (v2.0+) - Backend ORM.
-- Alembic (v1.13+) - Database migrations.
-- Pydantic (v2.5+) - Data validation and settings management.
-- Celery (v5.3+) - Distributed task queue.
-- Krakenex (v2.2+) - Kraken exchange API client.
 
-**Infrastructure:**
-- Redis (v5.0+) - Message broker for Celery and caching.
-- SQLite - Primary database engine.
-- HTTPX - Asynchronous HTTP client for API calls.
+- `fastapi` - Core API framework for trading endpoints, WebSocket support
+- `sqlalchemy` - ORM for market data, trade history, strategy storage
+- `pydantic` / `pydantic-settings` - Data validation and environment configuration
+- `krakenex` 2.2.1 - Kraken cryptocurrency exchange API client
+- `openai` 1.9.0+ - OpenAI API client for GPT chat and analysis
+- `anthropic` 0.15.0+ - Anthropic Claude API client
+- `websockets` 12.0 - WebSocket client for Kraken live feeds
+- `httpx` 0.26.0 - Async HTTP client
+
+**Data Processing & Analysis:**
+
+- `pandas` 2.2.0 - Time-series data manipulation
+- `numpy` 1.26.3 - Numerical computation
+- `ta` 0.11.0 - Technical analysis indicators (RSI, MACD, Bollinger Bands, etc.)
+
+**Authentication & Security:**
+
+- `python-jose[cryptography]` 3.3.0+ - JWT token handling
+- `passlib[bcrypt]` 1.7.4+ - Password hashing
+- `email-validator` 2.1.0+ - Email validation
+
+**Utilities:**
+
+- `python-dotenv` 1.0.0+ - Environment variable loading
+- `pytz` 2024.1 - Timezone handling for market data
+- `python-multipart` 0.0.6 - Form/multipart parsing
+
+**Frontend:**
+
+- `axios` 1.6.5+ - HTTP client for API calls
+- `lightweight-charts` 4.1.3 - Financial charting library
+- `web-vitals` 2.1.4 - Performance metrics
 
 ## Configuration
 
 **Environment:**
-- Configured via `.env` files and `pydantic-settings`.
-- Backend config located in `backend/core/settings.py`.
+
+- `.env` file at project root loads via `python-dotenv` and Pydantic `BaseSettings`
+- Frontend environment vars prefixed with `VITE_` are accessible at build/runtime
+- Backend uses `AppSettings` class in `backend/core/settings.py` for centralized config
 
 **Build:**
-- `frontend/vite.config.js` - Vite build and proxy configuration.
-- `backend/alembic.ini` - Database migration configuration.
+
+- Frontend: `vite build` creates optimized production bundle in `dist/`
+- Backend: Runs with uvicorn directly (no build step)
+- Database migrations: Alembic handles schema versioning in `backend/alembic/versions/`
+
+**Frontend Dev Server:**
+
+- Vite dev server on port 5173
+- Proxies `/api`, `/auth`, `/ws` to backend (configurable via `BACKEND_HOST`, `BACKEND_PORT`)
+- HMR enabled for hot module replacement
+- Allowed hosts: `['app.packnation.org']` (configured in `vite.config.js`)
 
 ## Platform Requirements
 
 **Development:**
-- Docker (optional, for Redis).
-- Python 3.10+ and Node.js 18+.
+
+- Python 3.12.3+
+- Node.js v24.13.0+ (for npm)
+- SQLite 3 (bundled with Python)
+- Redis 5.0+ (for Celery task queue)
+- Kraken API key and secret (optional, for live trading)
+- OpenAI API key (for AI features)
 
 **Production:**
-- Linux-based environment (Ubuntu/Debian recommended).
-- Redis server instance.
+
+- FastAPI backend runs on configurable host/port (default 0.0.0.0:8000)
+- Static frontend assets served via reverse proxy or CDN
+- SQLite or PostgreSQL-compatible database
+- Redis for task queue
+- TLS certificates and CA bundle supported (via `TLS_CERTFILE`, `TLS_KEYFILE`, `TLS_CA_BUNDLE`)
+
+**Security:**
+
+- Session cookie configuration (name: `cryptotrader_session`, defaults to `secure: false` in dev)
+- HSTS headers enforced (max-age: 31536000 seconds, includes subdomains, preload enabled)
+- Session timeout: 1800 seconds (30 minutes) by default
+- Email enumeration protection disabled by default
 
 ---
 
-*Stack analysis: 2025-03-04*
+*Stack analysis: 2026-02-04*
