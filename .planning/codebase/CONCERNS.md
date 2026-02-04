@@ -4,256 +4,244 @@
 
 ## Tech Debt
 
-**Deprecated NPM Dependencies:**
-- Issue: Frontend has 21 npm vulnerabilities (15 moderate, 6 high) and deprecated packages including `rollup-plugin-terser`, `source-map@0.8.0-beta.0`, `svgo@1.3.2`, `eslint@8.57.1`, Babel plugins, and Workbox modules
+**NPM Dependency Vulnerabilities:**
+- Issue: Frontend has 21 vulnerabilities reported (15 moderate, 6 high) with deprecated packages
 - Files: `frontend/package.json`
-- Impact: Security vulnerabilities in production, build process fragility, dependency maintenance burden
-- Fix approach: Run `npm audit fix`, upgrade deprecated packages to modern equivalents (e.g., `@rollup/plugin-terser`, modern ESLint v9+), test thoroughly after upgrades
+- Impact: Security exposure in production; potential XSS or injection vulnerabilities; unmaintained dependencies may lack critical patches
+- Deprecated packages: `rollup-plugin-terser`, `sourcemap-codec`, `stable`, `q`, Workbox modules, `whatwg-encoding`, `abab`, `domexception`, `w3c-hr-time`, `inflight`, `glob`, `rimraf`, `eslint@8.57.1`
+- Fix approach: Run `npm audit` with `npm audit fix`, upgrade to modern equivalents (e.g., `@rollup/plugin-terser`, newer ESLint), test thoroughly for breaking changes
 
-**Fetch Interceptor Monkeypatching:**
-- Issue: `AIChat.js` patches `window.fetch` globally at runtime to inject chat tone and alert context into requests
-- Files: `frontend/src/pages/AIChat.js` (lines 57-127)
-- Impact: Fragile, non-standard approach; breaks with native fetch API updates; makes debugging harder; side effects across entire app
-- Fix approach: Replace with proper request middleware in axios interceptor or custom hook context; avoid global state pollution
+**Rate Limiting Fail-Open Security Risk:**
+- Issue: Rate limiting gracefully degrades to allow all requests if Redis is unavailable
+- Files: `backend/core/rate_limit.py` (lines 44-47, 61-64)
+- Impact: Critical endpoints become unprotected against brute force/DoS when Redis connection fails (authentication, password reset). Malicious actors can exploit service outages to attack the system
+- Current behavior: `if not r: return True` and `except Exception: return True` - fail-open pattern is intentional but dangerous
+- Fix approach: Implement stricter failure modes: fail-closed for auth/sensitive endpoints, timeout detection with exponential backoff, health check monitoring, circuit breaker pattern. At minimum, differentiate between endpoint sensitivity
 
-**AI Provider Hardcoding:**
-- Issue: AI model provider selection logic is spread across multiple files with fallback to OpenAI if env vars are invalid
-- Files: `backend/api/ai.py` (lines 72-78), `backend/services/strategy_ai.py` (lines 28-33)
-- Impact: Configuration validation happens at runtime; invalid provider configs silently degrade instead of failing fast
-- Fix approach: Validate provider at startup in settings initialization; raise error instead of silent fallback
+**Raw Exception Handling:**
+- Issue: Bare `except Exception` blocks throughout codebase silently swallow errors without logging details
+- Files: `backend/core/security.py` (lines 144, 178), `backend/agents/*`, `backend/core/rate_limit.py`, `backend/core/auth.py`
+- Impact: Critical failures (auth, payment, trading) become invisible; difficult to debug production issues; silent failures mask security problems
+- Examples: `compute_totp()` returns empty string on base32 decode failure (line 145) - invalid codes accepted
+- Fix approach: Replace bare `except` with specific exceptions, always log with traceback, return structured error objects with detail codes
 
-**Exception Swallowing:**
-- Issue: Multiple places catch broad `Exception` and log warnings without re-raising, masking real problems
-- Files: `backend/main.py` (line 53), `backend/services/strategy_ai.py` (lines 178-181, 234-236)
-- Impact: Silent failures in error persistence, strategy recommendations, and promotion logic; hard to debug production issues
-- Fix approach: Distinguish between recoverable errors (log and continue) and fatal errors (raise); use specific exception types
+**Session Timeout Using UTC Without Timezone Awareness:**
+- Issue: Session expiry comparison uses `datetime.utcnow()` without timezone info across the codebase
+- Files: `backend/core/auth.py` (line 47), `backend/core/security.py` (line 103, 113), `backend/db/database.py` (line 156), `backend/api/auth.py`
+- Impact: Potential timezone-related session validation bugs in environments with non-UTC clocks; inconsistent behavior across servers with different TZ settings
+- Fix approach: Standardize on timezone-aware datetime: use `datetime.now(timezone.utc)` consistently, store with UTC timezone info in DB
 
-**Unvalidated Return None/Empty Patterns:**
-- Issue: Functions return `None` or `[]` without clear contract or caller handling
-- Files: `backend/db/database.py`, `backend/agents/sentiment_agent.py`, `backend/core/paper_trading.py`, `backend/api/ai.py`
-- Impact: Callers must handle both valid results and empty/None returns; no schema validation; easy to introduce None-safety bugs
-- Fix approach: Use Optional[] types consistently; validate at boundaries; consider raising exceptions for truly exceptional cases
+**Unprotected WebSocket Authentication:**
+- Issue: WebSocket fallback authentication accepts `token` query parameter without HTTPS enforcement
+- Files: `backend/core/auth.py` (line 66) - `websocket.query_params.get("token")`
+- Impact: Token can be logged by proxies, load balancers, and browser history. Violates secure token transmission requirements
+- Fix approach: Remove query parameter token support, require tokens in Authorization header only, enforce WSS (secure WebSocket)
 
-## Database
+## Known Bugs
 
-**SQLite in Production Context:**
-- Issue: Using SQLite as primary database for what appears to be a trading platform
-- Files: `backend/db/database.py` (line 21), `.env`
-- Impact: SQLite has limitations on concurrent writes, not ideal for high-frequency trading operations; single-file database vulnerable to data loss
-- Fix approach: Document SQLite use cases clearly; plan migration path to PostgreSQL for production; ensure proper backups
+**TOTP Secret Validation Silent Failure:**
+- Symptoms: Invalid TOTP secrets accepted without error during 2FA setup
+- Files: `backend/core/security.py` (lines 138-145)
+- Trigger: User with malformed `mfa_secret` can call `compute_totp()` which catches exception and returns empty string instead of error
+- Workaround: Restart authentication flow (user will be locked out if secret is corrupted)
+- Root cause: Defensive coding assumes all secrets are valid base32-encoded strings
 
-**Missing Transaction Management:**
-- Issue: Several database operations don't use explicit transactions for related updates
-- Files: `backend/db/database.py`, `backend/core/paper_trading.py`
-- Impact: Race conditions possible between related record updates (e.g., trade + position updates); data consistency not guaranteed under concurrent access
-- Fix approach: Wrap related updates in transaction context; use pessimistic locking for critical sections
+**Email Normalization Listener Registration Race Condition:**
+- Symptoms: Duplicate email registration succeeds when multiple registrations occur simultaneously
+- Files: `backend/db/database.py` (lines 254-299)
+- Trigger: Global `_USER_EMAIL_LISTENERS_REGISTERED` flag is not thread-safe; two threads can both see `False` and register listeners twice
+- Workaround: Unlikely at typical scale due to SQLAlchemy's GIL protection, but not guaranteed
+- Impact: Duplicate email validation bypassed; data integrity violated
+- Fix approach: Replace global flag with `threading.Lock()` or use SQLAlchemy event decorators that handle re-registration
 
-**Migration Versioning Gap:**
-- Issue: Only 2 migration files exist for a mature schema; migrations appear incomplete
-- Files: `backend/alembic/versions/0001_initial_schema.py` (13KB), `backend/alembic/versions/150f429d1db6_add_ai_provider_columns.py` (769B)
-- Impact: Schema drift risk; missing documented history of column additions (AI provider columns added but not tracked clearly)
-- Fix approach: Review recent code changes for schema modifications not captured in migrations; enforce migration requirement in CI/CD
+**OpenAI Compatibility Layer Memory Leak:**
+- Symptoms: AsyncOpenAI client created per request never garbage collected properly
+- Files: `backend/api/ai.py` (lines 38-59)
+- Trigger: Each call to `_OpenAIChatCompletionCompat.acreate()` creates new client and calls `aclose()`, but exception paths may leak resources
+- Impact: Long-running server accumulates open connections to OpenAI API; connection pool exhaustion possible under load
+- Fix approach: Use context manager or try/finally, consider connection pooling
 
-## Security
+## Security Considerations
 
-**API Key Storage in Environment Variables:**
-- Issue: Kraken API credentials stored in plain `.env` file
-- Files: `backend/core/settings.py` (lines 69-70), `.env`
-- Impact: If `.env` is accidentally committed or exposed, trading account is compromised
-- Fix approach: Use secrets manager (AWS Secrets Manager, HashiCorp Vault); implement key rotation; audit .gitignore
+**API Token in LocalStorage:**
+- Risk: Frontend stores auth token in localStorage despite using HttpOnly cookies (redundant and insecure)
+- Files: `frontend/src/services/api.js` (lines 28-49)
+- Current mitigation: Comment on line 77 indicates tokens now use HttpOnly cookies; localStorage token is unused/legacy
+- Recommendations: Remove localStorage token storage completely (`getToken`, `setToken`, `removeToken` functions should be deleted), verify server sets `HttpOnly`, `Secure`, `SameSite` flags on all cookies
 
-**Missing CSRF Protection:**
-- Issue: Forms and state-changing operations don't validate CSRF tokens
-- Files: `backend/main.py` - no CSRF middleware registered
-- Impact: Cross-site request forgery attacks possible; attacker can trigger trades from external site
-- Fix approach: Implement FastAPI CsrfProtectMiddleware; require CSRF tokens in POST/PUT/DELETE requests
+**Password Reset Token Exposure:**
+- Risk: Reset tokens transmitted in query parameter within password reset flow
+- Files: `backend/api/auth.py` (token passed to frontend), `frontend/src/pages/ForgotPassword.js`
+- Current mitigation: Token should be short-lived and single-use
+- Recommendations: Use POST-only reset endpoints with tokens in request body (not URL), implement token expiry (suggest 15-30 minutes), log failed attempts, rate-limit reset requests per email
 
-**localStorage for Auth Token (Deprecated):**
-- Issue: Comments indicate "auth token interceptor" but actual code uses HttpOnly cookies
-- Files: `frontend/src/services/api.js` (lines 33-48), `frontend/src/pages/AIChat.js` (lines 38-48)
-- Impact: Inconsistent auth strategy; if code reverts to localStorage, creates XSS vulnerability
-- Fix approach: Remove localStorage auth code completely; enforce HttpOnly cookie-only auth; document this choice
+**Kraken API Keys Stored Without Encryption:**
+- Risk: API keys stored in database as plaintext if user provides them through settings
+- Files: `backend/core/settings.py` (line 69-70) - `kraken_api_key`, `kraken_api_secret` loaded from env
+- Current mitigation: Environment variables only (not persisted to DB in current code)
+- Recommendations: If adding user-provided API key storage, implement encryption at rest using cryptography.Fernet, rotate keys regularly, audit key usage
 
-**WebSocket Connection Lacks Authentication:**
-- Issue: WebSocket connections to Kraken feed don't validate client identity
-- Files: `backend/services/kraken_ws.py` - public/unauthenticated feed
-- Impact: Any client can connect to market data stream; monitor for DoS risk
-- Fix approach: Add authentication to private WebSocket endpoints; rate limit public feeds
+**Email Enumeration Attack Possible:**
+- Risk: Login endpoint can distinguish between registered and unregistered emails via timing/response
+- Files: `backend/api/auth.py` (login endpoint)
+- Current mitigation: `allow_email_enumeration` setting exists (line 50 in `settings.py`) but unclear if used
+- Recommendations: Verify enumeration protection is enforced in login response (same response time/format for invalid email vs invalid password), use timing-safe comparisons
 
-**SQL Injection Via ilike Patterns:**
-- Issue: Search patterns built with string formatting before being passed to ilike
-- Files: `backend/api/ai.py` (lines 234-242) - `f"%{search}%"` pattern
-- Impact: User input goes through `ilike()` which should be parameterized; should verify SQLAlchemy handles properly
-- Fix approach: Audit all ilike/filter patterns; ensure parameterization; add input validation tests
+**CSRF Protection Missing:**
+- Risk: No CSRF token validation on state-changing operations (POST/PUT/DELETE)
+- Files: All API endpoints lack CSRF protection
+- Current mitigation: HTTPOnly cookies + CORS origin checking provides some protection for browser-based attacks
+- Recommendations: Implement CSRF tokens for non-API clients, ensure SameSite=Strict for sensitive operations
 
-## Performance
+## Performance Bottlenecks
 
-**N+1 Queries in Chat History:**
-- Issue: No eager loading of related records in chat history queries
-- Files: `backend/api/ai.py` (lines 279-315)
-- Impact: Fetching 25+ alerts/activities triggers separate queries for related data; slowdown with scale
-- Fix approach: Use SQLAlchemy `joinedload()` for related models; profile query performance
+**Large File Size in Core Modules:**
+- Problem: Several modules exceed 500 lines, making them difficult to test and reason about
+- Files:
+  - `backend/api/strategies.py` (930 lines) - strategy CRUD, GitHub import, AI recommendations
+  - `backend/services/kraken.py` (877 lines) - exchange API wrapper
+  - `backend/api/trades.py` (826 lines) - trade management, paper trading, analysis
+  - `backend/api/ai.py` (745 lines) - chat endpoints, provider switching, streaming
+- Impact: Long method chains, complex error handling, difficult debugging, high cognitive load for new developers
+- Improvement path: Refactor into smaller modules (e.g., split `strategies.py` into `strategy_crud.py`, `strategy_github.py`, `strategy_ai.py`); extract common patterns into utilities
 
-**WebSocket Message Processing:**
-- Issue: Each Kraken WebSocket message is processed in message loop with potential for backlogs
-- Files: `backend/services/kraken_ws.py` (lines 243-270)
-- Impact: If message processing is slow, queue builds up; high-frequency tickers could overflow
-- Fix approach: Profile message processing time; consider separate queue for fast path items
+**Synchronous Database Queries in Async Endpoints:**
+- Problem: FastAPI async routes still use SQLAlchemy's synchronous ORM extensively
+- Files: Most API endpoints in `backend/api/*.py`
+- Impact: Thread pool execution of sync queries blocks async event loop; poor concurrency under load
+- Example: `backend/api/strategies.py` line 930 - `session.query(Strategy)` in async context
+- Improvement path: Migrate to SQLAlchemy 2.0 async ORM (AsyncSession) or use `asyncio.to_thread()` explicitly
 
-**In-Memory Alert Cache Without Bounds:**
-- Issue: Alert data structure grows with each alert but no eviction policy visible
-- Files: `frontend/src/hooks/useAlerts.js` - `alertStore.alerts` array grows unbounded
-- Impact: Memory leak in browser over long sessions; potential slowdown with hundreds of alerts
-- Fix approach: Implement max size for in-memory alert cache; implement pagination properly; clean up old alerts
+**No Pagination on List Endpoints:**
+- Problem: Endpoints returning full lists without limit/offset
+- Files: `backend/api/strategies.py`, `backend/api/trades.py`, `backend/api/market.py`
+- Impact: Large datasets (100k+ records) loaded entirely into memory; slow response times; memory exhaustion
+- Improvement path: Add pagination with default limit=50, max limit=1000, implement cursor-based pagination for better performance
 
-**Database Backup Overhead:**
-- Issue: Database backup runs at startup with no concurrency controls
-- Files: `backend/db/database.py` (backup functions)
-- Impact: If database is large, backup at startup could block application initialization
-- Fix approach: Move backups to background task; implement incremental backups; add backup duration timeout
-
-## Error Handling & Reliability
-
-**Missing Error Recovery in Kraken WS:**
-- Issue: Reconnection uses fixed exponential backoff without jitter
-- Files: `backend/services/kraken_ws.py` (line 232)
-- Impact: All clients reconnect simultaneously after outage, causing thundering herd
-- Fix approach: Add jitter to reconnect delays; implement exponential backoff with randomization
-
-**Chat History Truncation Silent Failure:**
-- Issue: If chat history query fails, endpoint returns partial response without indicating error
-- Files: `backend/api/ai.py` (lines 262-320)
-- Impact: Frontend may display incomplete chat history without user awareness
-- Fix approach: Make query failures explicit in response; log query failures with context
-
-**No Timeout on AI Model Calls:**
-- Issue: OpenAI/Claude API calls don't have explicit timeout configuration
-- Files: `backend/services/strategy_ai.py` (lines 222-236), `backend/api/ai.py` (lines 200+)
-- Impact: Requests could hang indefinitely; resource exhaustion if many hanging requests pile up
-- Fix approach: Add timeout parameter to all AI client calls; implement circuit breaker pattern
-
-**Uncaught Errors in Async Tasks:**
-- Issue: `asyncio.create_task()` calls without exception handlers
-- Files: `backend/main.py` (line 69), `backend/services/kraken_ws.py` (lines 175, 178)
-- Impact: Task failures are logged but don't propagate; can fail silently
-- Fix approach: Wrap create_task with error callback; monitor task exceptions; implement task death detection
-
-## Missing Validation
-
-**Credential Edge Cases:**
-- Issue: Password reset tokens and session tokens don't validate length or format on creation
-- Files: `backend/db/models.py` (lines 45-58, 32-42)
-- Impact: Tokens could be invalid or empty; validation only happens at validation time
-- Fix approach: Add constraints in model; validate token format before storing
-
-**Market Data Inputs:**
-- Issue: Decimal values from Kraken stream converted without overflow checks
-- Files: `backend/services/kraken_ws.py` (lines 35-60)
-- Impact: Extreme price values could cause calculation errors; no bounds checking
-- Fix approach: Add min/max validation; implement circuit breaker for anomalous prices
-
-**JSON Configuration Fields:**
-- Issue: JSON fields in models (`rules_json`, `ai_modifications_json`, `preferences_json`) stored without schema validation
-- Files: `backend/db/models.py` (multiple JSON fields)
-- Impact: Invalid JSON structure could break strategy execution; no schema enforcement
-- Fix approach: Implement JSON schema validation before insert/update; document expected structures
-
-## Testing Gaps
-
-**No Tests for WebSocket Reconnection:**
-- Issue: Critical reconnection logic in `kraken_ws.py` lacks automated tests
-- Files: `backend/services/kraken_ws.py` (lines 213-241)
-- Impact: Reconnection bugs could cause trading signal delays without detection
-- Fix approach: Add unit tests for reconnect logic with mocked websockets; test exponential backoff
-
-**Missing Integration Tests for AI Providers:**
-- Issue: AI provider fallback logic tested manually if at all
-- Files: `backend/api/ai.py`, `backend/services/strategy_ai.py`
-- Impact: Provider switch bugs (e.g., invalid credentials) not caught until runtime
-- Fix approach: Add integration tests with mocked AI providers; test fallback paths
-
-**Frontend Auth Tests Incomplete:**
-- Issue: Session timeout, MFA flows not tested in frontend
-- Files: `frontend/src/` - no obvious test files for auth flows
-- Impact: Auth vulnerabilities not caught until production
-- Fix approach: Add test coverage for login, session timeout, MFA; test protected route access control
-
-**No Load Testing:**
-- Issue: High-frequency trading scenarios not tested
-- Files: Entire backend
-- Impact: Performance bottlenecks discovered in production under real trading load
-- Fix approach: Implement load tests for WebSocket throughput; profile alert generation at scale
+**Missing Database Indexes:**
+- Problem: No explicit indexes on frequently queried columns
+- Files: `backend/db/models.py`
+- Impact: Full table scans on user_id, strategy_id, timestamp queries; slow performance as data grows
+- Improvement path: Add indexes on foreign keys, timestamps used in filtering, email fields
 
 ## Fragile Areas
 
-**Kraken API Rate Limiting:**
-- Files: `backend/services/kraken.py` (rate limiting queue)
-- Why fragile: Rate limit handling is custom-built; Kraken API rate limit changes not automatically handled
-- Safe modification: Change only via queuing mechanism; add integration tests before modifying
-- Test coverage: Rate limit tests missing
+**Email Listener System Complexity:**
+- Files: `backend/db/database.py` (lines 254-299)
+- Why fragile: Multiple SQLAlchemy event hooks (`before_insert`, `before_update`, `before_flush`) with interdependent logic; email normalization happens in multiple places; race conditions possible
+- Safe modification: Add integration tests for concurrent registrations, use explicit locking, consider moving to database constraints instead
+- Test coverage: No tests visible for the listener system; only functional testing of registration endpoint
 
-**Paper Trading Execution:**
-- Files: `backend/core/paper_trading.py`
-- Why fragile: Paper and live trading paths not unified; execution logic duplicated
-- Safe modification: Refactor to single execution path with paper trading flag
-- Test coverage: Limited coverage of edge cases (gap fills, slippage calculations)
+**Paper Trading Engine State Management:**
+- Files: `backend/core/paper_trading.py` (555 lines)
+- Why fragile: In-memory state with no persistence; server restart loses all paper trading state; concurrent trade execution without explicit synchronization
+- Safe modification: Add explicit locks around state mutations, implement state snapshots to disk, add state recovery on startup
+- Test coverage: Gaps in concurrent execution scenarios, edge cases around order timing
 
-**Market Data Stream Synchronization:**
-- Files: `backend/services/kraken_ws.py`, `backend/services/market_data.py`
-- Why fragile: Two separate data sources (REST API and WebSocket) without conflict resolution
-- Safe modification: Add explicit sync logic when switching sources; handle gaps
-- Test coverage: No tests for REST/WebSocket data consistency
+**Kraken WebSocket Connection Management:**
+- Files: `backend/services/kraken_ws.py` (672 lines)
+- Why fragile: Long-running WebSocket connection requires careful error recovery; reconnection logic may hang; heartbeat mechanism could miss stale connections
+- Safe modification: Add timeout detection, implement circuit breaker, log all connection state changes, add integration tests with mock Kraken server
+- Test coverage: Manual testing only; no unit tests for disconnection/reconnection scenarios
+
+**AI Model Provider Abstraction Leaky:**
+- Files: `backend/api/ai.py` (745 lines), `backend/services/ai_models.py`
+- Why fragile: Multiple providers (OpenAI, Claude, Ollama) with different response formats; fallback logic not enforced; streaming implementation splits across modules
+- Safe modification: Implement strict provider interface contract, add provider-specific test fixtures, validate response format before returning
+- Test coverage: Unit tests likely missing for error paths; no chaos testing for provider failures
 
 ## Scaling Limits
 
-**SQLite Concurrent Write Limit:**
-- Current capacity: Single writer, multiple readers
-- Limit: Breaks under concurrent trade execution
-- Scaling path: Migrate to PostgreSQL with connection pooling; implement per-strategy sharding
+**Redis Dependency for Rate Limiting:**
+- Current capacity: Single Redis instance (localhost:6379 by default)
+- Limit: Fails open when Redis unavailable (security risk); no clustering/sentinel support
+- Scaling path: Implement Redis Sentinel for HA, add Redis Cluster support for horizontal scaling, implement local fallback cache with eventual consistency
 
-**WebSocket Broadcast Limit:**
-- Current capacity: All clients receive all updates (ticker, trades)
-- Limit: Broadcast overhead grows with client count
-- Scaling path: Implement per-client subscription filtering at broker level; use Redis pub/sub
+**SQLite Database Single Writer:**
+- Current capacity: Works for small-medium deployments (< 10k users)
+- Limit: SQLite has global write lock; concurrent writes block each other; cannot run multi-server deployment
+- Scaling path: Migrate to PostgreSQL with proper connection pooling (pgBouncer), implement read replicas for analytics queries
 
-**AI Provider Rate Limits:**
-- Current capacity: No built-in rate limit handling for OpenAI/Claude
-- Limit: API calls get rate limited without backoff
-- Scaling path: Implement token bucket rate limiter; queue AI requests with priority
+**Paper Trading In-Memory State:**
+- Current capacity: ~1000 concurrent paper trades before memory exhaustion
+- Limit: No persistence layer; all state lost on restart; no multi-server support
+- Scaling path: Move to Redis or PostgreSQL for state storage, implement distributed transaction handling
+
+**WebSocket Connection Limit:**
+- Current capacity: ~500 concurrent WebSocket connections per server (uvicorn/asyncio default)
+- Limit: Single server bottleneck; no connection pooling or message broker
+- Scaling path: Implement Redis pub/sub for multi-server broadcast, use connection pooling, add HAProxy/Nginx load balancing with sticky sessions
 
 ## Dependencies at Risk
 
-**Anthropic SDK Version Constraint:**
-- Risk: `anthropic>=0.15.0` is very loose; future major versions could break
-- Impact: Breaking changes in Claude API handling
-- Migration plan: Pin major version; maintain compatibility wrapper for version transitions
+**OpenAI API Client (openai >= 1.9.0):**
+- Risk: Frequent breaking changes in OpenAI SDK; multiple major versions in use across projects
+- Impact: Incompatible when upgrading; chat completion endpoints change between versions
+- Migration plan: Pin to 1.x, migrate to stable OpenAI v1 API when released; implement provider abstraction layer to allow drop-in replacements
 
-**Krakenex Library Maintenance:**
-- Risk: Krakenex 2.2.1 may not track Kraken API updates quickly
-- Impact: New Kraken features/changes not available; hidden API deprecations
-- Migration plan: Monitor krakenex releases; have plan to switch to direct httpx calls if unmaintained
+**Anthropic SDK (anthropic >= 0.15.0):**
+- Risk: Young library with API stability not guaranteed; currently at 0.15 (not 1.0)
+- Impact: Behavior changes possible with minor version bumps
+- Migration plan: Pin to specific version, monitor release notes, add integration tests for Anthropic responses
 
-**Old Pydantic Validator Pattern:**
-- Risk: Code uses `@validator` decorator (Pydantic v1 style) - may not work with v2
-- Impact: Validation logic could silently fail in Pydantic v2
-- Migration plan: Migrate all `@validator` to `@field_validator` for v2 compatibility
+**Technical Analysis Library (ta >= 0.11.0):**
+- Risk: Unmaintained or slow-moving library; indicators may have bugs
+- Impact: Strategy results incorrect; trading decisions based on wrong signal values
+- Migration plan: Consider TA-Lib or pandas_ta (more maintained), validate indicator outputs against market data
+
+**Krakenex (krakenex >= 2.2.1):**
+- Risk: Kraken may change API without notice; third-party wrapper could lag behind
+- Impact: Trading endpoints may break; balance queries may return wrong format
+- Migration plan: Monitor Kraken API changelog, add health checks for API compatibility, consider maintaining fork if updates lag
 
 ## Missing Critical Features
 
-**Hot-Reload Configuration:**
-- Problem: Settings changes require application restart
-- Blocks: Cannot change API keys, notification settings without downtime
-- Solution: Implement configuration change endpoint with safe reload; invalidate affected caches
+**Audit Logging:**
+- Problem: No audit trail for sensitive operations (trades, strategy changes, account settings)
+- Blocks: Regulatory compliance (may be required for financial instruments), forensic analysis of security incidents
+- Example: No log of who deleted a strategy and when; no record of settings changes
 
-**Audit Trail for Trades:**
-- Problem: No immutable log of who initiated each trade (human vs AI)
-- Blocks: Regulatory compliance, debugging trade issues, accountability
-- Solution: Add audit log table; log every trade with user/agent ID and decision context
+**Rate Limiting per Endpoint:**
+- Problem: Global Redis rate limiter treats all endpoints equally
+- Blocks: Cannot implement stricter limits on auth (prevent brute force), login (prevent account enumeration), password reset (prevent email scraping)
+- Current: `backend/core/rate_limit.py` applies single rule to all paths
 
-**Circuit Breaker for External APIs:**
-- Problem: Cascade failures when Kraken or AI APIs are down
-- Blocks: Can't degrade gracefully; affects all users
-- Solution: Implement circuit breaker pattern; fallback to cached data; notify users of degradation
+**Distributed Tracing:**
+- Problem: No request tracing across services; difficult to debug slow trades or AI decisions
+- Blocks: Performance optimization of complex workflows; root cause analysis for failures
+- Current: Logging is local per module with no correlation IDs
+
+## Test Coverage Gaps
+
+**Authentication Edge Cases:**
+- What's not tested: Session expiry near boundary times, timezone conversion bugs, concurrent login/logout, MFA disabled/enabled transitions, password reset token reuse
+- Files: `backend/api/auth.py` (455 lines), `backend/core/auth.py`, `backend/core/security.py`
+- Risk: Auth bypass possible; data leakage on failed authentication; session confusion
+- Priority: High
+
+**Kraken API Error Handling:**
+- What's not tested: Network timeouts, rate limit responses from Kraken, invalid order responses, WebSocket disconnection during trade
+- Files: `backend/services/kraken.py` (877 lines), `backend/services/kraken_ws.py` (672 lines)
+- Risk: Orders placed twice, trades never confirmed, account state desynchronized with Kraken
+- Priority: High
+
+**Concurrent Trade Execution:**
+- What's not tested: Multiple trades triggered simultaneously for same symbol, paper trading + live trading mixed, race conditions in position calculations
+- Files: `backend/core/paper_trading.py` (555 lines), `backend/agents/trade_executor.py`
+- Risk: Margin calls missed, overlapping orders, incorrect P&L calculations
+- Priority: High
+
+**AI Model Failover:**
+- What's not tested: OpenAI API unavailable, Claude timeout, Ollama model missing, streaming response truncation, token limit exceeded
+- Files: `backend/api/ai.py` (745 lines), `backend/services/ai_models.py` (433 lines)
+- Risk: Chat becomes unusable, strategy recommendations incorrect, incomplete data persisted
+- Priority: Medium
+
+**Frontend API Error Handling:**
+- What's not tested: 5xx errors, network timeout recovery, retry behavior on 429, session expiry during async operation
+- Files: `frontend/src/services/api.js`
+- Risk: Silent failures, stuck loading states, confusing error messages to user
+- Priority: Medium
 
 ---
 

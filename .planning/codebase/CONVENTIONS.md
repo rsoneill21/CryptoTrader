@@ -5,261 +5,188 @@
 ## Naming Patterns
 
 **Files:**
-- Python API routes: snake_case with descriptive names (`auth.py`, `strategies.py`, `market.py`)
-- Python services: snake_case (`kraken.py`, `email.py`, `alert_service.py`)
-- React components: PascalCase (`ChatWindow.js`, `PositionManager.js`, `AlertItem.js`)
-- React pages: PascalCase (`AIChat.js`, `Dashboard.js`, `StrategyLab.js`)
-- Utilities/services in frontend: camelCase with descriptive names (`api.js`)
-- Configuration files: lowercase with dots (`vite.config.js`, `eslint.config.js`, `tailwind.config.js`)
+- Python backend: `snake_case.py` - e.g., `auth.py`, `database.py`, `kraken_service.py`
+- JavaScript frontend: `PascalCase.js` for components (React), `camelCase.js` for utilities and hooks - e.g., `LoginForm.js`, `useAuth.js`, `api.js`
 
 **Functions:**
-- Python: snake_case for all functions, sync and async (`get_ticker()`, `_build_technical_snapshot()`, `verify_totp()`)
-- Python internal helpers: leading underscore (`_determine_log_level()`, `_format_message()`, `_kraken_error_alert()`)
-- JavaScript: camelCase (`getToken()`, `setToken()`, `normalizeAPIError()`, `extractAPIError()`)
-- JavaScript async: camelCase (`loadStoredChatTone()`, `ensureChatToneFetchInterceptor()`)
-- React hooks: camelCase, often follow `use*` pattern if custom hooks (not yet seen but expected)
+- Python: `snake_case` - e.g., `hash_password()`, `verify_password()`, `validate_password_strength()`
+- JavaScript: `camelCase` - e.g., `handleLogin()`, `getToken()`, `setToken()`, `clearError()`
 
 **Variables:**
-- Python: snake_case (`session_token`, `order_status`, `alert_severity`)
-- Python constants: UPPER_SNAKE_CASE (`VALID_EMAIL = "tester@example.com"`, `TOKEN_KEY`, `CHAT_TONE_STORAGE_KEY`)
-- JavaScript: camelCase (`apiOrigin`, `wsTarget`, `backendHost`)
-- JavaScript constants: UPPER_SNAKE_CASE (`DEFAULT_CHAT_TONE`, `CHAT_TONE_EVENT`, `UNEXPECTED_ERROR_MESSAGE`)
+- Python: `snake_case` - e.g., `session_token`, `password_hash`, `mfa_enabled`
+- JavaScript: `camelCase` - e.g., `isAuthenticated`, `setLoading`, `clearError`
 
-**Types:**
-- Python Pydantic models: PascalCase (`RegisterRequest`, `LoginResponse`, `StrategyCreate`, `Balance`, `Ticker`, `OHLC`)
-- Python Enums: PascalCase class name, UPPER_CASE values (`OrderType.MARKET`, `OrderSide.BUY`, `OrderStatus.OPEN`)
-- TypeScript/JavaScript: No explicit type annotations in current codebase (untyped JavaScript)
+**Types/Classes:**
+- Python: `PascalCase` - e.g., `User`, `Session`, `RegisterRequest`, `APIErrorResponse`
+- JavaScript: `PascalCase` for React components - e.g., `LoginForm`, `Layout`, `Dashboard`
+
+**Constants:**
+- Python: `UPPER_SNAKE_CASE` - e.g., `VALID_EMAIL`, `VALID_PASSWORD`, `REQUEST_ID_HEADER`
+- JavaScript: `UPPER_SNAKE_CASE` - e.g., `TOKEN_KEY`, `SIDEBAR_KEY`, `UNEXPECTED_ERROR_MESSAGE`
 
 ## Code Style
 
 **Formatting:**
-- Python: No black/autopep8 formatter detected. Uses standard 4-space indentation.
-- JavaScript: No Prettier formatter configured. Uses 2-space indentation in some files, varies slightly.
-- Line length: Flexible, no hard limit enforced
+- Python: No explicit formatter configured, but follows PEP 8 conventions (inferred from code style)
+- JavaScript: ESLint configured in `frontend/eslint.config.js` with Prettier integration (implied by package.json dependencies)
 
 **Linting:**
-- Frontend: ESLint 9.10.0 with strict configuration
-  - Config file: `frontend/eslint.config.js`
-  - Plugins: `eslint-plugin-react`, `eslint-plugin-react-hooks`
-  - Rules: Enforced recommended rules, disabled `react/react-in-jsx-scope`, `react/prop-types`
-  - Unused vars: Allowed if prefixed with `_` (pattern: `^_`)
-  - Command: `npm run lint` with `--max-warnings=0` (zero tolerance)
-- Backend: No linter configuration detected in repository (relies on manual code review)
+- Python: No eslint/pylint config file found - relies on natural conventions
+- JavaScript: ESLint with React and React Hooks plugins configured in `frontend/eslint.config.js`
+  - ES2022 as target ecmaVersion
+  - Unused variable rule allows underscore prefix pattern: `argsIgnorePattern: '^_'`
+  - React plugin configured with version detection
+  - React Hooks recommended rules enforced
+
+**Key JavaScript Rules:**
+- `react/react-in-jsx-scope`: off (React 17+ doesn't require React import)
+- `react/prop-types`: off (no prop validation required)
+- `no-unused-vars`: errors if variables unused except those starting with `_`
 
 ## Import Organization
 
-**Order (Python):**
-1. Standard library imports (`import asyncio`, `import logging`, `from typing import ...`)
-2. Third-party imports (`from fastapi import ...`, `from pydantic import ...`, `from sqlalchemy ...`)
-3. Local imports (`from core.settings import ...`, `from db.database import ...`)
-4. Blank line separating groups
-
-Example from `backend/api/auth.py`:
+**Python Pattern:**
 ```python
-import logging
-from datetime import datetime, timezone
-from typing import Optional
+# Standard library imports
+from pathlib import Path
+import os
+import sys
 
+# Third-party imports
 from fastapi import APIRouter, HTTPException, Depends, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
+# Local imports
 from core.settings import get_app_settings
 from db.database import get_db
+from db.models import User, Session as UserSession
+from services.email import email_service
 ```
 
-**Order (JavaScript):**
-1. React/framework imports (`import React, { useState, ...} from 'react'`)
-2. Third-party libraries (`import axios from 'axios'`)
-3. Local imports and services (`import ChatWindow from '../components/ChatWindow'`, `import api from '../services/api'`)
-4. Constants defined after imports
-
-Example from `frontend/src/pages/AIChat.js`:
+**JavaScript Pattern:**
 ```javascript
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
-import ChatWindow from '../components/ChatWindow';
-import api, { aiAPI } from '../services/api';
+// React/Framework imports
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-const CHAT_TONE_EVENT = 'cryptotrader:chatTonePreferenceChanged';
+// Third-party imports
+import axios from 'axios';
+
+// Local imports
+import { useAuth } from '../hooks/useAuth';
+import LoginForm from '../components/LoginForm';
+import Layout from '../components/Layout';
 ```
 
 **Path Aliases:**
-- Python: Relative imports from root (`from api.auth import ...`, `from db.models import ...`, `from core.settings import ...`)
-- JavaScript: Relative paths with directory traversal (`import api from '../services/api'`, `import ChatWindow from '../components/ChatWindow'`)
-- No alias configuration detected in either frontend or backend
+- No path aliases detected in frontend (uses relative paths)
+- JavaScript imports use relative paths like `../context/AuthContext`
 
 ## Error Handling
 
 **Python Pattern:**
-- Structured error responses via `api.errors` module
-- HTTPException raised with specific status codes
-- Centralized error handlers registered on FastAPI app
-- Example from `backend/api/auth.py`:
-  ```python
-  if not user_record:
-      raise HTTPException(status_code=404, detail="User not found")
-  ```
-- Error payload includes `code`, `message`, and optional `details`
-- Log level determined by HTTP status code (4xx = warning, 5xx = error)
+- Use FastAPI's `HTTPException` for API errors with status codes and detail messages
+- Custom error response format: `APIErrorResponse` with nested `APIErrorDetail` containing `code`, `message`, and optional `details`
+- Error logging via `log_system_error()` utility from `db.database`
+- Example: `raise HTTPException(status_code=409, detail="Email already registered")`
 
 **JavaScript Pattern:**
-- Axios interceptor pattern for response handling
-- Extract error from response data (check for `data.error` object)
-- Normalize errors to consistent shape: `{ message, code, details }`
-- 401 errors trigger automatic logout and redirect to `/login`
-- Example from `frontend/src/services/api.js`:
-  ```javascript
-  const normalizeAPIError = (errorResponseData) => {
-    const apiError = extractAPIError(errorResponseData);
-    if (!apiError) {
-      return null;
-    }
-    return {
-      message: apiError.message || apiError.detail || UNEXPECTED_ERROR_MESSAGE,
-      code: apiError.code || 'unknown_error',
-      details: apiError.details,
-    };
-  };
-  ```
+- Try-catch blocks in async functions
+- Error extraction from response data: check for `data.error` or `data.detail`
+- Return error objects with `success: false` and `error: message` fields
+- Example:
+```javascript
+catch (err) {
+  const message = err.message || 'Login failed';
+  setError(message);
+  return { success: false, error: message };
+}
+```
 
 ## Logging
 
 **Framework:**
-- Python: Standard `logging` module
-- JavaScript: `console.log()`, `console.debug()` for client-side logging
+- Python: `logging` module
+- JavaScript: `console.log()` for development (no centralized logger)
 
-**Patterns (Python):**
-- Logger per module: `logger = logging.getLogger("cryptotrader.auth")` or `logger = logging.getLogger(__name__)`
-- Named loggers by domain: `cryptotrader.auth`, `cryptotrader.kraken_alerts`, `cryptotrader.strategies`
-- System error logging through `db.database.log_system_error()` with sanitization
-- Example from `backend/api/auth.py`:
-  ```python
-  logger = logging.getLogger("cryptotrader.auth")
-  logger.exception("Failed to process login", exc_info=True)
-  ```
+**Python Patterns:**
+- Module-level logger: `logger = logging.getLogger("cryptotrader.service_name")`
+- Named loggers follow dot notation: `logging.getLogger("cryptotrader.kraken_alerts")`
+- Used in `api/auth.py`, `api/errors.py`, `main.py`, etc.
+- Error logging through centralized `log_system_error()` from database module
+- Example: `logger = logging.getLogger("cryptotrader.auth")`
 
-**Patterns (JavaScript):**
-- Debug logging: `console.debug('Unable to read preferred chat tone:', error)`
-- General logging: `console.log('Rendering App component')`
-- No structured logging framework detected
+**JavaScript Patterns:**
+- Development logging: `console.log('Rendering App component');`
+- No structured logging framework
+- Used sparingly in production code
 
 ## Comments
 
 **When to Comment:**
-- Module docstrings for files (Python uses triple-quoted strings at top)
-- Function docstrings for public API functions
-- Inline comments for non-obvious logic or workarounds
+- Python: Docstrings for all functions/classes with Args, Returns, Raises sections
+- Function-level comments explain complex logic (rarely needed)
+- Inline comments for non-obvious algorithm decisions
 
 **JSDoc/TSDoc:**
-- Python: Docstrings with triple quotes at module level
-  ```python
-  """
-  Authentication API routes.
-  """
-  ```
-  ```python
-  """Persist a Kraken API error as an alert record."""
-  ```
-- JavaScript: Block comments for module documentation
-  ```javascript
-  /**
-   * API client service for CryptoTrader.
-   *
-   * Provides axios instance with:
-   * - Base URL configuration
-   * - Auth token interceptor
-   * - 401 handling (redirect to login)
-   * - Error formatting
-   */
-  ```
+- JavaScript: JSDoc blocks for functions explaining purpose, parameters, return values, and errors
+- Example from `useAuth.js`:
+```javascript
+/**
+ * Custom hook for authentication.
+ *
+ * @returns {Object} Auth context with user, loading, error, and auth methods
+ * @throws {Error} If used outside of AuthProvider
+ */
+```
+
+- Python docstring style:
+```python
+def hash_password(password: str) -> str:
+    """
+    Hash a password using bcrypt.
+
+    Args:
+        password: Plain text password
+
+    Returns:
+        Hashed password string
+    """
+```
 
 ## Function Design
 
 **Size:**
-- Python: Functions typically 10-50 lines, modular approach
-- JavaScript: Component functions often 40-100+ lines, especially pages with multiple features
+- Python: Functions typically 10-50 lines, with complex business logic split across multiple functions
+- JavaScript: Functional components and hooks tend to be 40-100+ lines with multiple effects/state handlers
 
 **Parameters:**
-- Python: Type hints used throughout (e.g., `async def register(request: RegisterRequest, db: Session = Depends(get_db))`)
-- Python FastAPI: Uses dependency injection via `Depends()` for database sessions and authentication
-- JavaScript: No type annotations (untyped), parameters documented in JSDoc or clear from usage
+- Python: Use Pydantic models for request validation (e.g., `RegisterRequest`, `LoginRequest`)
+- JavaScript: Props objects for components, individual parameters for utility functions
 
 **Return Values:**
-- Python: Explicit Pydantic models for API responses (`RegisterResponse`, `LoginResponse`)
-- Python async: Always return `await` or explicit Promise-like objects
-- JavaScript: Returns JSX for components, plain objects for utility functions
+- Python: Return Pydantic response models or raise HTTPException for errors
+- JavaScript: Return objects with `success` boolean and `data`/`error` fields:
+```javascript
+return { success: true, data: response.data };
+return { success: false, error: message };
+```
 
 ## Module Design
 
-**Exports (Python):**
-- APIRouter instances exported as `router` from each API module
-- Main services instantiated as module-level singletons (e.g., `github_import_service = GitHubImportService()`)
-- Models exported from `db.models`
-
-**Exports (JavaScript):**
-- React components as default exports (`export default App`)
-- Utility functions as named exports (`export const getToken = ()`, `export const setToken = ()`)
-- Axios instance as default export, specific endpoints as named exports (`export const aiAPI`)
+**Exports:**
+- Python: Direct imports of classes/functions - no barrel pattern
+- JavaScript: ESM module exports with named exports and default exports
+  - Example: `export default Layout;` and `export const useAuth = () => { ... }`
 
 **Barrel Files:**
-- Python: Not used (direct imports from modules)
-- JavaScript: Not used (direct imports from components/pages)
-- Example from `backend/main.py` showing direct imports:
-  ```python
-  from api import auth_router, market_router, system_router
-  from api.alerts import router as alerts_router
-  from api.ai import router as ai_router
-  ```
+- Not used in this codebase
 
-## Async/Await Patterns
-
-**Python:**
-- FastAPI endpoints marked with `async def`
-- Database operations through sync SQLAlchemy (no async driver)
-- External API calls use `httpx` async client or kraken service wrappers
-- Example:
-  ```python
-  @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-  async def register(request: RegisterRequest, db: Session = Depends(get_db)):
-  ```
-
-**JavaScript:**
-- React components use hooks: `useState`, `useEffect`, `useCallback`, `useMemo`
-- Async operations with axios promises (not explicitly async/await in samples)
-- Example:
-  ```javascript
-  const loadStoredChatTone = () => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_CHAT_TONE;
-    }
-    try {
-      return window.localStorage.getItem(CHAT_TONE_STORAGE_KEY) ?? DEFAULT_CHAT_TONE;
-    } catch (error) {
-      console.debug('Unable to read preferred chat tone:', error);
-      return DEFAULT_CHAT_TONE;
-    }
-  };
-  ```
-
-## Validation
-
-**Python:**
-- Pydantic BaseModel for request validation (automatic via FastAPI)
-- Custom validators with `@validator` decorator
-- Email validation: `EmailStr` from pydantic
-- Password strength validation: `validate_password_strength()` function
-- Example:
-  ```python
-  class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-  ```
-
-**JavaScript:**
-- No explicit validation framework
-- Manual checks in axios interceptors and utility functions
-- Relies on backend validation with error extraction
+**Database Models:**
+- SQLAlchemy models in `backend/db/models.py` follow PascalCase class names
+- Tablenames use `snake_case`: `__tablename__ = "users"`
+- Relationships defined with `relationship()` and `back_populates`
 
 ---
 

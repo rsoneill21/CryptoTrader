@@ -6,274 +6,294 @@
 
 ```
 CryptoTrader/
-├── backend/                    # FastAPI server + business logic
-│   ├── api/                    # HTTP route handlers (routers)
-│   ├── agents/                 # Autonomous trading agents
-│   ├── core/                   # Infrastructure, config, security
-│   ├── db/                     # Database models, migrations, ORM utilities
-│   ├── services/               # Business logic + external integrations
-│   ├── tests/                  # Backend test suite
-│   ├── alembic/                # Database migration files
-│   ├── main.py                 # FastAPI app entry point
-│   ├── init_db.py              # Database initialization script
-│   ├── requirements.txt         # Python dependencies
-│   └── cryptotrader.db         # SQLite database file (dev)
-│
-├── frontend/                   # React SPA client
+├── backend/                         # FastAPI application
+│   ├── main.py                      # Application entry point
+│   ├── init_db.py                   # Database initialization script
+│   ├── api/                         # HTTP request handlers
+│   │   ├── auth.py                  # Authentication routes
+│   │   ├── market.py                # Market data and WebSocket routes
+│   │   ├── trades.py                # Trade management routes
+│   │   ├── strategies.py            # Strategy CRUD routes
+│   │   ├── alerts.py                # Alert management routes
+│   │   ├── ai.py                    # AI chat and decision routes
+│   │   ├── risk.py                  # Risk analysis routes
+│   │   ├── export.py                # Data export routes
+│   │   ├── system.py                # System health, logs routes
+│   │   ├── errors.py                # Exception handlers
+│   │   └── __init__.py              # Router exports
+│   ├── services/                    # Business logic and integrations
+│   │   ├── kraken.py                # Kraken exchange API client
+│   │   ├── kraken_ws.py             # Kraken WebSocket feed handler
+│   │   ├── market_data.py           # Market data aggregation
+│   │   ├── portfolio.py             # Portfolio calculations
+│   │   ├── ai_models.py             # AI provider routing (OpenAI, Claude, Groq)
+│   │   ├── chat_memory.py           # Chat history management
+│   │   ├── alert_service.py         # Alert notification dispatch
+│   │   ├── risk_ai.py               # Risk assessment AI
+│   │   ├── strategy_ai.py           # Strategy optimization AI
+│   │   ├── social_sentiment.py      # Sentiment analysis service
+│   │   ├── news_feed.py             # News aggregation
+│   │   ├── health_monitor.py        # System health checks
+│   │   ├── email.py                 # Email sending service
+│   │   ├── password_reset.py        # Password reset token management
+│   │   ├── paper_trading_service.py # Paper trading backend
+│   │   └── __init__.py
+│   ├── agents/                      # AI agents for autonomous decisions
+│   │   ├── base.py                  # Base agent class and message types
+│   │   ├── orchestrator.py          # Main orchestrator agent
+│   │   ├── market_analyst.py        # Market analysis agent
+│   │   ├── strategy_optimizer.py    # Strategy optimization agent
+│   │   ├── trade_executor.py        # Trade execution agent
+│   │   ├── risk_monitor.py          # Risk monitoring agent
+│   │   ├── sentiment_agent.py       # Sentiment analysis agent
+│   │   └── __init__.py
+│   ├── core/                        # Infrastructure and cross-cutting concerns
+│   │   ├── settings.py              # Application configuration via Pydantic
+│   │   ├── security.py              # Password hashing, token generation, MFA
+│   │   ├── auth.py                  # Session and token verification
+│   │   ├── rate_limit.py            # Rate limiting utilities
+│   │   ├── message_queue.py         # Celery message queue and pub/sub
+│   │   ├── celery_app.py            # Celery application configuration
+│   │   ├── tasks.py                 # Background job definitions
+│   │   ├── trading_control.py       # Trading execution control and state
+│   │   ├── indicators.py            # Technical analysis indicators
+│   │   ├── paper_trading.py         # Paper trading engine
+│   │   ├── audit.py                 # Audit logging utilities
+│   │   ├── patterns.py              # Trading pattern recognition
+│   │   └── __init__.py
+│   ├── db/                          # Database layer
+│   │   ├── database.py              # SQLAlchemy engine, session factory, initialization
+│   │   ├── models.py                # ORM models (User, Trade, Strategy, etc.)
+│   │   ├── migrations.py            # Alembic migration runner
+│   │   ├── alembic/                 # Database migration files
+│   │   │   └── versions/            # Migration scripts (auto-generated)
+│   │   └── __init__.py
+│   ├── tests/                       # Test suite
+│   └── venv/                        # Python virtual environment (excluded from git)
+├── frontend/                        # React application
 │   ├── src/
-│   │   ├── components/         # Reusable React components
-│   │   ├── context/            # React Context providers
-│   │   ├── hooks/              # Custom React hooks
-│   │   ├── pages/              # Route-level page components
-│   │   ├── services/           # HTTP API clients (Axios)
-│   │   ├── store/              # State management (if using Redux/Zustand)
-│   │   ├── App.jsx             # Root app component with routing
-│   │   ├── main.jsx            # React DOM mount point
-│   │   └── index.css           # Global styles
-│   ├── vite.config.js          # Vite bundler configuration
-│   ├── package.json            # Node dependencies
-│   └── index.html              # HTML entry point
-│
-├── prompts/                    # AI specification and project docs
-├── .planning/                  # Planning documents
-├── .planning/codebase/         # Codebase analysis (ARCHITECTURE.md, etc)
-└── [project files]             # Git, docs, config files
+│   │   ├── main.jsx                 # React bootstrap entry
+│   │   ├── App.jsx                  # Root component with routing
+│   │   ├── pages/                   # Full-page components
+│   │   │   ├── Login.js             # User login page
+│   │   │   ├── Register.js          # User registration page
+│   │   │   ├── ForgotPassword.js    # Password reset request page
+│   │   │   ├── Dashboard.js         # Main dashboard with stats and features
+│   │   │   ├── LiveTrading.js       # Live/paper trading interface
+│   │   │   ├── StrategyLab.js       # Strategy creation and management
+│   │   │   ├── AIChat.js            # AI conversation interface
+│   │   │   ├── Alerts.js            # Alert management and history
+│   │   │   ├── SystemLogs.js        # System event logs
+│   │   │   └── Settings.js          # User preferences and configuration
+│   │   ├── components/              # Reusable React components
+│   │   │   ├── Layout.js            # Main layout wrapper with sidebar and header
+│   │   │   ├── Header.js            # Top navigation bar
+│   │   │   ├── Sidebar.js           # Side navigation menu
+│   │   │   ├── Chart.js             # Interactive chart using lightweight-charts
+│   │   │   ├── ChartIndicators.js   # Technical indicator overlays
+│   │   │   ├── ChartAnnotations.js  # Chart drawing tools
+│   │   │   ├── ChatWindow.js        # AI chat message display
+│   │   │   ├── PositionManager.js   # Trade/position entry and management
+│   │   │   ├── RiskDashboard.js     # Risk metrics and controls
+│   │   │   ├── SentimentPanel.js    # Market sentiment display
+│   │   │   ├── ReasoningPanel.js    # AI reasoning explanation
+│   │   │   ├── ModelComparison.js   # Compare multiple AI model outputs
+│   │   │   ├── ExportPanel.js       # Data export interface
+│   │   │   ├── AlertItem.js         # Single alert display
+│   │   │   ├── AlertNotification.js # Toast-style alert notifications
+│   │   │   ├── LoginForm.js         # Reusable login form
+│   │   │   ├── RegisterForm.js      # Reusable registration form
+│   │   │   └── ProtectedRoute.js    # Route guard for authentication
+│   │   ├── context/                 # React Context providers
+│   │   │   ├── AuthContext.js       # Authentication state and user data
+│   │   │   └── ThemeContext.js      # Theme (light/dark) state
+│   │   ├── hooks/                   # Custom React hooks
+│   │   │   ├── useAuth.js           # Authentication utilities
+│   │   │   ├── useWebSocket.js      # WebSocket connection management
+│   │   │   └── useAlerts.js         # Alert subscription and state
+│   │   └── services/                # API clients and utilities
+│   │       └── api.js               # Axios instance with interceptors
+│   ├── public/                      # Static assets
+│   ├── package.json                 # NPM dependencies and scripts
+│   ├── vite.config.js               # Vite build configuration
+│   ├── tailwind.config.js           # Tailwind CSS configuration
+│   ├── postcss.config.js            # PostCSS plugins
+│   ├── eslint.config.js             # ESLint rules
+│   └── dist/                        # Built output (excluded from git)
+├── .planning/                       # Planning and analysis documents
+│   └── codebase/                    # Generated codebase analysis
+│       ├── ARCHITECTURE.md          # (this file) Architectural overview
+│       ├── STRUCTURE.md             # (this file) Directory structure
+│       ├── CONVENTIONS.md           # Coding patterns and conventions
+│       ├── TESTING.md               # Test patterns and framework info
+│       ├── STACK.md                 # Technology stack details
+│       ├── INTEGRATIONS.md          # External service integrations
+│       └── CONCERNS.md              # Technical debt and issues
+├── .triad/                          # Triad agent framework files (AI code generation)
+├── triad/                           # Triad monorepo submodule
+├── prompts/                         # AI agent prompts and specifications
+├── scripts/                         # Utility scripts
+├── .env.example                     # Example environment configuration
+├── README.md                        # Project documentation
+└── pyproject.toml / requirements.txt # Backend dependencies
 ```
 
 ## Directory Purposes
 
-**`backend/api/`:**
-- Purpose: HTTP route handlers organized by domain
-- Contains: FastAPI APIRouter instances with endpoint definitions
-- Key files: `auth.py`, `market.py`, `trades.py`, `ai.py`, `strategies.py`, `risk.py`, `alerts.py`, `export.py`, `system.py`, `errors.py`
-- Pattern: Each file is a logical grouping of related endpoints
+**backend/api:**
+- Purpose: HTTP request handlers organized by feature domain (auth, market, trades, etc.)
+- Contains: FastAPI route definitions with Pydantic request/response models
+- Key files: `auth.py` (login/register/MFA), `market.py` (market data WebSocket), `ai.py` (chat endpoint), `trades.py` (trade CRUD)
 
-**`backend/agents/`:**
-- Purpose: Autonomous agent implementations for trading decision-making
-- Contains: Agent classes extending BaseAgent abstract class
-- Key files: `base.py` (BaseAgent, AgentRegistry), `orchestrator.py`, `market_analyst.py`, `sentiment_agent.py`, `risk_monitor.py`, `strategy_optimizer.py`, `trade_executor.py`
-- Pattern: Each agent has distinct responsibility in multi-agent system
+**backend/services:**
+- Purpose: Domain-specific business logic and third-party service integrations
+- Contains: Stateful service classes for market data, exchange communication, AI routing, portfolio calculations
+- Key files: `kraken.py` (REST API wrapper), `kraken_ws.py` (WebSocket feed), `ai_models.py` (provider routing), `alert_service.py` (notifications)
 
-**`backend/core/`:**
-- Purpose: Cross-cutting concerns and application infrastructure
-- Contains: Configuration, authentication, security, task scheduling, utilities
-- Key files: `settings.py`, `auth.py`, `security.py`, `celery_app.py`, `tasks.py`, `rate_limit.py`, `audit.py`, `indicators.py`, `patterns.py`, `paper_trading.py`, `message_queue.py`, `trading_control.py`
-- Pattern: Modules provide shared functionality across all layers
+**backend/agents:**
+- Purpose: Autonomous AI agents that make trading decisions and analyze markets
+- Contains: Agent subclasses that implement decision algorithms, publish to message queue
+- Key files: `orchestrator.py` (main coordinator), `market_analyst.py` (trend analysis), `risk_monitor.py` (position validation)
 
-**`backend/db/`:**
-- Purpose: Data access layer with SQLAlchemy ORM
-- Contains: Database configuration, models, migrations
-- Key files:
-  - `database.py`: Engine setup, SessionLocal factory, initialization logic
-  - `models.py`: SQLAlchemy model definitions (User, Trade, Strategy, etc.)
-  - `migrations.py`: Alembic migration runner
-- Pattern: All database operations go through SQLAlchemy ORM
+**backend/core:**
+- Purpose: Infrastructure, configuration, and cross-cutting utilities shared across all layers
+- Contains: Settings management, security utilities, authentication, rate limiting, task definitions, audit logging
+- Key files: `settings.py` (env config), `security.py` (password/token utilities), `tasks.py` (Celery background jobs)
 
-**`backend/services/`:**
-- Purpose: Business logic and external API integration
-- Contains: Service classes with focused domain responsibilities
-- Key files: `ai_models.py`, `strategy_ai.py`, `risk_ai.py`, `kraken.py`, `kraken_ws.py`, `market_data.py`, `trade_sync.py`, `alert_service.py`, `chat_memory.py`, `news_feed.py`, `social_sentiment.py`, `portfolio.py`, `password_reset.py`, `email.py`, `health_monitor.py`, `preference_learning.py`, `github_import.py`, `model_tracking.py`, `paper_trading_service.py`
-- Pattern: Service per domain/concern; can be instantiated and injected as dependency
+**backend/db:**
+- Purpose: Database abstraction layer with ORM models and schema management
+- Contains: SQLAlchemy ORM models, database session factory, migration runner
+- Key files: `models.py` (User, Trade, Strategy, Alert entities), `database.py` (engine and session setup)
 
-**`backend/tests/`:**
-- Purpose: Test suite for backend functionality
-- Contains: Test files mirroring backend structure
-- Pattern: Tests alongside implementation code (pytest convention)
+**frontend/src/pages:**
+- Purpose: Full-page components that correspond to routes in the application
+- Contains: Layout, data fetching, page-specific logic
+- Key files: `Dashboard.js` (home), `LiveTrading.js` (trading UI), `StrategyLab.js` (strategy builder), `AIChat.js` (chat interface)
 
-**`backend/alembic/`:**
-- Purpose: Database schema versioning and migrations
-- Contains: Version files with up/down migration scripts
-- Key file: `versions/` directory with timestamped migration files
-- Pattern: Each migration is self-contained and reversible
+**frontend/src/components:**
+- Purpose: Reusable UI components used across multiple pages
+- Contains: Chart, forms, modals, notifications, lists, panels
+- Key files: `Chart.js` (market chart), `PositionManager.js` (trade entry), `ChatWindow.js` (message list)
 
-**`frontend/src/components/`:**
-- Purpose: Reusable UI building blocks
-- Contains: React functional components with isolated responsibilities
-- Component examples:
-  - Layout: `Layout.js` (wraps pages), `Header.js`, `Sidebar.js`
-  - Forms: `LoginForm.js`, `RegisterForm.js`
-  - Charts: `Chart.js`, `ChartIndicators.js`, `ChartAnnotations.js`
-  - Trading: `PositionManager.js`, `ExportPanel.js`
-  - Dashboards: `RiskDashboard.js`, `ModelComparison.js`
-  - Alerts: `AlertNotification.js`, `AlertItem.js`
-  - Other: `ChatWindow.js`, `ReasoningPanel.js`, `SentimentPanel.js`
-- Pattern: Each component is self-contained with internal state management
+**frontend/src/context:**
+- Purpose: React Context providers for shared state management
+- Contains: Authentication state, theme state, user profile data
+- Key files: `AuthContext.js` (user, token), `ThemeContext.js` (dark/light mode)
 
-**`frontend/src/pages/`:**
-- Purpose: Route-level page components (full screens)
-- Contains: Page components that compose smaller components
-- Key pages:
-  - Auth: `Login.js`, `Register.js`, `ForgotPassword.js`
-  - Main: `Dashboard.js` (overview)
-  - Trading: `LiveTrading.js` (real-time trading)
-  - Strategy: `StrategyLab.js` (strategy creation/testing)
-  - AI: `AIChat.js` (AI conversation)
-  - Admin: `SystemLogs.js` (system events), `Settings.js` (user prefs)
-  - Alerts: `Alerts.js` (alert management)
-- Pattern: Pages handle route logic and compose components
-
-**`frontend/src/context/`:**
-- Purpose: Global state management via React Context API
-- Key providers:
-  - `AuthContext.js`: Authentication state (user, loading, error, methods)
-  - `ThemeContext.js`: Theme state (dark/light mode)
-- Pattern: Context + Provider component; consume with useContext
-
-**`frontend/src/hooks/`:**
-- Purpose: Reusable stateful logic and side effects
-- Custom hooks:
-  - `useAuth.js`: Convenience hook to access AuthContext
-  - `useWebSocket.js`: WebSocket connection and subscription management
-  - `useAlerts.js`: Alert subscription and notification handling
-- Pattern: Return state/methods object for use in components
-
-**`frontend/src/services/`:**
-- Purpose: HTTP API communication and request handling
-- Key file: `api.js`
-  - Creates Axios instance with interceptors
-  - Implements error normalization
-  - Exports API client objects: authAPI, systemAPI, marketAPI, tradesAPI, aiAPI
-- Pattern: Objects with methods returning Promise for API calls
-
-**`frontend/src/store/`:**
-- Purpose: State management (if using Redux/Zustand)
-- Status: Appears minimal; primarily using Context API
+**frontend/src/hooks:**
+- Purpose: Custom React hooks for reusable logic
+- Contains: Authentication helpers, WebSocket management, alert subscriptions
+- Key files: `useAuth.js` (login/logout), `useWebSocket.js` (connection lifecycle)
 
 ## Key File Locations
 
 **Entry Points:**
-- Backend: `backend/main.py` - FastAPI app initialization
-- Frontend: `frontend/src/main.jsx` - React DOM mount
-- Frontend routing: `frontend/src/App.jsx` - React Router setup
+- `backend/main.py`: FastAPI app initialization, routes registration, middleware setup
+- `frontend/src/main.jsx`: React app bootstrap and DOM mounting
+- `backend/init_db.py`: Database schema initialization on startup
 
 **Configuration:**
-- Backend: `backend/core/settings.py` - Pydantic BaseSettings with env vars
-- Frontend: `frontend/vite.config.js` - Vite build configuration
-- Frontend env: `frontend/.env` (if present) - Runtime environment variables
+- `backend/core/settings.py`: Environment-based app configuration (port, database URL, API keys, security settings)
+- `frontend/vite.config.js`: Build tool configuration (dev server proxy, output paths)
+- `frontend/tailwind.config.js`: UI styling configuration
 
 **Core Logic:**
-- Authentication: `backend/api/auth.py` (routes), `backend/core/auth.py` (middleware/deps)
-- Trading: `backend/api/trades.py` (routes), `backend/services/trade_sync.py` (logic)
-- AI: `backend/api/ai.py` (routes), `backend/services/ai_models.py` (provider mgmt), `backend/agents/` (autonomous logic)
-- Market data: `backend/services/market_data.py`, `backend/services/kraken_ws.py`
+- `backend/agents/orchestrator.py`: Main decision-making orchestrator
+- `backend/services/kraken.py`: Exchange API client with rate limiting
+- `backend/db/models.py`: Data model definitions (User, Trade, Strategy, etc.)
 
 **Testing:**
-- Backend: `backend/tests/` - Pytest test files
-- Frontend: Tests typically co-located with components (if any)
+- `backend/tests/`: Unit and integration tests (organized by module)
+- `frontend/src/**/*.test.js`: Component tests using React Testing Library
 
 ## Naming Conventions
 
 **Files:**
-- Python: `snake_case.py` for modules (e.g., `ai_models.py`, `kraken_ws.py`)
-- React: `PascalCase.js(x)` for components (e.g., `LoginForm.js`, `Chart.js`)
-- React: `camelCase.js` for hooks/utils (e.g., `useAuth.js`, `api.js`)
+- Python: snake_case (e.g., `user_service.py`, `trade_executor.py`)
+- JavaScript/React: camelCase for logic files (`useAuth.js`, `api.js`), PascalCase for components (`LoginForm.js`, `Chart.js`)
 
 **Directories:**
-- All lowercase: `api`, `services`, `agents`, `core`, `db`
-- Consistent naming: `components`, `pages`, `hooks`, `context`, `services`
+- Feature-based grouping: `api/`, `services/`, `agents/`, `core/`, `db/`
+- Page routes as directories: `frontend/src/pages/`, `frontend/src/components/`
+- Utility grouping: `frontend/src/hooks/`, `frontend/src/context/`
 
-**Python Functions & Variables:**
-- `snake_case`: All functions, variables, module names
-- Classes: `PascalCase`
-- Constants: `UPPER_SNAKE_CASE` (config values)
+**Classes/Functions:**
+- Python: PascalCase for classes (`User`, `Trade`, `KrakenService`), snake_case for functions (`get_current_user()`)
+- JavaScript: camelCase for functions (`useAuth()`, `formatPrice()`), PascalCase for components (`<Dashboard />`, `<Chart />`)
 
-**React Components & Hooks:**
-- Components: `PascalCase` (e.g., `Dashboard`, `PositionManager`)
-- Hooks: `camelCase` starting with `use` (e.g., `useAuth`, `useWebSocket`)
-- Context: `PascalCase` for context object (e.g., `AuthContext`)
-
-**Database Tables:**
-- Plural, lowercase: `users`, `strategies`, `trades`, `orders`
-- Relationship foreign keys: `<table>_id` (e.g., `user_id`, `strategy_id`)
-
-**Routes/APIs:**
-- Kebab-case in URL paths: `/api/auth/login`, `/api/market/ticker`
-- Resource-oriented: `/api/trades/`, `/api/strategies/`
-- Actions: `/api/trades/{id}/close`, `/api/trades/{id}/ai-toggle`
+**Constants:**
+- Python: UPPER_SNAKE_CASE (e.g., `DATABASE_URL`, `SESSION_TIMEOUT_SECONDS`)
+- JavaScript: UPPER_SNAKE_CASE for globals (e.g., `API_BASE_URL`, `TOKEN_KEY`)
 
 ## Where to Add New Code
 
-**New Feature (Backend):**
-1. **API Route**: Create endpoint in appropriate file in `backend/api/` (or new file if distinct domain)
-   - Example: `backend/api/new_feature.py`
-2. **Service Logic**: Implement business logic in `backend/services/` (or core if infrastructure)
-   - Example: `backend/services/new_feature_service.py`
-3. **Database Model** (if needed): Add SQLAlchemy model to `backend/db/models.py`
-4. **Migration** (if DB change): Run `alembic revision --autogenerate -m "description"` and edit migration
-5. **Tests**: Add tests to `backend/tests/test_new_feature.py`
+**New Feature (e.g., "Add Portfolio Rebalancing"):**
 
-**New Feature (Frontend):**
-1. **Page Component**: Create new page in `frontend/src/pages/NewFeature.js`
+1. **Backend Route:**
+   - Create endpoint in `backend/api/` in appropriate file (e.g., `strategies.py` for strategy changes)
+   - Define Pydantic request/response models in the same file
+   - Use `Depends(get_db)` to inject database session
+   - Call service layer for business logic
+
+2. **Business Logic:**
+   - Add logic to `backend/services/` (e.g., `portfolio.py` for rebalancing math)
+   - Or add to existing agent in `backend/agents/` if it's decision-making
+
+3. **Database:**
+   - Add new columns/tables to `backend/db/models.py`
+   - Create migration file in `backend/alembic/versions/`
+   - Run migration to create schema
+
+4. **Frontend Page:**
+   - Create page component in `frontend/src/pages/` (e.g., `PortfolioRebalance.js`)
    - Add route in `frontend/src/App.jsx`
-2. **Reusable Components**: Create in `frontend/src/components/` if used elsewhere
-   - Example: `frontend/src/components/NewFeatureWidget.js`
-3. **API Calls**: Add methods to appropriate API object in `frontend/src/services/api.js`
-   - Example: Add `featureAPI` or extend existing API objects
-4. **State Management**: Add context if global state needed
-   - Example: `frontend/src/context/FeatureContext.js`
-5. **Hooks**: Extract reusable logic to `frontend/src/hooks/useNewFeature.js`
+   - Add navigation link in `frontend/src/components/Sidebar.js`
 
-**New Service/Integration:**
-1. Create service module in `backend/services/new_service.py`
-2. Implement with clear public interface
-3. Use dependency injection in API routes
-4. Add configuration to `backend/core/settings.py` if needed (API keys, endpoints)
+5. **Frontend Components:**
+   - Break down page into reusable components in `frontend/src/components/`
+   - Use context or custom hooks for shared state
 
-**New Agent:**
-1. Create file in `backend/agents/new_agent.py`
-2. Extend `BaseAgent` from `backend/agents/base.py`
-3. Register with `AgentRegistry` in `__init__`
-4. Integrate with orchestrator if needed
+6. **API Integration:**
+   - Add methods to `frontend/src/services/api.js` for new endpoints
 
-**Utility Functions:**
-- Backend: Add to existing service or create in `backend/core/` if cross-cutting
-- Frontend: Create in `frontend/src/services/` or as custom hook in `frontend/src/hooks/`
+**New Component/Module:**
+
+- **React Component:** Create in `frontend/src/components/` following PascalCase naming. Export from component file. Import in parent page/component. Use hooks for lifecycle and state.
+- **Python Service:** Create class in `backend/services/` with `__init__()` and public methods. Instantiate in-module or inject via FastAPI dependency. Handle errors with try/except and custom exceptions.
+- **Agent:** Extend `BaseAgent` in `backend/agents/`, implement `execute()` method, subscribe to message queue channels in constructor.
+
+**Utilities:**
+
+- **Frontend:** `frontend/src/hooks/` for custom hooks (follow `use*` naming), `frontend/src/context/` for shared state
+- **Backend:** `backend/core/` for infrastructure utilities, `backend/services/` for domain-specific helpers
 
 ## Special Directories
 
-**`backend/alembic/versions/`:**
-- Purpose: Database migration history
-- Generated: Yes (by Alembic on schema changes)
-- Committed: Yes (part of version control)
-- Pattern: Each file is timestamped migration; don't edit directly
+**backend/alembic/:**
+- Purpose: Database migration management via Alembic ORM tool
+- Generated: Yes (migrations auto-created by `alembic revision --autogenerate`)
+- Committed: Yes (versions checked into git for reproducibility)
+- Invoke via: `backend/db/migrations.py::run_migrations()` on app startup
 
-**`backend/__pycache__/`, `frontend/node_modules/`:**
-- Purpose: Compiled Python bytecode, Node dependencies
-- Generated: Yes (automatically)
-- Committed: No (.gitignore excluded)
+**frontend/dist/:**
+- Purpose: Built frontend application output from Vite
+- Generated: Yes (by `npm run build`)
+- Committed: No (build artifact, excluded from git)
 
-**`backend/venv/`:**
-- Purpose: Python virtual environment
-- Generated: Yes (created by `python -m venv venv`)
-- Committed: No (.gitignore excluded)
+**backend/venv/, frontend/node_modules/:**
+- Purpose: Project dependencies
+- Generated: Yes (installed by `pip install -r requirements.txt` or `npm install`)
+- Committed: No (excluded from git via .gitignore)
 
-**`backend/tests/__pycache__/`:**
-- Purpose: Compiled test bytecode
-- Generated: Yes (during test runs)
+**backend/.pytest_cache/, frontend/dist/**
+- Purpose: Build and test artifacts
+- Generated: Yes
 - Committed: No
 
-**`frontend/dist/`:**
-- Purpose: Vite build output (production bundle)
-- Generated: Yes (`npm run build`)
-- Committed: No (.gitignore excluded)
-
-**`frontend/.env*` files:**
-- Purpose: Environment variables for different environments
-- Generated: No (created manually)
-- Committed: `.env.example` only (never `.env` with secrets)
-- Usage: `VITE_API_URL`, `VITE_WS_URL`, etc.
-
-**`backend/.env` file:**
-- Purpose: Environment variables for backend configuration
-- Generated: No (created manually)
-- Committed: No (.gitignore excluded)
-- Key vars: `DATABASE_URL`, `OPENAI_API_KEY`, `KRAKEN_API_KEY`, etc.
-
-**`prompts/`:**
-- Purpose: AI specification and initialization prompts
-- Files: `app_spec.txt`, `initializer_prompt.md`, `coding_prompt.md`
-- Generated: Yes (by /gsd:create-spec command)
-- Committed: Yes
+**prompts/, triad/:**
+- Purpose: GSD (Generative Software Development) framework for AI-assisted code generation
+- Generated: No (manually configured)
+- Committed: Yes (contains specifications and templates)
 
 ---
 

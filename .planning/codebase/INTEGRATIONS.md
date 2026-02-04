@@ -4,201 +4,205 @@
 
 ## APIs & External Services
 
-**Cryptocurrency Exchanges:**
-
-- **Kraken** - Primary exchange for market data and trading
-  - SDK/Client: `krakenex` 2.2.1
-  - Auth: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET` (environment variables)
-  - Services: `backend/services/kraken.py` (REST API calls), `backend/services/kraken_ws.py` (WebSocket feeds)
-  - Data: Ticker, OHLC, orderbook, balance, order management
-  - WebSocket: Connects to Kraken WS API for real-time ticker/trade updates
+**Cryptocurrency Exchange:**
+- Kraken - Real-time market data, account info, trading
+  - SDK/Client: `krakenex` 2.2.1+
+  - Auth: `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`
+  - Implementation: `backend/services/kraken.py`, `backend/services/kraken_ws.py`
+  - WebSocket feed: Real-time ticker, OHLC, trades, spreads, order book
+  - Async interface with error callback mechanism for alert generation
 
 **AI/LLM Providers:**
-
-- **OpenAI** - Primary AI provider for chat and analysis
+- OpenAI (GPT-4, GPT-4o, GPT-4o-mini models)
   - SDK/Client: `openai` 1.9.0+
-  - Auth: `OPENAI_API_KEY` (environment variable)
-  - Services: `backend/services/ai_models.py`, `backend/api/ai.py`
-  - Models: GPT-4, GPT-4o, GPT-4o-mini (configurable via `AI_MODELS_OPENAI_MODEL`)
-  - Features: Chat completions, streaming responses
+  - Auth: `OPENAI_API_KEY` environment variable
+  - Implementation: `backend/services/ai_models.py`, `backend/api/ai.py`
+  - Chat completions for market analysis, strategy recommendations
 
-- **Anthropic Claude** - Secondary AI provider (fallback/alternative)
+- Anthropic Claude (Claude 3.5-sonic)
   - SDK/Client: `anthropic` 0.15.0+
-  - Auth: `ANTHROPIC_API_KEY` (environment variable, optional)
-  - Services: `backend/services/ai_models.py`, `backend/api/ai.py`
-  - Models: Claude 3.5 Sonic (configurable via `AI_MODELS_CLAUDE_MODEL`)
-  - Features: Chat completions, streaming responses
+  - Auth: `ANTHROPIC_API_KEY` environment variable
+  - Implementation: `backend/services/ai_models.py`
+  - Alternative to OpenAI for conversational AI
 
-- **Ollama** - Local LLM alternative
-  - HTTP Client: `httpx` 0.26.0
+- Ollama (Local models - Gemma3, Llama2, etc.)
   - Base URL: `http://localhost:11434/api` (configurable via `OLLAMA_BASE_URL`)
-  - Model: Configurable via `AI_MODELS_OLLAMA_MODEL` (default: `gemma3`)
-  - No auth required (local deployment)
+  - Auth: Optional `OLLAMA_API_KEY` environment variable
+  - Model: Configurable via `AI_MODELS_OLLAMA_MODEL` (default: gemma3)
+  - Implementation: `backend/services/ai_models.py`
+  - Fully local alternative for private AI inference
 
-**Communication & Notifications:**
-
-- **Slack** - Bot notifications and alerts
-  - Token: `SLACK_BOT_TOKEN` (environment variable)
-  - Channel: `TRIAD_SLACK_CHANNEL` (environment variable, default: `triad-cryptotrader`)
-  - Configuration: Loaded in `backend/core/settings.py` (lines 67-68)
-  - Status: Optional (no implementation found in main codebase, configured for future use)
+**Groq (Inference Acceleration):**
+- API Token: `GROQ_API_TOKEN` environment variable
+- Status: Configured in `.env` but not actively used in backend code (may be for future features)
 
 ## Data Storage
 
 **Databases:**
-
-- **SQLite** (development default)
-  - Connection: `DATABASE_URL=sqlite:///./cryptotrader.db`
-  - Client: SQLAlchemy ORM
-  - Location: `backend/db/database.py` (line 21)
-  - Migrations: Alembic in `backend/alembic/`
-  - Backup: Enabled by default (30-day retention, configured in `backend/core/settings.py` lines 72-76)
-
-- **PostgreSQL** (production-ready but not default)
-  - Connection: Support via SQLAlchemy (any `DATABASE_URL` string)
-  - Client: SQLAlchemy ORM (database-agnostic)
+- SQLite 3.x (development default)
+  - Connection: `DATABASE_URL` env var (default: `sqlite:///./cryptotrader.db`)
+  - Client: SQLAlchemy ORM 2.0.25+
+  - Tables: Users, Sessions, Alerts, ChatHistory, StrategyPerformance, SystemLogs, AISettings, Trades, Portfolio, etc.
 
 **File Storage:**
-
 - Local filesystem only
-- Database backups stored in `./backups/` (configurable via `DATABASE_BACKUP_DIR`)
-- Prefix: `cryptotrader` (configurable via `DATABASE_BACKUP_PREFIX`)
+- Database backup files in `./backups/` (configurable via `DATABASE_BACKUP_DIR`)
+- No cloud storage (S3, GCS) integration detected
 
 **Caching:**
-
-- **Redis** - Task queue and Celery broker
-  - Connection: `redis://` (configured in requirements, used by Celery)
-  - Purpose: Celery message broker for distributed tasks
-  - Not used for HTTP caching (no cache config detected)
+- Redis 5.0.1+
+  - Primary use: Celery broker and result backend
+  - Connection: `REDIS_URL` env var (default: `redis://localhost:6379/0`)
+  - Used for rate limiting: `backend/core/rate_limit.py` via `redis.asyncio`
 
 ## Authentication & Identity
 
 **Auth Provider:**
+- Custom JWT-based implementation
+  - Library: `python-jose[cryptography]` 3.3.0+
+  - Password hashing: `passlib[bcrypt]` 1.7.4+
+  - Implementation: `backend/core/auth.py`
 
-- Custom authentication (no external OAuth/SSO detected)
-- Implementation: `backend/api/auth_router` (imported in `main.py`)
-- Method: JWT tokens via `python-jose[cryptography]`
-- Session Management:
-  - HttpOnly cookies (token no longer in headers, `frontend/src/services/api.js` line 77 note)
-  - Session timeout: 1800 seconds (30 minutes, configurable)
-  - Idle warning: 120 seconds before timeout
-  - Password: Hashed via bcrypt (`passlib[bcrypt]`)
-  - MFA support: Optional flag in `User` model (`backend/db/models.py` line 21)
+**Session Management:**
+- Cookie-based sessions with configurable security:
+  - `SESSION_COOKIE_NAME`: "cryptotrader_session"
+  - `SESSION_COOKIE_SECURE`: TLS enforcement
+  - `SESSION_COOKIE_SAMESITE`: "lax" (configurable)
+  - Timeout: `SESSION_TIMEOUT_SECONDS` (default: 1800 seconds / 30 minutes)
+  - Idle warning: `SESSION_IDLE_WARNING_SECONDS` (default: 120 seconds)
 
-**User Roles:**
+**Password Reset:**
+- Token-based flow in `backend/services/password_reset.py`
+- Tokens stored in database with expiration
+- Email delivery: See Email section below
 
-- Basic role system in `User` model
-- MFA optional per user
-- Session-based permissions (no explicit role column detected at initial scan)
+## Email & Notifications
+
+**Email Service:**
+- Implementation: `backend/services/email.py`
+- Current: Mock implementation for development
+- Sends: Password reset links, MFA verification codes
+- Logging: Tokens logged only if `MOCK_EMAIL_LOG_TOKENS` enabled
+- Production path: Extend for SMTP, SendGrid, Mailgun, etc.
+
+**Notification Channels:**
+- Email: `NOTIFICATION_EMAIL_ENABLED` (default: true)
+- SMS: `NOTIFICATION_SMS_ENABLED` (default: false)
+- Webhook: `NOTIFICATION_WEBHOOK_ENABLED` (default: true)
+- Digest mode: `NOTIFICATION_DIGEST_MINUTES` (default: 60 minutes)
+- Do Not Disturb (DND): `NOTIFICATION_DND_START` and `NOTIFICATION_DND_END` (optional)
 
 ## Monitoring & Observability
 
-**Error Tracking:**
-
-- Not detected (no Sentry, Rollbar, or similar integration)
-- Errors logged via Python `logging` module
-- Exception handlers registered in `backend/api/errors.py`
-
-**Logs:**
-
-- Python `logging` module (see imports in most backend files)
-- SystemLog model in `backend/db/models.py` (lines 294-300) for application events
-- Log levels: debug, info, warning, error, critical
-- Logged to console and database
+**Logging:**
+- Standard Python logging module
+- Per-module loggers: `cryptotrader.kraken_alerts`, `cryptotrader.ai`, etc.
+- Error tracking via database alerts: `backend/db/models.py` Alert model
+- System logs: `SystemLog` table for audit trail
 
 **Alerts:**
+- Alert system: `backend/api/alerts.py`, `backend/db/models.py`
+- Alert types: Kraken API errors, trade notifications, system events
+- Storage: `Alert` table with severity, status, type fields
+- API: `/api/alerts/` endpoints for CRUD operations
 
-- Alert model in `backend/db/models.py` for system notifications
-- Types: `kraken_api_error`, custom alerts
-- Stored in database, accessible via `/api/alerts` endpoint
+**Error Handling:**
+- Custom exception handlers in `backend/api/errors.py`
+- Kraken service error callback mechanism for automatic alert creation
+- HTTPException standardization across API routes
 
 ## CI/CD & Deployment
 
 **Hosting:**
-
-- Not explicitly configured
-- Backend: Runs via `uvicorn` on configurable host/port (default 0.0.0.0:8000)
-- Frontend: Static assets served via reverse proxy (Vite build output)
+- Self-hosted ASGI server (Uvicorn) on configurable host:port
+- Vite dev server for frontend development (port 5173)
+- Docker support: Not detected in codebase (can be added)
 
 **CI Pipeline:**
+- Not detected - no GitHub Actions, GitLab CI, or other CI config files present
+- Testing framework ready: pytest configured for backend, Testing Library for frontend
 
-- Not detected
-- No GitHub Actions, GitLab CI, or similar configuration found
+**Initialization Scripts:**
+- `backend/init_db.py` - Database schema initialization
+- `init.sh` - Full project initialization
+- `start.bat` / `start.sh` - Start backend and frontend
 
-**Orchestration:**
+## Slack Integration
 
-- Triad agent framework in `backend/agents/` for autonomous trading logic
-- Worker process: `triad/run_worker.sh` for background job execution
-- Agent types: orchestrator, trade_executor, market_analyst, risk_monitor, sentiment_agent, strategy_optimizer
-
-## Environment Configuration
-
-**Required env vars:**
-
-- `KRAKEN_API_KEY` - Kraken exchange access (optional, required for live trading)
-- `KRAKEN_API_SECRET` - Kraken exchange secret (optional, required for live trading)
-- `OPENAI_API_KEY` - OpenAI API access (required for AI chat)
-- `ANTHROPIC_API_KEY` - Claude API access (optional, fallback)
-- `SLACK_BOT_TOKEN` - Slack notifications (optional)
-- `TRIAD_SLACK_CHANNEL` - Slack channel name (optional, if using Slack)
-- `DATABASE_URL` - Database connection string (default: `sqlite:///./cryptotrader.db`)
-- `BACKEND_HOST` - Backend server host (default: `0.0.0.0`)
-- `BACKEND_PORT` - Backend server port (default: `8000`)
-- `VITE_API_URL` - Frontend API endpoint (default: `http://127.0.0.1:8000`)
-- `VITE_WS_URL` - WebSocket endpoint (default: `ws://127.0.0.1:8000`)
-
-**Secrets location:**
-
-- `.env` file at project root (see `.env.example` for template)
-- Loaded by `python-dotenv` on backend startup
-- Never committed to git (added to `.gitignore`)
-
-**AI Configuration:**
-
-- `AI_MODELS_OPENAI_MODEL` - OpenAI model selection (default: `gpt-4o-mini`)
-- `AI_MODELS_CLAUDE_MODEL` - Claude model selection (default: `claude-3.5-sonic`)
-- `AI_MODELS_OLLAMA_MODEL` - Ollama model selection (default: `gemma3`)
-- `AI_MODELS_DEFAULT_PROVIDER` - Default AI provider (default: `openai`)
-- `AI_MODELS_SYSTEM_PROMPT` - System prompt for AI (default: "You are CryptoTrader's AI assistant.")
-- `OLLAMA_BASE_URL` - Ollama API endpoint (default: `http://localhost:11434/api`)
-- `CHAT_AI_PROVIDER` - Active chat provider selection (environment variable in `backend/api/ai.py`)
+**Triad Framework Integration:**
+- Slack Bot Token: `SLACK_BOT_TOKEN` environment variable
+- Channel: `TRIAD_SLACK_CHANNEL` (default: "triad-cryptotrader")
+- Purpose: Slack channel for triad agent coordination and notifications
+- Implementation: Used by `backend/core/settings.py`, not fully integrated into main backend
+- SDK: `slack_sdk` (if installed) or `tqdm.contrib.slack`
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-
-- Not detected
-- No webhook endpoints for external services
+- Not detected in current codebase
 
 **Outgoing:**
+- Notification webhook support: `NOTIFICATION_WEBHOOK_ENABLED` flag
+- Implementation: Not fully coded yet, framework ready in settings
+- Potential use: Sending alerts to external systems (Discord, custom servers)
 
-- **Kraken error callbacks**: `backend/main.py` line 66-67 - Error alerts registered via `kraken_service.on_error()`
-- System logs and alerts stored in database (can be queried via API)
+**Kraken Callbacks:**
+- Error callback mechanism: `kraken_service.on_error()` in `backend/main.py`
+- Callback creates Alert records on API errors
 
-## Data Models & API Integration Points
+## Environment Configuration
 
-**Key integrations in models (`backend/db/models.py`):**
+**Required env vars (critical):**
+- `KRAKEN_API_KEY` - Exchange trading access
+- `KRAKEN_API_SECRET` - Exchange API secret
+- `OPENAI_API_KEY` - OpenAI GPT access (if using OpenAI)
+- `DATABASE_URL` - Database connection string (defaults to SQLite)
 
-- `AISettings` (lines 271-278) - Stores active AI provider selection
-- `StrategyPerformance` (lines 81-98) - Records AI model used for analysis
-- `ChatHistory` (referenced in `backend/api/ai.py` line 27) - Stores conversation turns
-- `SystemLog` (lines 294-300) - Application event logging
-- `Alert` (referenced in `backend/main.py` line 22, `backend/api/ai.py` line 31) - Notification storage
+**Optional env vars (features):**
+- `ANTHROPIC_API_KEY` - Anthropic Claude access
+- `GROQ_API_TOKEN` - Groq inference acceleration
+- `OLLAMA_API_KEY` - Local Ollama authentication
+- `SLACK_BOT_TOKEN` - Slack integration
+- `OPENAI_API_KEY` - OpenAI LLM models
+- `REDIS_URL` - Redis broker for Celery
+- `VITE_API_URL` - Frontend API endpoint (default: http://127.0.0.1:8000)
+- `VITE_WS_URL` - WebSocket endpoint (default: ws://127.0.0.1:8000)
 
-**Exchange Data Flow:**
+**Security & Deployment:**
+- `TLS_CERTFILE`, `TLS_KEYFILE`, `TLS_CA_BUNDLE` - SSL/TLS support
+- `FRONTEND_ORIGINS` - CORS whitelist (comma-separated)
+- `SESSION_COOKIE_SECURE` - Enforce HTTPS for cookies
+- `ALLOW_INSECURE_COOKIES` - Allow non-HTTPS cookies in dev
+- `ALLOW_EMAIL_ENUMERATION` - Security setting for auth endpoints
 
-1. `backend/services/kraken.py` - REST API calls for market data, account info
-2. `backend/services/kraken_ws.py` - WebSocket subscription to real-time feeds
-3. `backend/api/market_router` - HTTP endpoints exposing market data
-4. Frontend (`frontend/src/services/api.js`) - axios calls to market endpoints
+**Secrets location:**
+- `.env` file in project root (git-ignored)
+- Template: `.env.example` for reference
+- Development: Secrets can be exposed; production requires secure management (vaults, k8s secrets, etc.)
 
-**AI Integration Flow:**
+## Data Flow Integration Points
 
-1. Frontend chat UI (`frontend/src/pages/AIChat.js`) - User message input
-2. `backend/api/ai.py` - Chat request handling, provider selection
-3. `backend/services/ai_models.py` - Provider abstraction and model execution
-4. OpenAI/Claude/Ollama - LLM inference
-5. Response streamed to frontend via StreamingResponse
+**Market Data → Frontend:**
+1. Kraken WebSocket connects and subscribes to ticker/OHLC feeds
+2. Real-time updates broadcast via `/ws` endpoint
+3. Frontend receives and renders in charts (lightweight-charts library)
+
+**User → API → Database:**
+1. Frontend sends API requests via Axios
+2. FastAPI routes to appropriate handler
+3. Database layer via SQLAlchemy ORM for persistence
+4. Response streamed or returned as JSON
+
+**AI Processing:**
+1. User message → `/api/ai/chat` endpoint
+2. Route selects active AI provider (OpenAI/Claude/Ollama)
+3. Stream response via Server-Sent Events (SSE)
+4. Store conversation in ChatHistory table
+
+**Background Tasks:**
+1. Celery worker pulls tasks from Redis queue
+2. Executes trade sync, health monitoring, model training
+3. Results stored back in Redis or database
 
 ---
 

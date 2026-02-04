@@ -5,140 +5,159 @@
 ## Languages
 
 **Primary:**
-- Python 3.12.3 - Backend API, services, agents
-- JavaScript (ES2022) - React frontend UI
-- SQL - Database queries and migrations
+- Python 3.12 - Backend API, services, and database migrations
+- JavaScript (ES6+) - React frontend, UI interactions
+- SQL - Database queries via SQLAlchemy ORM
 
 **Secondary:**
-- Shell scripts - Worker processes, deployment
+- HTML/CSS - Email templates, AI chat interface
+- Shell - Initialization and deployment scripts
 
 ## Runtime
 
 **Environment:**
-- Python 3.12.3 via venv at `backend/venv`
-- Node.js v24.13.0 - Frontend dev and build
+- Python 3.12.3 (backend)
+- Node.js (frontend, via Vite dev server on port 5173)
 
 **Package Manager:**
-- pip - Python dependencies
-- npm - JavaScript dependencies
-- Both projects use lock mechanisms (pip freeze, package-lock.json)
+- pip (Python)
+- npm (Node.js)
+- Lockfile: `frontend/package.json` tracked; Python requirements in `backend/requirements.txt`
 
 ## Frameworks
 
-**Backend:**
-- FastAPI 0.109.0+ - HTTP API framework, WebSocket support
-- uvicorn[standard] 0.27.0+ - ASGI server
-- Starlette - Middleware, exception handling (via FastAPI)
-
-**Frontend:**
-- React 18.2.0 - UI library
-- React Router 6.21.2 - Client-side routing
-- Vite 7.3.1 - Build tool and dev server
-
-**Testing:**
-- pytest 7.4.4 - Python test runner
-- pytest-asyncio 0.23.3 - Async test support
-- Testing Library + Jest DOM - Frontend test utilities
+**Core:**
+- FastAPI 0.109.0+ - REST API framework with async support
+- React 18.2.0 - Frontend UI library
+- Vite 7.3.1 - Frontend bundler and dev server
 
 **Database & ORM:**
-- SQLAlchemy 2.0.25+ - Python ORM
-- Alembic 1.13.1 - Database migrations
-- SQLite (development) - Default database via `sqlite:///./cryptotrader.db`
+- SQLAlchemy 2.0.25+ - SQL toolkit and ORM
+- Alembic 1.13.1+ - Database migration tool
+- SQLite 3.x - Default database (development)
 
-**Task Queue:**
-- Celery 5.3.6 - Distributed task processing
-- Redis 5.0.1 - Message broker for Celery
+**Testing:**
+- pytest 7.4.4+ - Python testing framework
+- pytest-asyncio 0.23.3+ - Async test support
+- Testing Library (@testing-library/react) - Frontend component testing
 
 **Build/Dev:**
-- Vite 7.3.1 - Frontend bundling and dev server
-- ESLint 9.10.0 - JavaScript linting
-- Tailwind CSS 3.4.1 - Utility-first CSS framework
-- PostCSS 8.4.33 - CSS transformation
-- Autoprefixer 10.4.17 - CSS vendor prefixes
+- @vitejs/plugin-react 5.1.3+ - React support in Vite
+- Tailwind CSS 3.4.1+ - Utility-first CSS framework
+- PostCSS 8.4.33+ - CSS processing
+- ESLint 9.10.0+ - JavaScript linting with React plugins
 
 ## Key Dependencies
 
 **Critical:**
+- fastapi & uvicorn - Core web framework and ASGI server
+- sqlalchemy & alembic - Data persistence and schema management
+- pydantic 2.5.3+ - Data validation and settings management
+- pydantic-settings 2.1.0+ - Environment configuration
+- httpx 0.26.0+ - Async HTTP client for external API calls
+- websockets 12.0+ - WebSocket support for real-time data
+- krakenex 2.2.1+ - Kraken cryptocurrency exchange API client
 
-- `fastapi` - Core API framework for trading endpoints, WebSocket support
-- `sqlalchemy` - ORM for market data, trade history, strategy storage
-- `pydantic` / `pydantic-settings` - Data validation and environment configuration
-- `krakenex` 2.2.1 - Kraken cryptocurrency exchange API client
-- `openai` 1.9.0+ - OpenAI API client for GPT chat and analysis
-- `anthropic` 0.15.0+ - Anthropic Claude API client
-- `websockets` 12.0 - WebSocket client for Kraken live feeds
-- `httpx` 0.26.0 - Async HTTP client
-
-**Data Processing & Analysis:**
-
-- `pandas` 2.2.0 - Time-series data manipulation
-- `numpy` 1.26.3 - Numerical computation
-- `ta` 0.11.0 - Technical analysis indicators (RSI, MACD, Bollinger Bands, etc.)
+**AI & Machine Learning:**
+- openai 1.9.0+ - OpenAI API client for GPT models
+- anthropic 0.15.0+ - Anthropic Claude API client
+- pandas 2.2.0+ - Data manipulation and analysis
+- numpy 1.26.3+ - Numerical computing
+- ta 0.11.0+ - Technical analysis indicators for trading
 
 **Authentication & Security:**
+- python-jose[cryptography] 3.3.0+ - JWT token generation and verification
+- passlib[bcrypt] 1.7.4+ - Password hashing and verification
+- email-validator 2.1.0+ - Email format validation
 
-- `python-jose[cryptography]` 3.3.0+ - JWT token handling
-- `passlib[bcrypt]` 1.7.4+ - Password hashing
-- `email-validator` 2.1.0+ - Email validation
+**Task Queue & Caching:**
+- celery 5.3.6+ - Distributed task queue for background jobs
+- redis 5.0.1+ - In-memory data store (broker and result backend)
 
 **Utilities:**
-
-- `python-dotenv` 1.0.0+ - Environment variable loading
-- `pytz` 2024.1 - Timezone handling for market data
-- `python-multipart` 0.0.6 - Form/multipart parsing
+- python-dotenv 1.0.0+ - Environment variable loading from .env
+- pytz 2024.1+ - Timezone support
 
 **Frontend:**
-
-- `axios` 1.6.5+ - HTTP client for API calls
-- `lightweight-charts` 4.1.3 - Financial charting library
-- `web-vitals` 2.1.4 - Performance metrics
+- axios 1.6.5+ - HTTP client for API requests
+- react-router-dom 6.21.2+ - Client-side routing
+- lightweight-charts 4.1.3+ - Financial charting library
+- web-vitals 2.1.4+ - Performance metrics
 
 ## Configuration
 
 **Environment:**
-
-- `.env` file at project root loads via `python-dotenv` and Pydantic `BaseSettings`
-- Frontend environment vars prefixed with `VITE_` are accessible at build/runtime
-- Backend uses `AppSettings` class in `backend/core/settings.py` for centralized config
+- Loaded via `.env` file (see `.env.example` for template)
+- Pydantic settings validation in `backend/core/settings.py`
+- Environment variables for secrets: KRAKEN_API_KEY, KRAKEN_API_SECRET, OPENAI_API_KEY, ANTHROPIC_API_KEY, SLACK_BOT_TOKEN, GROQ_API_TOKEN, OLLAMA_API_KEY
 
 **Build:**
+- `frontend/vite.config.js` - Frontend build config with React support
+- `frontend/tailwind.config.js` - Tailwind CSS theme customization
+- `frontend/eslint.config.js` - JavaScript linting rules
+- `frontend/postcss.config.cjs` - PostCSS plugins for Tailwind
 
-- Frontend: `vite build` creates optimized production bundle in `dist/`
-- Backend: Runs with uvicorn directly (no build step)
-- Database migrations: Alembic handles schema versioning in `backend/alembic/versions/`
+## Database
 
-**Frontend Dev Server:**
+**Default:**
+- SQLite 3.x at `./cryptotrader.db` (local development)
+- Configurable via `DATABASE_URL` environment variable
+- Connection pooling via SQLAlchemy engine
 
-- Vite dev server on port 5173
-- Proxies `/api`, `/auth`, `/ws` to backend (configurable via `BACKEND_HOST`, `BACKEND_PORT`)
-- HMR enabled for hot module replacement
-- Allowed hosts: `['app.packnation.org']` (configured in `vite.config.js`)
+**Migrations:**
+- Alembic for schema versioning
+- Migration files in `backend/alembic/versions/`
+- Run via `init_db()` on application startup
+
+## Task Queue
+
+**Broker & Backend:**
+- Redis (default: `redis://localhost:6379/0`)
+- Configurable via `REDIS_URL` environment variable
+- Used by Celery for distributed task execution
+
+**Configuration:**
+- Celery app in `backend/core/celery_app.py`
+- Beat scheduler for periodic tasks (cleanup, monitoring)
+- JSON serialization for task payloads
+
+## WebSocket
+
+**Real-time Communication:**
+- Kraken WebSocket API for live price feeds (`backend/services/kraken_ws.py`)
+- Frontend connects via `/ws` proxy in Vite dev server
+- Uses `websockets` 12.0+ library
 
 ## Platform Requirements
 
 **Development:**
-
-- Python 3.12.3+
-- Node.js v24.13.0+ (for npm)
-- SQLite 3 (bundled with Python)
-- Redis 5.0+ (for Celery task queue)
-- Kraken API key and secret (optional, for live trading)
-- OpenAI API key (for AI features)
+- Python 3.12+
+- Node.js 18+
+- Redis server running on localhost:6379 (for Celery)
+- Kraken API credentials (optional, for trading features)
+- OpenAI/Anthropic API keys (optional, for AI features)
 
 **Production:**
+- ASGI-compatible server (Uvicorn with optional SSL/TLS support)
+- Relational database (SQLite, PostgreSQL, MySQL compatible via SQLAlchemy)
+- Redis instance for task queue
+- CORS configured for multiple frontend origins
+- HSTS headers for TLS-enabled deployments
+- Session cookie security: `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAMESITE`
 
-- FastAPI backend runs on configurable host/port (default 0.0.0.0:8000)
-- Static frontend assets served via reverse proxy or CDN
-- SQLite or PostgreSQL-compatible database
-- Redis for task queue
-- TLS certificates and CA bundle supported (via `TLS_CERTFILE`, `TLS_KEYFILE`, `TLS_CA_BUNDLE`)
+## Deployment
 
-**Security:**
+**Frontend:**
+- Vite build output to `dist/` directory
+- Served as static files from FastAPI backend or separate web server
+- Development: `npm run dev` on port 5173
+- Production: `npm run build`
 
-- Session cookie configuration (name: `cryptotrader_session`, defaults to `secure: false` in dev)
-- HSTS headers enforced (max-age: 31536000 seconds, includes subdomains, preload enabled)
-- Session timeout: 1800 seconds (30 minutes) by default
-- Email enumeration protection disabled by default
+**Backend:**
+- FastAPI with Uvicorn ASGI server
+- Default: `0.0.0.0:8000` (configurable via `BACKEND_HOST`, `BACKEND_PORT`)
+- Optional TLS via `TLS_CERTFILE`, `TLS_KEYFILE`, `TLS_CA_BUNDLE`
+- Startup hook initializes database migrations and Kraken WebSocket connection
 
 ---
 

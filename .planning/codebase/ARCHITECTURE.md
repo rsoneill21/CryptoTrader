@@ -4,332 +4,214 @@
 
 ## Pattern Overview
 
-**Overall:** Layered architecture with service-oriented backend and component-based frontend
+**Overall:** Layered monolithic architecture with AI agents coordinating trading operations
 
 **Key Characteristics:**
-- **Separation of concerns**: API routes, business logic services, and data layer cleanly separated
-- **Multi-agent system**: Backend orchestrates autonomous trading agents that operate independently
-- **FastAPI with Pydantic validation**: Type-safe endpoints with validation at boundaries
-- **React SPA frontend**: Client-side routing with context-based state management
-- **Database persistence**: SQLAlchemy ORM with Alembic migrations
-- **Async-first backend**: AsyncIO and async/await patterns throughout
-- **Modular services**: Business logic isolated in service modules with focused responsibilities
+- FastAPI REST API backend with async/await patterns
+- React SPA frontend with hooks and context API
+- Message queue-based inter-agent communication (Celery + Redis)
+- SQLite database with Alembic migrations
+- WebSocket support for real-time market data and chat
+- Separation between AI decision agents and trade execution
+- Paper trading mode for risk-free strategy validation
 
 ## Layers
 
-**API Layer (Routes):**
-- Purpose: HTTP request handling, input validation, authorization checks, response formatting
+**Presentation Layer (Frontend):**
+- Purpose: User interface for authentication, trading operations, strategy management, real-time alerts, and AI chat
+- Location: `frontend/src/`
+- Contains: React components, pages, services (API client), context providers, custom hooks
+- Depends on: REST API endpoints, WebSocket connections for market data and chat
+- Used by: End users accessing the application through browser
+
+**API Layer:**
+- Purpose: Handle HTTP requests and WebSocket connections, coordinate request routing to services
 - Location: `backend/api/`
-- Contains: Route definitions using FastAPI's APIRouter
-- Depends on: Services layer, database, authentication
-- Used by: Frontend clients via HTTP/REST
-- Router files:
-  - `auth.py`: Registration, login, MFA, password reset
-  - `market.py`: Market data, portfolio queries
-  - `trades.py`: Trade execution and management
-  - `strategies.py`: Strategy CRUD and backtesting
-  - `ai.py`: AI chat endpoints with streaming support
-  - `risk.py`: Risk analysis and monitoring
-  - `alerts.py`: Alert management
-  - `export.py`: Data export in various formats
-  - `system.py`: Health checks, connection status, system logs
+- Contains: Route handlers organized by domain (auth.py, market.py, trades.py, ai.py, alerts.py, strategies.py, risk.py, export.py, system.py)
+- Depends on: Database models, services, core utilities
+- Used by: Frontend clients, external integrations
 
-**Services Layer (Business Logic):**
-- Purpose: Core business logic, external API integration, data transformation
+**Service Layer:**
+- Purpose: Business logic implementation, external API integration, data transformation
 - Location: `backend/services/`
-- Contains: Service classes with focused domain responsibilities
-- Depends on: Database, external APIs, configuration
-- Used by: API routes, agents, core modules
-- Key services:
-  - `ai_models.py`: AI provider management (OpenAI, Claude, Ollama)
-  - `strategy_ai.py`: AI-driven strategy generation and analysis
-  - `risk_ai.py`: Risk scoring and monitoring using AI
-  - `kraken.py`: Exchange API client for Kraken
-  - `kraken_ws.py`: WebSocket connection for live market data
-  - `market_data.py`: Market data aggregation and caching
-  - `trade_sync.py`: Syncing trades with exchange
-  - `alert_service.py`: Alert creation and notification logic
-  - `chat_memory.py`: Conversation history management
-  - `news_feed.py`: News aggregation and sentiment analysis
-  - `social_sentiment.py`: Social media sentiment tracking
-  - `portfolio.py`: Portfolio calculations
-  - `email.py`: Email sending
+- Contains: Market data service, Kraken exchange integration, AI model routing, chat memory, portfolio management, risk calculations, alert management, password reset, health monitoring
+- Depends on: Database access, external APIs (Kraken), third-party ML services
+- Used by: API routes, agents, other services
 
-**Agents Layer (Autonomous Workers):**
-- Purpose: Independent agents that monitor, analyze, and execute trading decisions
+**Agent Layer:**
+- Purpose: Autonomous AI decision-making for trading strategies, market analysis, risk management, sentiment analysis, and orchestration
 - Location: `backend/agents/`
-- Contains: Agent implementations extending BaseAgent abstract class
-- Depends on: Services layer, database
-- Used by: Orchestrator agent for coordination
-- Key agents:
-  - `base.py`: BaseAgent abstract class, AgentRegistry for lifecycle management
-  - `orchestrator.py`: Coordinates all agents and handles inter-agent messaging
-  - `market_analyst.py`: Analyzes market conditions and trends
-  - `sentiment_agent.py`: Processes sentiment data from news and social
-  - `risk_monitor.py`: Monitors portfolio risk and generates alerts
-  - `strategy_optimizer.py`: Evaluates and optimizes strategies
-  - `trade_executor.py`: Executes trades based on signals
+- Contains: Base agent framework, orchestrator (main coordinator), market analyst, strategy optimizer, trade executor, risk monitor, sentiment agent
+- Depends on: Services layer, message queue, database
+- Used by: API routes (for chat), periodic tasks, message queue events
 
-**Core Layer (Infrastructure & Configuration):**
-- Purpose: Cross-cutting concerns, shared utilities, environment configuration
+**Core Layer:**
+- Purpose: Cross-cutting infrastructure: authentication, authorization, rate limiting, settings, task queues, message broadcasting, audit logging
 - Location: `backend/core/`
-- Contains: Settings, security, authentication, task scheduling, audit logging
-- Depends on: Database, external services
-- Used by: All layers
-- Key modules:
-  - `settings.py`: Pydantic-based configuration from environment
-  - `auth.py`: JWT/session validation, dependency injection for current user
-  - `security.py`: Password hashing, token generation, MFA (TOTP)
-  - `celery_app.py`: Celery instance configuration for async task queue
-  - `tasks.py`: Background tasks (session cleanup, trade sync, logging)
-  - `rate_limit.py`: Rate limiting middleware
-  - `trading_control.py`: Trading controls and safeguards
-  - `audit.py`: Audit logging for compliance
-  - `indicators.py`: Technical indicator calculations
-  - `patterns.py`: Chart pattern recognition
-  - `paper_trading.py`: Paper trading simulation engine
-  - `message_queue.py`: Inter-service messaging
+- Contains: Security utilities, Celery task definitions, message queue, rate limiting, trading control, indicators, paper trading, audit logging, settings management
+- Depends on: Database, environment configuration
+- Used by: All other layers
 
-**Database Layer (Persistence):**
-- Purpose: Data storage and retrieval using SQLAlchemy ORM
+**Data Access Layer:**
+- Purpose: Database abstraction and schema management
 - Location: `backend/db/`
-- Contains: Models, migrations, database utilities
-- Depends on: SQLite/database engine
-- Used by: All business logic layers
-- Key components:
-  - `models.py`: SQLAlchemy model definitions
-  - `database.py`: SQLAlchemy engine, session factory, initialization
-  - `migrations.py`: Alembic migration runner
-
-**Frontend - Component Layer:**
-- Purpose: UI rendering and user interaction
-- Location: `frontend/src/components/`
-- Contains: Reusable React components
-- Depends on: Context providers, API service, custom hooks
-- Used by: Page components, Layout wrapper
-- Component categories:
-  - Layout: `Layout.js`, `Header.js`, `Sidebar.js`
-  - Trading: `PositionManager.js`, `ExportPanel.js`
-  - Charting: `Chart.js`, `ChartIndicators.js`, `ChartAnnotations.js`
-  - Analysis: `RiskDashboard.js`, `ModelComparison.js`, `SentimentPanel.js`
-  - Communication: `ChatWindow.js`, `AlertNotification.js`
-  - Authentication: `LoginForm.js`, `RegisterForm.js`
-
-**Frontend - Pages/Routes:**
-- Purpose: Full-page views for distinct features
-- Location: `frontend/src/pages/`
-- Contains: Route components with page-level logic
-- Depends on: Components, context, API services
-- Used by: React Router in App.jsx
-- Pages:
-  - `Login.js`, `Register.js`, `ForgotPassword.js`: Auth flows
-  - `Dashboard.js`: Main overview page
-  - `LiveTrading.js`: Real-time trading interface
-  - `StrategyLab.js`: Strategy creation and testing
-  - `AIChat.js`: AI conversation interface
-  - `Alerts.js`: Alert management
-  - `SystemLogs.js`: System event logging
-  - `Settings.js`: User preferences
-
-**Frontend - Context & Hooks:**
-- Purpose: Global state management and reusable logic
-- Location: `frontend/src/context/`, `frontend/src/hooks/`
-- Context providers:
-  - `AuthContext.js`: User authentication state and methods
-  - `ThemeContext.js`: Dark/light theme toggle
-- Custom hooks:
-  - `useAuth.js`: Access to auth context
-  - `useWebSocket.js`: WebSocket connection for live updates
-  - `useAlerts.js`: Alert subscription and management
-
-**Frontend - Services:**
-- Purpose: HTTP API communication
-- Location: `frontend/src/services/`
-- Contains: Axios instance with interceptors and API clients
-- Key exports:
-  - `authAPI`: Login, register, session, password reset
-  - `systemAPI`: Health checks, logs, connection status
-  - `marketAPI`: Prices, OHLC, portfolio, orderbook
-  - `tradesAPI`: Trade CRUD, order management
-  - `aiAPI`: AI model listing, chat history
+- Contains: SQLAlchemy ORM models, database initialization, session factory, migrations via Alembic
+- Depends on: SQLite, Alembic for schema versioning
+- Used by: Services, API routes, agents
 
 ## Data Flow
 
-**Authentication Flow:**
-1. User submits credentials via `LoginForm.js`
-2. Component calls `authAPI.login()` → POST `/api/auth/login`
-3. Backend validates credentials in `auth.py` route handler
-4. Route calls `core.auth.verify_password()` and creates session via services
-5. Session token returned to frontend and stored in localStorage
-6. Token included in subsequent requests (via axios interceptors)
-7. `get_current_user` dependency validates token on protected routes
+**User Authentication Flow:**
 
-**Trading Flow:**
-1. User initiates trade in `PositionManager.js` or `LiveTrading.js`
-2. Component calls `tradesAPI.createTrade()` → POST `/api/trades/`
-3. `trades.py` route validates request with Pydantic models
-4. Route delegates to service layer (trade validation, execution)
-5. Service interacts with `kraken_service` to place order on exchange
-6. Trade record saved to database via SQLAlchemy ORM
-7. WebSocket subscription in `useWebSocket` hook pushes live updates to frontend
-8. Frontend subscribes to trade status changes and updates `LiveTrading.js` state
+1. User submits email/password on Login page (`frontend/src/pages/Login.js`)
+2. Frontend calls `POST /api/auth/login` via axios client (`frontend/src/services/api.js`)
+3. Backend route handler validates credentials, checks MFA requirement (`backend/api/auth.py`)
+4. Success returns JWT token in response; frontend stores in localStorage and sets cookie
+5. Subsequent requests include auth token in headers
+6. `get_current_user` dependency in `backend/core/auth.py` verifies token on protected endpoints
+7. User profile and session timeout settings loaded from database
 
-**AI Analysis Flow:**
-1. User submits message in `AIChat.js` page
-2. Component calls `aiAPI` or direct POST to `/api/ai/chat/stream`
-3. `ai.py` route receives ChatRequest with provider selection
-4. Route initializes appropriate AI service (OpenAI/Claude/Ollama) from `ai_models.py`
-5. Orchestrator agent (`agents/orchestrator.py`) receives request
-6. Agent queries other agents (market_analyst, sentiment_agent, risk_monitor)
-7. Services gather context (market data, sentiment, portfolio risk)
-8. AI provider generates response with streamed chunks
-9. Frontend receives SSE/streaming response and updates chat history
+**Market Data Flow:**
 
-**Real-time Market Data Flow:**
-1. Backend establishes WebSocket to Kraken via `kraken_ws.py` at startup
-2. `market_data.py` service subscribes to price tickers and order book updates
-3. Agents poll or react to market data changes
-4. Risk monitor checks positions against market movements
-5. Alerts generated if risk thresholds exceeded
-6. Frontend WebSocket listeners in `useWebSocket` receive updates
-7. Components like `Chart.js` re-render with new price data
+1. User navigates to Dashboard or LiveTrading page
+2. Frontend WebSocket handler (`frontend/src/hooks/useWebSocket.js`) connects to `/ws/market`
+3. Backend WebSocket endpoint initiates Kraken WebSocket feed via `backend/services/kraken_ws.py`
+4. Market data stream continuously updates database and broadcasts to connected clients
+5. Frontend renders real-time charts using lightweight-charts library (`frontend/src/components/Chart.js`)
+6. Backend rate limits and caches data to avoid overloading Kraken API
+
+**Trading Decision Flow:**
+
+1. User creates/edits strategy in StrategyLab or system recommends optimization
+2. Strategy rules stored in database with JSON schema
+3. Market analyst agent (`backend/agents/market_analyst.py`) analyzes market conditions
+4. Orchestrator agent (`backend/agents/orchestrator.py`) evaluates strategy against market conditions
+5. Risk monitor agent (`backend/agents/risk_monitor.py`) validates position sizing and drawdown limits
+6. Decision sent to frontend via WebSocket or stored for user review
+7. Trade executor agent (`backend/agents/trade_executor.py`) places orders via Kraken API if live trading enabled
+8. Order status and P&L tracked in database, pushed to frontend
+
+**AI Chat Flow:**
+
+1. User types message in AIChat page (`frontend/src/pages/AIChat.js`)
+2. Frontend sends WebSocket message to `/ws/ai-chat` endpoint
+3. Backend ChatAIService (`backend/services/ai_models.py`) routes message to configured provider (OpenAI, Claude, Groq)
+4. Provider response augmented with market context from agents
+5. Response streamed back to frontend via WebSocket
+6. Chat history persisted in `backend/services/chat_memory.py`
+7. User can review reasoning, market conditions, and model selection in UI panels
+
+**Alert Generation Flow:**
+
+1. Trade execution, market condition change, or system event triggers alert creation
+2. Alert persisted to database with type, severity, message
+3. Background task (`backend/core/tasks.py`) picks up alerts
+4. Alert service (`backend/services/alert_service.py`) determines notification channels (email, SMS, webhook)
+5. Notifications dispatched respecting user preferences (digest frequency, do-not-disturb window)
+6. Frontend polls/WebSocket receives alert updates for display in AlertNotification component
 
 **State Management:**
-- **Global auth state**: React Context in `AuthContext.js` (user, loading, error states)
-- **Theme state**: React Context in `ThemeContext.js` (dark/light mode)
-- **Component local state**: useState in individual page/component files
-- **Derived/async state**: Via custom hooks (useAlerts, useWebSocket)
-- **Server state**: API responses cached client-side when applicable
-- **Backend state**: SQLAlchemy models + in-memory agent state
+
+- **Database State:** Users, sessions, strategies, trades, orders, alerts, AI decisions, performance metrics - single source of truth
+- **In-Memory State:** Frontend uses React Context (AuthContext for user/session, ThemeContext for UI preferences)
+- **Cache/Session:** Message queue (Redis) handles Celery task queues and pub/sub for agent-to-frontend communication
+- **Local Storage:** Frontend stores auth token, user preferences for offline access
 
 ## Key Abstractions
 
 **BaseAgent:**
-- Purpose: Template for autonomous agents with lifecycle management
-- Location: `backend/agents/base.py`
-- Pattern: Abstract base class with hooks for start, stop, pause, resume
-- Concrete implementations: Orchestrator, MarketAnalyst, SentimentAgent, etc.
-- Communication: Inter-agent messaging via AgentMessage dataclass
+- Purpose: Common interface for all AI agents with lifecycle methods
+- Examples: `backend/agents/orchestrator.py`, `backend/agents/market_analyst.py`, `backend/agents/risk_monitor.py`
+- Pattern: Abstract base class with `setup()`, `execute()`, `shutdown()` lifecycle; agents subscribe to message queue channels and publish decisions
 
-**APIRouter (FastAPI):**
-- Purpose: Organize related endpoints with shared dependencies
-- Location: `backend/api/*`
-- Pattern: Each module creates `router = APIRouter()` and includes routes
-- Example: `auth.py` has routes for register, login, MFA, password reset
-- Main app aggregates routers in `main.py`
+**APIRouter:**
+- Purpose: FastAPI route grouping by domain, dependency injection of services
+- Examples: `backend/api/auth.py` (auth_router), `backend/api/market.py` (market_router), `backend/api/trades.py` (trades_router)
+- Pattern: Pydantic models for request/response validation, HTTPException for error handling, Depends() for injecting database sessions and auth
 
-**Service Classes:**
-- Purpose: Encapsulate business logic and external integrations
-- Location: `backend/services/`
-- Pattern: Classes with well-defined public methods
-- Examples:
-  - `AIModelsService`: Manages AI provider activation and switching
-  - `KrakenService`: REST API calls to exchange
-  - `MarketDataService`: Market data aggregation
-- Dependency injection: Services created once and reused across requests
+**Service Pattern:**
+- Purpose: Encapsulate domain business logic separate from route handling
+- Examples: `backend/services/kraken.py` (KrakenService), `backend/services/portfolio.py` (PortfolioService)
+- Pattern: Stateful service classes initialized once and used across requests; consistent error handling with custom exceptions
 
-**Pydantic Models:**
-- Purpose: Request/response validation and serialization
-- Usage: All API payloads validated against BaseModel subclasses
-- Example: `ChatRequest`, `LoginRequest`, `TradeResponse`
-- Benefit: Type safety, automatic OpenAPI documentation
+**Celery Task:**
+- Purpose: Asynchronous background work triggered by events or schedules
+- Examples: `backend/core/tasks.py` - cleanup_expired_sessions, sync_manual_trades
+- Pattern: Define with @celery_app.task decorator; scheduled via beat_schedule; errors logged and retried
 
-**SQLAlchemy ORM Models:**
-- Purpose: Object-relational mapping to database tables
-- Location: `backend/db/models.py`
-- Core models: User, Session, Strategy, Trade, Order, AIDecision, Alert, etc.
-- Relationships: Models define FK relationships (back_populates for bidirectional)
-
-**React Hooks (Custom):**
-- Purpose: Encapsulate stateful logic and side effects
-- Examples: `useAuth()` extracts auth context logic, `useAlerts()` subscribes to alert stream
-- Pattern: Custom hooks return object/tuple of state + methods
-
-**API Service Clients:**
-- Purpose: Organize HTTP calls by domain
-- Location: `frontend/src/services/api.js`
-- Pattern: Objects with methods that return axios promises
-- Example: `authAPI.login()`, `marketAPI.getTicker()`
+**Message Queue Pattern:**
+- Purpose: Decouple agents from frontend, enable pub/sub communication
+- Examples: `backend/core/message_queue.py` with Channels enum for different topics
+- Pattern: Agents publish decisions to channels; frontend WebSocket handler subscribes to push updates
 
 ## Entry Points
 
-**Backend:**
+**Backend Entry Point:**
 - Location: `backend/main.py`
-- Triggers: `python -m backend.main` or uvicorn
-- Responsibilities:
-  1. Create FastAPI app instance
-  2. Register exception handlers via `register_exception_handlers()`
-  3. Configure CORS middleware with settings
-  4. Initialize database via `init_db()` (runs Alembic migrations)
-  5. Start Kraken WebSocket connection
-  6. Register all API routers (auth, market, trades, ai, etc.)
-  7. Start Celery tasks for background work
-  8. Provide `/ai-chat` HTML page for chat interface
+- Triggers: Server startup with `uvicorn main:app --host 0.0.0.0 --port 8000`
+- Responsibilities: FastAPI app initialization, CORS middleware setup, exception handler registration, database initialization via lifespan context manager, Kraken WebSocket startup, router registration (auth, market, system, alerts, ai, export, risk, strategies, trades)
 
-**Frontend:**
+**Frontend Entry Point:**
 - Location: `frontend/src/main.jsx`
-- Triggers: `npm run dev` (Vite) or build process
-- Responsibilities:
-  1. Mount React app to DOM root element
-  2. Render `<App />` component (in StrictMode for development)
+- Triggers: Browser navigation to http://localhost:3000
+- Responsibilities: React app bootstrap, root component rendering (App.jsx), theme and auth provider wrapping, routing setup
 
-**Frontend App Root:**
-- Location: `frontend/src/App.jsx`
-- Responsibilities:
-  1. Set up routing with React Router
-  2. Wrap routes with `ThemeProvider` and `AuthProvider`
-  3. Define public routes (login, register, forgot password)
-  4. Define protected routes using `ProtectedRoute` wrapper
-  5. Wrap authenticated pages in `Layout` (sidebar, header, content area)
-  6. Set redirect for unauthenticated users
+**Database Initialization:**
+- Location: `backend/init_db.py`, triggered by `backend/db/database.py::init_db()`
+- Triggers: On application startup
+- Responsibilities: Run Alembic migrations, register SQLAlchemy event listeners for audit logging
+
+**Celery Worker:**
+- Location: `backend/core/celery_app.py`
+- Triggers: Manual `celery -A core.celery_app worker --loglevel=info`
+- Responsibilities: Pick up tasks from Redis queue, execute background work (session cleanup, manual trade sync), publish results
 
 ## Error Handling
 
-**Strategy:** Centralized error handlers in API with structured error responses
+**Strategy:**
+- Explicit error types with Pydantic models, HTTP exception codes mapped to user-friendly messages
+- Async exception handlers registered globally to catch and format errors
+- Database rollback on transaction failure
+- Validation errors caught before database operations
 
 **Patterns:**
-- **API errors**: All endpoints return `APIErrorResponse` with code, message, details
-- **Validation errors**: Pydantic raises RequestValidationError → converted to structured error
-- **HTTP exceptions**: FastAPI HTTPException caught and formatted consistently
-- **Database errors**: SQLAlchemy exceptions caught in services, mapped to meaningful errors
-- **Unhandled exceptions**: Global exception handler in `errors.py` logs and returns 500
 
-**Frontend error handling:**
-- Axios interceptor catches 401 responses and redirects to login
-- Error components display user-friendly messages
-- Forms show field-level validation errors from API responses
-- Console logging for debugging in development
+- **API Layer:** HTTPException with status_code and detail, caught by FastAPI error handlers (`backend/api/errors.py`)
+- **Service Layer:** Custom exceptions (e.g., KrakenAPIError, StrategyValidationError) raised with context, caught by API layer
+- **Database Layer:** SQLAlchemy IntegrityError for constraint violations, SQLAlchemyError for connection issues - logged and re-raised as HTTP 500
+- **Agent Layer:** Decision errors logged to audit table; trading halted if critical agent fails; user notified via alerts
 
 ## Cross-Cutting Concerns
 
 **Logging:**
-- Backend: Python logging module throughout, structured logs in `database.py`
-- Frontend: Console logging for debugging
+- Structured logging via Python logging module
+- Logger names follow module path convention (e.g., `cryptotrader.auth`, `cryptotrader.kraken_alerts`)
+- Sensitive data filtered (passwords, tokens, API keys) via `_SENSITIVE_DETAIL_PARTS` in `backend/db/database.py`
+- System events logged to database for audit trail via `backend/core/audit.py`
 
 **Validation:**
-- Backend: Pydantic models at route boundaries
-- Frontend: React form libraries (basic HTML5 validation)
+- Frontend: React component-level validation (required fields, format checks)
+- API: Pydantic models enforce schema and types; HTTPException raised for invalid input
+- Database: SQLAlchemy constraints (unique, not null, foreign key)
+- Business Logic: Service methods validate state before executing (e.g., check if strategy in paper mode before promoting)
 
 **Authentication:**
-- Backend: JWT-style session tokens + HTTPOnly cookies
-- Frontend: AuthContext provides user state and login/logout methods
-- Dependency: `get_current_user` on protected routes
+- Session token generated on login, stored in database with expiry
+- Token verified on protected endpoints via `get_current_user` dependency
+- MFA optional: TOTP secret stored, verified on login if enabled
+- Password hashing via bcrypt in `backend/core/security.py`
+- Session timeout and idle warning configurable via settings
+
+**Rate Limiting:**
+- Per-endpoint rate limits defined in `backend/core/rate_limit.py`
+- RateLimiter checks request frequency, returns 429 if exceeded
+- Email verification endpoints rate limited to prevent abuse
+- Kraken API calls rate limited to respect exchange limits
 
 **Authorization:**
-- Backend: Currently user-based (no role-based access control visible)
-- Checks: Implicit via authentication requirement on protected routes
-
-**Database transactions:**
-- Backend: SQLAlchemy ORM manages transactions
-- Pattern: Session provides automatic rollback on error
-
-**Rate limiting:**
-- Backend: `core/rate_limit.py` provides RateLimiter class
-- Usage: Can be applied to routes to prevent abuse
-
-**Audit logging:**
-- Backend: `core/audit.py` logs sensitive actions
-- Storage: SystemLog model persists audit trail
+- No role-based access control visible in codebase; all authenticated users have same permissions
+- Admin operations (system logs, settings) accessible to all authenticated users
+- Trade operations restricted to user's own strategies and trades via implicit user context
 
 ---
 
