@@ -496,7 +496,7 @@ async def get_market_analysis(
             lookback=lookback,
         )
     except Exception as exc:  # pragma: no cover - best effort summary
-        logger.exception("Failed to summarize technical data for %s: %s", normalized_symbol, exc)
+        logger.error("Failed to summarize technical data for %s", normalized_symbol, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to gather technical data for analysis",
@@ -514,13 +514,13 @@ async def get_market_analysis(
     try:
         indicator_payload = await market_analyst_agent.get_indicator_summary(normalized_symbol)
     except Exception as exc:
-        logger.warning("Indicator summary unavailable for %s: %s", normalized_symbol, exc)
+        logger.warning("Indicator summary unavailable for %s", normalized_symbol, exc_info=True)
 
     insights: List[Dict[str, Any]] = []
     try:
         insights = await market_analyst_agent.get_recent_insights(normalized_symbol, limit=insight_limit)
     except Exception as exc:
-        logger.warning("Failed to fetch analyst insights for %s: %s", normalized_symbol, exc)
+        logger.warning("Failed to fetch analyst insights for %s", normalized_symbol, exc_info=True)
 
     sentiment_summary: Optional[SentimentSummary] = None
     try:
@@ -529,7 +529,7 @@ async def get_market_analysis(
             limit=sentiment_limit,
         )
     except Exception as exc:
-        logger.warning("Sentiment summary unavailable for %s: %s", normalized_symbol, exc)
+        logger.warning("Sentiment summary unavailable for %s", normalized_symbol, exc_info=True)
 
     technical_snapshot = _build_technical_snapshot(normalized_symbol, technical_payload)
     indicator_snapshot = _build_indicator_snapshot(indicator_payload)
@@ -652,8 +652,8 @@ async def market_stream(
                 await kraken_ws.subscribe_trades([normalized])
             elif feed == KrakenWSFeed.OHLC.value:
                 await kraken_ws.subscribe_ohlc([normalized])
-        except Exception as e:
-            logger.error(f"Failed to subscribe to {feed} for {symbol}: {e}")
+        except Exception:
+            logger.error("Failed to subscribe to %s feed for %s", feed, symbol, exc_info=True)
 
     kraken_ws.add_client(websocket, feeds={feed})
     try:

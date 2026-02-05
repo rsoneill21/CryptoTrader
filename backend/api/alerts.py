@@ -1,13 +1,16 @@
 """Alerts API routes."""
 
+import logging
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import desc, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.exceptions import DatabaseException
 from db.database import get_async_db
 from db.models import Alert
 from core.pagination import (
@@ -18,6 +21,7 @@ from core.pagination import (
     encode_cursor,
 )
 
+logger = logging.getLogger("cryptotrader.alerts")
 router = APIRouter()
 
 ACTIONED_STATUSES = {"actioned", "dismissed"}
@@ -197,12 +201,13 @@ async def create_alert(
         db.add(alert)
         await db.commit()
         await db.refresh(alert)
-    except Exception:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to create alert",
-        )
+        logger.error("Failed to create alert", exc_info=True)
+        raise DatabaseException(
+            message="Unable to create alert",
+            details={"operation": "create_alert"},
+        ) from exc
     return _serialize_alert(alert)
 
 
@@ -304,11 +309,12 @@ async def list_alerts(
         result = await db.execute(query)
         alerts_list = list(result.scalars().all())
 
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to list alerts",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to list alerts", exc_info=True)
+        raise DatabaseException(
+            message="Unable to list alerts",
+            details={"operation": "list_alerts"},
+        ) from exc
 
     # Determine if there are more results
     has_more = len(alerts_list) > limit
@@ -341,11 +347,12 @@ async def get_alert(alert_id: int, db: AsyncSession = Depends(get_async_db)) -> 
     """Retrieve a single alert by ID."""
     try:
         alert = await db.get(Alert, alert_id)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to fetch alert",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to fetch alert %s", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to fetch alert",
+            details={"operation": "get_alert", "alert_id": alert_id},
+        ) from exc
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -359,11 +366,12 @@ async def get_alert_chat_context(alert_id: int, db: AsyncSession = Depends(get_a
     """Return structured context for starting a chat about an alert."""
     try:
         alert = await db.get(Alert, alert_id)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to fetch alert context",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to fetch alert context %s", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to fetch alert context",
+            details={"operation": "get_alert_context", "alert_id": alert_id},
+        ) from exc
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -392,11 +400,12 @@ async def update_alert(
     """Partially update alert metadata."""
     try:
         alert = await db.get(Alert, alert_id)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to fetch alert for update",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to load alert %s for update", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load alert",
+            details={"operation": "update_alert_load", "alert_id": alert_id},
+        ) from exc
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -419,12 +428,13 @@ async def update_alert(
     try:
         await db.commit()
         await db.refresh(alert)
-    except Exception:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to update alert",
-        )
+        logger.error("Failed to update alert %s", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to update alert",
+            details={"operation": "update_alert", "alert_id": alert_id},
+        ) from exc
     return _serialize_alert(alert)
 
 
@@ -437,11 +447,12 @@ async def update_alert_status(
     """Update only the status/action fields of an alert."""
     try:
         alert = await db.get(Alert, alert_id)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to fetch alert for status update",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to load alert %s for status update", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load alert",
+            details={"operation": "update_alert_status_load", "alert_id": alert_id},
+        ) from exc
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -455,12 +466,13 @@ async def update_alert_status(
     try:
         await db.commit()
         await db.refresh(alert)
-    except Exception:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to update alert status",
-        )
+        logger.error("Failed to update alert status for %s", alert_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to update alert status",
+            details={"operation": "update_alert_status", "alert_id": alert_id},
+        ) from exc
     return _serialize_alert(alert)
 
 
@@ -473,11 +485,12 @@ async def bulk_update_status(
     try:
         result = await db.execute(select(Alert).where(Alert.id.in_(request.ids)))
         alerts = list(result.scalars().all())
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to fetch alerts for bulk update",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to fetch alerts for bulk update", exc_info=True)
+        raise DatabaseException(
+            message="Unable to fetch alerts",
+            details={"operation": "bulk_update_status"},
+        ) from exc
     if not alerts:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -491,10 +504,11 @@ async def bulk_update_status(
 
     try:
         await db.commit()
-    except Exception:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to apply bulk alert updates",
-        )
+        logger.error("Failed to apply bulk alert updates", exc_info=True)
+        raise DatabaseException(
+            message="Unable to apply bulk alert updates",
+            details={"operation": "bulk_update_status_commit"},
+        ) from exc
     return BulkStatusUpdateResponse(updated=len(alerts))
