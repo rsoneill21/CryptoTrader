@@ -9,13 +9,13 @@ from typing import Any, Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Query, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
 from core.settings import get_app_settings
 from db.database import (
-    get_db,
+    get_async_db,
     backup_sqlite_database,
     list_sqlite_backups,
     restore_sqlite_database,
@@ -190,12 +190,14 @@ async def connection_status():
 
 @router.get("/logs", response_model=LogsResponse)
 async def get_logs(
-    level: Optional[str] = Query(None, description="Filter by log level (debug, info, warning, error, critical)"),
+    level: Optional[str] = Query(
+        None, description="Filter by log level (debug, info, warning, error, critical)"
+    ),
     source: Optional[str] = Query(None, description="Filter by source/component"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(get_current_user),
 ):
     """
     Get system logs with filtering and pagination.
@@ -204,21 +206,26 @@ async def get_logs(
     - Paginated results
     - Ordered by timestamp descending (newest first)
     """
-    # Build query
-    query = db.query(SystemLog)
-
-    # Apply filters
+    conditions = []
     if level:
-        query = query.filter(SystemLog.level == level)
+        conditions.append(SystemLog.level == level)
     if source:
-        query = query.filter(SystemLog.source.ilike(f"%{source}%"))
+        conditions.append(SystemLog.source.ilike(f"%{source}%"))
 
-    # Get total count
-    total = query.count()
+    count_stmt = select(func.count(SystemLog.id)).select_from(SystemLog)
+    for condition in conditions:
+        count_stmt = count_stmt.where(condition)
+    count_result = await db.execute(count_stmt)
+    total = int(count_result.scalar_one() or 0)
 
-    # Apply pagination and ordering
     offset = (page - 1) * page_size
-    logs = query.order_by(desc(SystemLog.timestamp)).offset(offset).limit(page_size).all()
+    logs_stmt = select(SystemLog)
+    for condition in conditions:
+        logs_stmt = logs_stmt.where(condition)
+    logs_stmt = (
+        logs_stmt.order_by(desc(SystemLog.timestamp)).offset(offset).limit(page_size)
+    )
+    logs = (await db.execute(logs_stmt)).scalars().all()
 
     # Convert to response format
     log_entries = [
