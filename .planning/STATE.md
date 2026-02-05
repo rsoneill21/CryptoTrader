@@ -20,9 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-10 completed (10 of 15 in phase)
-**Status:** In progress
-**Progress:** ████████░░ 67% (10/15 plans in current phase)
+**Plan:** 01-11 completed (11 of 15 in phase)
+**Status:** In progress (gap-closure follow-ups)
+**Last activity:** 2026-02-05 - Completed 01-11-PLAN.md
+**Progress:** ███████░░░ 73% (22/30 plans complete; 11/15 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -35,6 +36,7 @@
 - Completed 01-08: Shared pagination helper plus cursor-based strategies & trades listings
 - Completed 01-09: Structured exception handling and exc_info logging across backend APIs
 - Completed 01-10: Trade creation endpoints reload orders before serialization (fixes POST /api/trades 500s)
+- Completed 01-11: Paper trading session reset/archive endpoints exposed via FastAPI
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -118,6 +120,7 @@
 | Entry_time anchors trade pagination | 2026-02-05 | Keeps cursor ordering tied to real execution timestamp without new schema | Frontend + agents can consume deterministic trade history tokens |
 | DatabaseException for API SQL errors | 2026-02-05 | Encapsulate SQLAlchemyError details without leaking raw traces | Clients receive consistent structured error payloads across backend APIs |
 | ServiceUnavailable for GitHub imports | 2026-02-05 | Surface upstream dependency failures with safe messaging | Makes strategy import outages observable without exposing stack traces |
+| Paper trading reset requires confirmation with archival option | 2026-02-05 | Prevents accidental destruction of active sessions when hit via API | Maintenance endpoints stay safe for UI/agent callers |
 
 ### Active Todos
 
@@ -142,7 +145,12 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-10):**
+**2026-02-05 (latest - 01-11):**
+- Completed 01-11: Paper trading reset/archive APIs exposed to FastAPI callers
+- Reset endpoint enforces confirmation + optional archival; archive endpoint returns timestamped confirmation payload
+- Duration: ~2 minutes (2 tasks, 2 commits)
+
+**2026-02-05 (01-10):**
 - Completed 01-10: Trade creation endpoints reload orders with selectinload before serialization
 - Reloading ensures POST /api/trades and /api/trades/system return orders arrays without DetachedInstanceError
 - Duration: <1 minute (1 task, 1 commit)
@@ -236,12 +244,12 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 16:42-16:43 UTC
-**Stopped at:** Completed 01-10-PLAN.md (trade creation eager loading fix)
+**Last session:** 2026-02-05 16:42-16:44 UTC
+**Stopped at:** Completed 01-11-PLAN.md (paper trading session reset/archive APIs)
 **Resume file:** None
 
 **For next session:**
-1. Review optional 01-02 (rate limiter fail-closed) to decide if it should run despite phase completion
+1. Queue up 01-12-PLAN.md (cursor DESC fix) or revisit optional 01-02 if needed
 2. Confirm transition plan for Phase 2 (autonomous agents) using new structured error foundation
 3. Carry forward exc_info logging requirements for every new backend endpoint
 
