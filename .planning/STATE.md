@@ -20,13 +20,14 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-01 completed (1 of 4 in phase)
+**Plan:** 01-04 completed (2 of 4 in phase)
 **Status:** In progress
-**Progress:** █░░░░░░░░░ 9% (0/11 phases complete, 1/4 plans in current phase)
+**Progress:** ██░░░░░░░░ 18% (0/11 phases complete, 2/4 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
-- Next: 01-02, 01-03, 01-04 (rate limiting, state persistence, pagination)
+- Completed 01-04: Cursor-based pagination for alerts
+- Next: 01-02 (rate limiting), 01-03 (state persistence)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -41,7 +42,6 @@
 - Agents don't run autonomously on schedule
 - Paper trading state lost on restart
 - Rate limiter fails open when Redis down
-- No pagination on list endpoints
 - Dashboard shows placeholder data
 - AI chat doesn't reference trading state
 
@@ -49,6 +49,11 @@
 - ✓ Trades API endpoints use AsyncSession (non-blocking database queries)
 - ✓ Async engine and session factory available for all async routes
 - ✓ Relationship eager loading with selectinload for async context
+
+**Fixed in 01-04:**
+- ✓ Alerts list uses cursor-based pagination (stable results during concurrent inserts)
+- ✓ Cursor tokens encode timestamp+id for deterministic ordering
+- ✓ Alerts endpoint migrated to AsyncSession
 
 ## Performance Metrics
 
@@ -70,15 +75,20 @@
 | AsyncSession for trades API | 2026-02-05 | Use AsyncSession instead of asyncio.to_thread wrapper - native async provides better performance and follows SQLAlchemy 2.0 patterns | All new endpoints must use async_sessionmaker pattern |
 | Dual session factories (sync + async) | 2026-02-05 | Keep sync SessionLocal for legacy utilities (logging, backups) during migration period | Allows gradual migration without breaking existing code |
 | aiosqlite for development | 2026-02-05 | Thread-pool async bridge sufficient for dev/testing; production will use asyncpg | Development workflow unaffected, production deployment needs asyncpg setup |
+| Cursor-based pagination for lists | 2026-02-05 | Cursor pagination with timestamp+id composite key ensures stable results when alerts inserted between pages; avoids offset drift | All list endpoints should use cursor pattern for consistency |
+| Limit+1 fetch strategy | 2026-02-05 | Fetch limit+1 rows to detect has_more flag; eliminates expensive COUNT(*) queries on large tables | Better performance for pagination, no total count needed |
 
 ### Active Todos
 
 - [x] ~~Create Phase 1 execution plans (infrastructure fixes)~~ - Completed: 01-01 through 01-04 created
 - [x] ~~Execute 01-01: Async DB session factory~~ - Completed: AsyncSession with aiosqlite
-- [ ] Migrate remaining API endpoints to AsyncSession (market, strategies, alerts)
+- [x] ~~Execute 01-04: Pagination (cursor-based for alerts)~~ - Completed: cursor pagination with AsyncSession
+- [ ] Migrate remaining API endpoints to AsyncSession (market, strategies, create_alert, get_alert, update_alert)
 - [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker
 - [ ] Execute 01-03: Paper trading state persistence
-- [ ] Execute 01-04: Pagination (cursor-based for trading data)
+- [ ] Migrate other list endpoints to cursor pagination (strategies, trades, decisions)
+- [ ] Frontend adaptation: use cursor tokens instead of page numbers for alerts
+- [ ] Add composite index on alerts (created_at, id) for pagination performance
 - [ ] Install aiosqlite in production requirements.txt
 - [ ] Document asyncpg migration for production PostgreSQL
 
@@ -88,7 +98,15 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05:**
+**2026-02-05 (later):**
+- Completed 01-04: Cursor-based pagination for alerts
+- Added encode_cursor/decode_cursor helpers (base64 timestamp|id)
+- Converted list_alerts to AsyncSession with cursor navigation
+- Replaced offset pagination with cursor tokens (next_cursor/prev_cursor)
+- Preserved all filters (severity, status, type, search, since, until)
+- Duration: ~2 minutes (2 tasks, 2 commits)
+
+**2026-02-05 (earlier):**
 - Completed 01-01: Async database session factory
 - Created AsyncEngine and AsyncSessionLocal with aiosqlite driver
 - Converted trades API (11 endpoints) to use AsyncSession
@@ -113,34 +131,40 @@ None currently.
 
 **Known tech debt (from PROJECT.md):**
 - ~~Sync DB queries in trades API (INFRA-03)~~ - FIXED in 01-01 (AsyncSession for all trades endpoints)
+- ~~No pagination (INFRA-06)~~ - PARTIALLY FIXED in 01-04 (alerts have cursor pagination; other endpoints pending)
 - Rate limiting fails open (INFRA-02) - PLANNED (01-02)
 - Bare exception handling (INFRA-04) - PLANNED (01-02 or separate plan)
-- No pagination (INFRA-06) - PLANNED (01-04)
 - Paper trading state not persisted (INFRA-01) - PLANNED (01-03)
+- Sync DB in some endpoints (create_alert, get_alert, update_alert) - NOT PLANNED (low priority)
 - Partial fills not handled (POS-05)
 - Slippage/fees not modeled (SAFE-03)
 - Stop-loss not enforced (RISK-02)
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 01:48-01:53 UTC
-**Stopped at:** Completed 01-01-PLAN.md (async database session factory)
-**Resume file:** None (can execute 01-02, 01-03, or 01-04)
+**Last session:** 2026-02-05 01:57-01:58 UTC
+**Stopped at:** Completed 01-04-PLAN.md (cursor pagination for alerts)
+**Resume file:** None (can execute 01-02 or 01-03)
 
 **For next session:**
 1. Read this STATE.md for current position
-2. Execute 01-02-PLAN.md (rate limiting) OR 01-03-PLAN.md (state persistence) OR 01-04-PLAN.md (pagination)
+2. Execute 01-02-PLAN.md (rate limiting) OR 01-03-PLAN.md (state persistence)
 3. Plans can run independently in any order
 
 **Context to carry forward:**
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Use `selectinload` for eager loading relationships in async context
+- Cursor pagination pattern established - use encode_cursor/decode_cursor for list endpoints
+- Fetch limit+1 rows to detect has_more flag without COUNT(*) query
+- Order by composite key (timestamp DESC, id DESC) for deterministic pagination
 - aiosqlite installed for development; production needs asyncpg
 - Sync SessionLocal still available for legacy utilities (logging, backups)
 
 **Questions resolved:**
 - ~~Async DB migration: AsyncSession (big change) or asyncio.to_thread (wrapper)?~~ - COMPLETE: AsyncSession with aiosqlite (01-01)
+- ~~Pagination style: cursor vs offset?~~ - COMPLETE: Cursor-based with timestamp+id composite key (01-04)
+- ~~Cursor format: opaque token vs exposed fields?~~ - COMPLETE: Base64-encoded timestamp|id for opacity (01-04)
 - Paper trading schema: New tables or extend existing? - DEFERRED to 01-03 (state persistence plan)
 - Rate limiter fail-closed: Raise exception or return 503? - DEFERRED to 01-02
 
