@@ -514,14 +514,32 @@ async def get_market_analysis(
     }
     try:
         indicator_payload = await market_analyst_agent.get_indicator_summary(normalized_symbol)
+    except ServiceUnavailableException:
+        logger.exception("Indicator summary unavailable for %s", normalized_symbol)
+        raise
     except Exception as exc:
-        logger.warning("Indicator summary unavailable for %s", normalized_symbol, exc_info=True)
+        logger.exception("Indicator summary failure for %s", normalized_symbol)
+        raise ServiceUnavailableException(
+            service="market_analysis",
+            dependency="indicator_summary",
+            operation="get_indicator_summary",
+            details={"symbol": normalized_symbol},
+        ) from exc
 
     insights: List[Dict[str, Any]] = []
     try:
         insights = await market_analyst_agent.get_recent_insights(normalized_symbol, limit=insight_limit)
+    except ServiceUnavailableException:
+        logger.exception("Analyst insights unavailable for %s", normalized_symbol)
+        raise
     except Exception as exc:
-        logger.warning("Failed to fetch analyst insights for %s", normalized_symbol, exc_info=True)
+        logger.exception("Failed to fetch analyst insights for %s", normalized_symbol)
+        raise ServiceUnavailableException(
+            service="market_analysis",
+            dependency="insights",
+            operation="get_recent_insights",
+            details={"symbol": normalized_symbol, "limit": insight_limit},
+        ) from exc
 
     sentiment_summary: Optional[SentimentSummary] = None
     try:
@@ -529,8 +547,17 @@ async def get_market_analysis(
             normalized_symbol,
             limit=sentiment_limit,
         )
+    except ServiceUnavailableException:
+        logger.exception("Sentiment summary unavailable for %s", normalized_symbol)
+        raise
     except Exception as exc:
-        logger.warning("Sentiment summary unavailable for %s", normalized_symbol, exc_info=True)
+        logger.exception("Sentiment summary failure for %s", normalized_symbol)
+        raise ServiceUnavailableException(
+            service="market_analysis",
+            dependency="sentiment",
+            operation="summarize_symbol",
+            details={"symbol": normalized_symbol, "limit": sentiment_limit},
+        ) from exc
 
     technical_snapshot = _build_technical_snapshot(normalized_symbol, technical_payload)
     indicator_snapshot = _build_indicator_snapshot(indicator_payload)
