@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, WebSocket,
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from db.database import fetch_ai_decisions_async, get_async_db
 from db.models import AIDecision
