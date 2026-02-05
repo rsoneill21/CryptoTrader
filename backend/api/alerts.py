@@ -242,17 +242,36 @@ async def create_alert(
 
 @router.get("/", response_model=AlertListResponse)
 async def list_alerts(
+    cursor: Optional[str] = Query(None, description="Cursor token for pagination"),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT, description="Number of alerts per page"),
     severity: Optional[str] = Query(None, description="Severity filter (info, warning, critical)"),
     status_filter: Optional[str] = Query(None, alias="status", description="Alert status filter"),
     alert_type: Optional[str] = Query(None, alias="type", description="Alert type filter"),
     search: Optional[str] = Query(None, description="Keyword search for title or message"),
     since: Optional[datetime] = Query(None, description="Return alerts created after this timestamp"),
     until: Optional[datetime] = Query(None, description="Return alerts created before this timestamp"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(25, ge=1, le=200, description="Number of alerts per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AlertListResponse:
-    """List alerts with optional filtering and pagination."""
+    """
+    List alerts with cursor-based pagination and optional filtering.
+
+    Cursor pagination ensures stable results even when new alerts are inserted.
+    Alerts are ordered by created_at DESC, then id DESC for deterministic sorting.
+
+    Query parameters:
+        cursor: Pagination cursor (from previous response's next_cursor/prev_cursor)
+        limit: Number of alerts to return (default 25, max 100)
+        severity: Filter by severity level (info, warning, critical)
+        status: Filter by alert status
+        type: Filter by alert type
+        search: Keyword search in title or message
+        since: Return alerts created after this timestamp
+        until: Return alerts created before this timestamp
+
+    Returns:
+        AlertListResponse with alerts list, next_cursor, prev_cursor, and has_more flag
+    """
+    # Validate severity if provided
     severity_filter = None
     if severity:
         try:
@@ -262,45 +281,90 @@ async def list_alerts(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             )
+
+    # Decode cursor if provided
+    cursor_timestamp = None
+    cursor_id = None
+    if cursor:
+        try:
+            cursor_timestamp, cursor_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cursor: {exc}",
+            )
+
     try:
-        query = db.query(Alert)
+        # Build base query with filters
+        query = select(Alert)
+
         if severity_filter:
-            query = query.filter(Alert.severity == severity_filter)
+            query = query.where(Alert.severity == severity_filter)
         if status_filter:
-            query = query.filter(Alert.status == status_filter)
+            query = query.where(Alert.status == status_filter)
         if alert_type:
-            query = query.filter(Alert.type == alert_type)
+            query = query.where(Alert.type == alert_type)
         if search:
             pattern = f"%{search}%"
-            query = query.filter(
+            query = query.where(
                 or_(
                     Alert.title.ilike(pattern),
                     Alert.message.ilike(pattern),
                 )
             )
         if since:
-            query = query.filter(Alert.created_at >= since)
+            query = query.where(Alert.created_at >= since)
         if until:
-            query = query.filter(Alert.created_at <= until)
+            query = query.where(Alert.created_at <= until)
 
-        total = query.count()
-        alerts = (
-            query.order_by(desc(Alert.created_at))
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
-    except Exception:
+        # Apply cursor filter (for pagination continuation)
+        if cursor_timestamp and cursor_id:
+            # Cursor filters: (created_at < cursor_timestamp) OR (created_at = cursor_timestamp AND id < cursor_id)
+            query = query.where(
+                or_(
+                    Alert.created_at < cursor_timestamp,
+                    (Alert.created_at == cursor_timestamp) & (Alert.id < cursor_id),
+                )
+            )
+
+        # Order by created_at DESC, id DESC for stable sorting
+        query = query.order_by(desc(Alert.created_at), desc(Alert.id))
+
+        # Fetch limit + 1 to check if there are more results
+        query = query.limit(limit + 1)
+
+        result = await db.execute(query)
+        alerts_list = list(result.scalars().all())
+
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to list alerts",
         )
 
+    # Determine if there are more results
+    has_more = len(alerts_list) > limit
+    if has_more:
+        alerts_list = alerts_list[:limit]  # Trim to requested limit
+
+    # Generate next_cursor from last item
+    next_cursor = None
+    if has_more and alerts_list:
+        last_alert = alerts_list[-1]
+        next_cursor = encode_cursor(last_alert.created_at, last_alert.id)
+
+    # Generate prev_cursor from first item (if we came from a cursor)
+    prev_cursor = None
+    if cursor and alerts_list:
+        first_alert = alerts_list[0]
+        prev_cursor = encode_cursor(first_alert.created_at, first_alert.id)
+
     return AlertListResponse(
-        alerts=[_serialize_alert(alert) for alert in alerts],
-        total=total,
-        page=page,
-        page_size=page_size,
+        alerts=[_serialize_alert(alert) for alert in alerts_list],
+        next_cursor=next_cursor,
+        prev_cursor=prev_cursor,
+        limit=limit,
+        has_more=has_more,
     )
 
 
