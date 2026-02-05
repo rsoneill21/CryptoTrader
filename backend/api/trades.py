@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -203,6 +203,11 @@ async def create_manual_trade(
         db.add(trade)
         await db.commit()
         await db.refresh(trade)
+        trade = await db.scalar(
+            select(Trade)
+            .where(Trade.id == trade.id)
+            .options(selectinload(Trade.orders))
+        )
     except Exception as exc:
         await db.rollback()
         logger.error("Failed to create manual trade: %s", exc)
@@ -245,6 +250,11 @@ async def create_system_trade(
         db.add(trade)
         await db.commit()
         await db.refresh(trade)
+        trade = await db.scalar(
+            select(Trade)
+            .where(Trade.id == trade.id)
+            .options(selectinload(Trade.orders))
+        )
     except Exception as exc:
         await db.rollback()
         logger.error("Failed to create system trade: %s", exc)
