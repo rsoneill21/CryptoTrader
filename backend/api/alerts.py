@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,9 +80,7 @@ class AlertResponse(BaseModel):
     action_taken: Optional[str]
     ai_confidence: Optional[float]
 
-    class Config:
-        # Pydantic v2 migration: renamed from orm_mode
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertListResponse(BaseModel):
@@ -114,8 +112,7 @@ class AlertChatContextResponse(BaseModel):
     created_at: datetime
     prompt: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertCreateRequest(BaseModel):
