@@ -53,8 +53,8 @@ def apply_cursor_pagination(
 
     query = query.where(
         or_(
-            timestamp_column < cursor_timestamp,
-            (timestamp_column == cursor_timestamp) & (id_column < cursor_id),
+            timestamp_column > cursor_timestamp,
+            (timestamp_column == cursor_timestamp) & (id_column > cursor_id),
         )
     )
     return query, cursor_timestamp, cursor_id

@@ -20,9 +20,9 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-09 completed (9 of 9 in phase)
-**Status:** Phase complete
-**Progress:** ██████████ 100% (1/11 phases complete, 9/9 plans in current phase)
+**Plan:** 01-10 completed (10 of 15 in phase)
+**Status:** In progress
+**Progress:** ████████░░ 67% (10/15 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -34,6 +34,7 @@
 - Completed 01-07: AsyncSession migration for alerts, market, strategies, and risk APIs
 - Completed 01-08: Shared pagination helper plus cursor-based strategies & trades listings
 - Completed 01-09: Structured exception handling and exc_info logging across backend APIs
+- Completed 01-10: Trade creation endpoints reload orders before serialization (fixes POST /api/trades 500s)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -141,7 +142,12 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-09):**
+**2026-02-05 (latest - 01-10):**
+- Completed 01-10: Trade creation endpoints reload orders with selectinload before serialization
+- Reloading ensures POST /api/trades and /api/trades/system return orders arrays without DetachedInstanceError
+- Duration: <1 minute (1 task, 1 commit)
+
+**2026-02-05 (01-09):**
 - Completed 01-09: Structured exception handling across alerts, market, strategies, risk, AI chat, and export endpoints
 - Added DatabaseException/ServiceUnavailableException responses plus `exc_info=True` logging for every failure path
 - Duration: 5 minutes (3 tasks, 3 commits)
@@ -230,8 +236,8 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 12:28-12:34 UTC
-**Stopped at:** Completed 01-09-PLAN.md (structured exception handling across backend APIs)
+**Last session:** 2026-02-05 16:42-16:43 UTC
+**Stopped at:** Completed 01-10-PLAN.md (trade creation eager loading fix)
 **Resume file:** None
 
 **For next session:**
