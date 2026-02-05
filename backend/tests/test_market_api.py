@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from api import market as market_module
 from agents.sentiment_agent import SentimentSummary
+from core.exceptions import ServiceUnavailableException
 from services.kraken import KrakenAPIError, OHLC, Ticker
 
 
@@ -180,3 +181,79 @@ async def test_get_market_analysis_invalid_symbol():
     with pytest.raises(HTTPException) as exc:
         await market_module.get_market_analysis("not-a-pair")
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dependency",
+    ["indicator_summary", "insights", "sentiment"],
+)
+async def test_get_market_analysis_dependency_failure_raises_service_unavailable(
+    dependency,
+    monkeypatch,
+):
+    now = datetime.now(timezone.utc)
+
+    async def fake_summarize(symbol: str, lookback: int, reference=None):
+        return {
+            "data_points": 4,
+            "direction": "flat",
+            "last_price": Decimal("100"),
+            "previous_price": Decimal("99"),
+            "average": Decimal("99"),
+            "high": Decimal("101"),
+            "low": Decimal("97"),
+            "momentum": Decimal("0.01"),
+            "volatility": Decimal("0.02"),
+            "price_range": Decimal("4"),
+            "range_pct": Decimal("0.04"),
+            "last_updated": now,
+        }
+
+    async def fake_indicator(symbol: str):
+        return {
+            "short_sma": Decimal("99"),
+            "long_sma": Decimal("95"),
+            "momentum": Decimal("0.02"),
+            "volatility": Decimal("0.04"),
+            "price_count": 20,
+            "last_price": Decimal("100"),
+            "last_timestamp": now,
+        }
+
+    async def fake_insights(symbol: str, limit: int):
+        return [{"summary": "Momentum waning"}]
+
+    async def fake_sentiment(symbol: str, limit: int):
+        return SentimentSummary(
+            symbol=symbol,
+            average_score=0.1,
+            positive_mentions=1,
+            negative_mentions=0,
+            neutral_mentions=0,
+            data_points=1,
+            latest_summary="Neutral",
+            last_updated=now,
+            sources={"twitter": 1},
+        )
+
+    monkeypatch.setattr(market_module.market_data_service, "summarize_symbol", fake_summarize)
+    monkeypatch.setattr(market_module.market_analyst_agent, "get_indicator_summary", fake_indicator)
+    monkeypatch.setattr(market_module.market_analyst_agent, "get_recent_insights", fake_insights)
+    monkeypatch.setattr(market_module.sentiment_agent, "summarize_symbol", fake_sentiment)
+
+    async def boom(*_, **__):
+        raise RuntimeError("boom")
+
+    if dependency == "indicator_summary":
+        monkeypatch.setattr(market_module.market_analyst_agent, "get_indicator_summary", boom)
+    elif dependency == "insights":
+        monkeypatch.setattr(market_module.market_analyst_agent, "get_recent_insights", boom)
+    else:
+        monkeypatch.setattr(market_module.sentiment_agent, "summarize_symbol", boom)
+
+    with pytest.raises(ServiceUnavailableException) as exc:
+        await market_module.get_market_analysis("btc/usd")
+
+    payload = exc.value.detail.get("details", {})
+    assert payload.get("dependency") == dependency
