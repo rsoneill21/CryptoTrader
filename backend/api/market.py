@@ -20,6 +20,7 @@ from services.market_data import market_data_service
 from services.portfolio import PortfolioSnapshot, portfolio_service
 from agents.market_analyst import market_analyst_agent
 from agents.sentiment_agent import SentimentSummary, sentiment_agent
+from core.exceptions import ServiceUnavailableException
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -497,9 +498,9 @@ async def get_market_analysis(
         )
     except Exception as exc:  # pragma: no cover - best effort summary
         logger.error("Failed to summarize technical data for %s", normalized_symbol, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to gather technical data for analysis",
+        raise ServiceUnavailableException(
+            service="market_data",
+            details={"symbol": normalized_symbol, "operation": "summarize_symbol"},
         ) from exc
 
     indicator_payload: Dict[str, Any] = {
