@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,8 +14,9 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 
-from db.database import SessionLocal
+from db.database import SessionLocal, AsyncSessionLocal
 from db.models import Trade
+from services.paper_trading_state import PaperTradingStateService
 
 from core.indicators import indicator_snapshot
 
@@ -163,6 +165,9 @@ class PaperTradingEngine:
         self,
         starting_cash: float = 100_000.0,
         db_factory: Callable[[], Any] = SessionLocal,
+        async_session_factory: Callable[[], Any] = AsyncSessionLocal,
+        session_id: Optional[str] = None,
+        state_service: Optional[PaperTradingStateService] = None,
     ) -> None:
         self._lock = asyncio.Lock()
         self._starting_cash = starting_cash
@@ -176,6 +181,11 @@ class PaperTradingEngine:
         )
         self._strategy_metrics: Dict[int, _StrategyMetricsState] = {}
         self._db_factory = db_factory
+        self._async_session_factory = async_session_factory
+        self._session_id = session_id or str(uuid.uuid4())
+        self._state_service = state_service or PaperTradingStateService()
+        self._persistence_enabled = True
+        self._last_persistence_time: Optional[datetime] = None
 
     async def execute_signal(self, signal: PaperTradeSignal) -> List[PaperTradeResult]:
         """Handle a paper trading signal (entry or exit) asynchronously."""
@@ -187,8 +197,13 @@ class PaperTradingEngine:
             self._record_price(signal.symbol, price)
             if signal.intent == TradeIntent.ENTRY:
                 self._open_position(signal, price)
-                return []
-            return self._close_positions(signal, price, context)
+                results = []
+            else:
+                results = self._close_positions(signal, price, context)
+
+        # Persist state after signal execution (outside lock to avoid blocking)
+        await self.persist_state()
+        return results
 
     async def update_market_price(self, symbol: str, price: float) -> None:
         """Refresh the last known market price for a symbol."""
@@ -202,6 +217,11 @@ class PaperTradingEngine:
             self._price_book[normalized_symbol] = normalized_price
             self._record_price(normalized_symbol, normalized_price)
             self._recalculate_unrealized()
+
+        # Periodically persist state (every 10th price update to avoid excessive writes)
+        # Can be optimized with time-based throttling if needed
+        if len(self._price_book) % 10 == 0:
+            await self.persist_state()
 
     async def persist_closed_trades(self, trades: Iterable[PaperTradeResult]) -> int:
         """Save completed paper trades to the database in a background thread."""
@@ -480,6 +500,174 @@ class PaperTradingEngine:
 
     def _normalize_symbol(self, symbol: str) -> str:
         return symbol.strip().upper()
+
+    async def load_state_from_db(self) -> bool:
+        """
+        Load paper trading state from database.
+
+        Returns:
+            True if state was loaded, False if no state found or error occurred.
+        """
+        if not self._persistence_enabled:
+            logger.info("Persistence disabled, skipping state load")
+            return False
+
+        try:
+            async with self._async_session_factory() as session:
+                state_data = await self._state_service.load_active_session(session)
+
+                if not state_data:
+                    logger.info("No active session found, starting fresh")
+                    return False
+
+                # Restore state from JSON
+                async with self._lock:
+                    self._session_id = state_data.get("session_id", self._session_id)
+                    self._cash = state_data.get("cash", self._starting_cash)
+                    self._realized_pnl = state_data.get("realized_pnl", 0.0)
+                    self._unrealized_pnl = state_data.get("unrealized_pnl", 0.0)
+                    self._price_book = state_data.get("price_book", {})
+
+                    # Restore positions
+                    self._positions.clear()
+                    for symbol, pos_list in state_data.get("positions", {}).items():
+                        for pos_data in pos_list:
+                            pos = _MutablePosition(
+                                symbol=pos_data["symbol"],
+                                side=TradeSide(pos_data["side"]),
+                                entry_price=pos_data["entry_price"],
+                                entry_time=datetime.fromisoformat(pos_data["entry_time"]),
+                                strategy_id=pos_data.get("strategy_id"),
+                                metadata=pos_data.get("metadata", {}),
+                                quantity=pos_data["quantity"]
+                            )
+                            self._positions[symbol].append(pos)
+
+                    # Restore price history (limited to maxlen)
+                    for symbol, prices in state_data.get("price_history", {}).items():
+                        self._price_history[symbol] = deque(prices, maxlen=_PRICE_HISTORY_MAXLEN)
+
+                    logger.info(
+                        "Loaded paper trading session %s: cash=%.2f, positions=%d, realized_pnl=%.2f",
+                        self._session_id,
+                        self._cash,
+                        sum(len(p) for p in self._positions.values()),
+                        self._realized_pnl
+                    )
+                    return True
+
+        except Exception as exc:
+            logger.exception("Failed to load paper trading state: %s", exc)
+            return False
+
+    async def persist_state(self) -> bool:
+        """
+        Save current paper trading state to database.
+
+        Returns:
+            True if state was saved, False otherwise.
+        """
+        if not self._persistence_enabled:
+            return False
+
+        try:
+            async with self._lock:
+                # Serialize positions
+                positions_data = {}
+                for symbol, pos_list in self._positions.items():
+                    positions_data[symbol] = [
+                        {
+                            "symbol": pos.symbol,
+                            "side": pos.side.value,
+                            "quantity": pos.quantity,
+                            "entry_price": pos.entry_price,
+                            "entry_time": pos.entry_time.isoformat(),
+                            "strategy_id": pos.strategy_id,
+                            "metadata": pos.metadata
+                        }
+                        for pos in pos_list
+                    ]
+
+                # Serialize price history
+                price_history_data = {
+                    symbol: list(prices)
+                    for symbol, prices in self._price_history.items()
+                }
+
+                state_payload = {
+                    "session_id": self._session_id,
+                    "cash": self._cash,
+                    "realized_pnl": self._realized_pnl,
+                    "unrealized_pnl": self._unrealized_pnl,
+                    "positions": positions_data,
+                    "price_book": self._price_book,
+                    "price_history": price_history_data,
+                    "starting_cash": self._starting_cash,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            async with self._async_session_factory() as session:
+                success = await self._state_service.save_state(
+                    session,
+                    self._session_id,
+                    state_payload
+                )
+
+                if success:
+                    self._last_persistence_time = datetime.utcnow()
+                    logger.debug("Persisted paper trading state for session %s", self._session_id)
+
+                return success
+
+        except Exception as exc:
+            logger.exception("Failed to persist paper trading state: %s", exc)
+            return False
+
+    async def archive_current_session(self) -> bool:
+        """
+        Archive the current session (mark as inactive).
+
+        Returns:
+            True if session was archived, False otherwise.
+        """
+        try:
+            async with self._async_session_factory() as session:
+                success = await self._state_service.archive_session(session, self._session_id)
+                if success:
+                    logger.info("Archived paper trading session %s", self._session_id)
+                return success
+        except Exception as exc:
+            logger.exception("Failed to archive session: %s", exc)
+            return False
+
+    async def reset_to_clean_state(self, archive_current: bool = True) -> None:
+        """
+        Reset engine to a clean state, optionally archiving current session.
+
+        Args:
+            archive_current: If True, archive current session before reset
+        """
+        async with self._lock:
+            if archive_current:
+                await self.archive_current_session()
+
+            # Generate new session ID
+            self._session_id = str(uuid.uuid4())
+
+            # Reset all state
+            self._cash = self._starting_cash
+            self._realized_pnl = 0.0
+            self._unrealized_pnl = 0.0
+            self._positions.clear()
+            self._price_book.clear()
+            self._price_history.clear()
+            self._strategy_metrics.clear()
+            self._last_persistence_time = None
+
+            logger.info("Reset to clean paper trading state, new session: %s", self._session_id)
+
+            # Persist the clean state
+            await self.persist_state()
 
     def _persist_trades(self, trades: List[PaperTradeResult]) -> int:
         if not trades:
