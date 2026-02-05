@@ -8,9 +8,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from db.database import fetch_ai_decisions, get_db
+from db.database import fetch_ai_decisions, get_db, get_async_db
 from db.models import AIDecision
 from core.auth import get_current_session_ws
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
@@ -271,18 +273,18 @@ def _build_recommendations(
     return recommendations
 
 
-def fetch_decisions_for_trade(
-    db: Session,
+async def fetch_decisions_for_trade(
+    db: AsyncSession,
     trade_id: int,
     limit: int = 10,
 ) -> List[DecisionRecord]:
-    records = (
-        db.query(AIDecision)
-        .filter(AIDecision.related_trade_id == trade_id)
+    result = await db.execute(
+        select(AIDecision)
+        .where(AIDecision.related_trade_id == trade_id)
         .order_by(AIDecision.timestamp.desc())
         .limit(max(1, min(limit, 50)))
-        .all()
     )
+    records = result.scalars().all()
     return [_map_decision(record) for record in records]
 
 def _handle_kraken_error(exc: KrakenAPIError) -> HTTPException:

@@ -8,11 +8,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.auth import get_current_user
 from core.indicators import side_color
-from db.database import get_db
+from db.database import get_async_db
 from db.models import Order, Trade, User
 from backend.api.market import DecisionRecord, fetch_decisions_for_trade
 from backend.agents.market_analyst import market_analyst_agent
@@ -148,11 +150,11 @@ class TradeReasoningResponse(BaseModel):
 async def create_manual_trade(
     request: CreateTradeRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> ActiveTradeResponse:
     """Execute a manual trade and record it."""
     now = datetime.utcnow()
-    
+
     trade = Trade(
         symbol=request.symbol,
         side=request.side,
@@ -167,10 +169,10 @@ async def create_manual_trade(
 
     try:
         db.add(trade)
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to create manual trade: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -188,7 +190,7 @@ async def create_manual_trade(
 )
 async def create_system_trade(
     request: CreateSystemTradeRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> ActiveTradeResponse:
     """Record a trade originated by an AI agent or internal system process."""
     now = datetime.utcnow()
@@ -209,10 +211,10 @@ async def create_system_trade(
 
     try:
         db.add(trade)
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to create system trade: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -309,17 +311,17 @@ def _calculate_pnl(trade: Trade, exit_price: float) -> Optional[float]:
 )
 async def list_active_trades(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> List[ActiveTradeResponse]:
     """Return all trades that have not been exited yet, with live prices."""
     try:
-        trades = (
-            db.query(Trade)
+        result = await db.execute(
+            select(Trade)
             .options(selectinload(Trade.orders))
-            .filter(Trade.exit_time.is_(None))
+            .where(Trade.exit_time.is_(None))
             .order_by(Trade.entry_time.desc())
-            .all()
         )
+        trades = result.scalars().all()
     except Exception as exc:  # pragma: no cover - DB should be reachable
         logger.error("Failed to fetch active trades: %s", exc)
         raise HTTPException(
@@ -352,10 +354,10 @@ async def close_trade(
     trade_id: int,
     request: CloseTradeRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> CloseTradeResponse:
     """Mark a trade as closed and record exit pricing."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -389,10 +391,10 @@ async def close_trade(
         trade.exit_reasoning_json = exit_reason
 
     try:
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Unable to close trade %s: %s", trade_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -428,10 +430,10 @@ async def adjust_trade(
     trade_id: int,
     request: AdjustTradeRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AdjustTradeResponse:
     """Persist stop-loss / take-profit adjustments for an active trade."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -459,10 +461,10 @@ async def adjust_trade(
     trade.market_conditions_json = conditions
 
     try:
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Unable to record adjustment for trade %s: %s", trade_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -491,10 +493,10 @@ async def adjust_trade(
 async def explain_trade_reasoning(
     trade_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> TradeReasoningResponse:
     """Return AI reasoning, context, and analyst insights for a specific trade."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -518,7 +520,7 @@ async def explain_trade_reasoning(
     except Exception as exc:
         logger.warning("Analyst insights unavailable for %s: %s", trade.symbol, exc)
 
-    decisions = fetch_decisions_for_trade(db, trade_id)
+    decisions = await fetch_decisions_for_trade(db, trade_id)
 
     return TradeReasoningResponse(
         trade_id=trade.id,
@@ -560,10 +562,10 @@ class AIToggleResponse(BaseModel):
 async def toggle_ai_managed(
     trade_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AIToggleResponse:
     """Toggle the ai_managed flag on a trade."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     if trade.exit_time is not None:
@@ -572,10 +574,10 @@ async def toggle_ai_managed(
     trade.ai_managed = not bool(trade.ai_managed)
 
     try:
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to toggle ai_managed for trade %s: %s", trade_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -611,10 +613,10 @@ async def add_to_position(
     trade_id: int,
     request: AddToPositionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AddToPositionResponse:
     """Add quantity to an existing position, recomputing the weighted-average entry price."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     if trade.exit_time is not None:
@@ -645,10 +647,10 @@ async def add_to_position(
     trade.quantity = new_qty
 
     try:
-        db.commit()
-        db.refresh(trade)
+        await db.commit()
+        await db.refresh(trade)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to add to position %s: %s", trade_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -694,14 +696,19 @@ class OrderInfoResponse(BaseModel):
 async def list_trade_orders(
     trade_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> List[OrderInfoResponse]:
     """Return orders for a trade, refreshing status from Kraken for open exchange orders."""
-    trade = db.get(Trade, trade_id)
+    trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
 
-    orders = db.query(Order).filter(Order.trade_id == trade_id).order_by(Order.created_at.desc()).all()
+    result = await db.execute(
+        select(Order)
+        .where(Order.trade_id == trade_id)
+        .order_by(Order.created_at.desc())
+    )
+    orders = result.scalars().all()
 
     # Sync status from exchange for orders that have an exchange_order_id and aren't terminal
     terminal_statuses = {"closed", "canceled", "expired", "filled", "cancelled"}
@@ -715,9 +722,9 @@ async def list_trade_orders(
                 logger.debug("Could not refresh order %s: %s", order.exchange_order_id, exc)
 
     try:
-        db.commit()
+        await db.commit()
     except Exception:
-        db.rollback()
+        await db.rollback()
 
     return [
         OrderInfoResponse(
@@ -752,10 +759,10 @@ class CancelOrderResponse(BaseModel):
 async def cancel_order(
     order_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> CancelOrderResponse:
     """Cancel an exchange order."""
-    order = db.get(Order, order_id)
+    order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
@@ -772,10 +779,10 @@ async def cancel_order(
 
     order.status = "canceled"
     try:
-        db.commit()
-        db.refresh(order)
+        await db.commit()
+        await db.refresh(order)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to update canceled order %s: %s", order_id, exc)
 
     logger.info("Order %s canceled by %s", order_id, current_user.email)
@@ -790,10 +797,10 @@ async def cancel_order(
 async def get_order_status(
     order_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> OrderInfoResponse:
     """Fetch the latest order status from the exchange and sync to DB."""
-    order = db.get(Order, order_id)
+    order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
@@ -802,12 +809,12 @@ async def get_order_status(
             info = await kraken_service.get_order_status(order.exchange_order_id)
             order.status = info.status.value
             order.filled_quantity = float(info.filled_volume)
-            db.commit()
-            db.refresh(order)
+            await db.commit()
+            await db.refresh(order)
         except KrakenAPIError as exc:
             logger.warning("Unable to refresh order %s from exchange: %s", order_id, exc)
         except Exception as exc:
-            db.rollback()
+            await db.rollback()
             logger.error("DB error syncing order %s: %s", order_id, exc)
 
     return OrderInfoResponse(
