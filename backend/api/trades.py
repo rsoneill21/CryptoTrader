@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import desc, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +28,7 @@ from api.market import DecisionRecord, fetch_decisions_for_trade
 from agents.market_analyst import market_analyst_agent
 from services.market_data import market_data_service
 from services.kraken import kraken_service, KrakenAPIError
+from core.exceptions import DatabaseException, ServiceUnavailableException
 
 logger = logging.getLogger("cryptotrader.trades")
 router = APIRouter()
@@ -208,13 +210,13 @@ async def create_manual_trade(
             .where(Trade.id == trade.id)
             .options(selectinload(Trade.orders))
         )
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Failed to create manual trade: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to execute trade",
-        )
+        logger.error("Failed to create manual trade", exc_info=True)
+        raise DatabaseException(
+            message="Failed to execute trade",
+            details={"operation": "create_manual_trade"},
+        ) from exc
 
     logger.info("Manual trade created: id=%s, symbol=%s", trade.id, trade.symbol)
     return _serialize_trade(trade)
@@ -255,13 +257,13 @@ async def create_system_trade(
             .where(Trade.id == trade.id)
             .options(selectinload(Trade.orders))
         )
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Failed to create system trade: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to record system trade",
-        )
+        logger.error("Failed to create system trade", exc_info=True)
+        raise DatabaseException(
+            message="Failed to record system trade",
+            details={"operation": "create_system_trade"},
+        ) from exc
 
     logger.info(
         "System trade created: id=%s, symbol=%s, ai_model=%s, is_manual=False",
@@ -320,12 +322,12 @@ async def list_trades(
         trades = list(result.scalars().all())
     except HTTPException:
         raise
-    except Exception as exc:  # pragma: no cover - defensive guard
-        logger.error("Trade list fetch failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to retrieve trades",
-        )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        logger.error("Trade list fetch failed", exc_info=True)
+        raise DatabaseException(
+            message="Unable to retrieve trades",
+            details={"operation": "list_trades"},
+        ) from exc
 
     has_more = len(trades) > limit
     if has_more:
@@ -437,12 +439,12 @@ async def list_active_trades(
             .order_by(Trade.entry_time.desc())
         )
         trades = result.scalars().all()
-    except Exception as exc:  # pragma: no cover - DB should be reachable
-        logger.error("Failed to fetch active trades: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to retrieve active trades",
-        )
+    except SQLAlchemyError as exc:  # pragma: no cover - DB should be reachable
+        logger.error("Failed to fetch active trades", exc_info=True)
+        raise DatabaseException(
+            message="Unable to retrieve active trades",
+            details={"operation": "list_active_trades"},
+        ) from exc
 
     # Fetch current prices for all unique symbols in active trades
     symbols = {trade.symbol for trade in trades}
@@ -452,7 +454,7 @@ async def list_active_trades(
             ticker = await kraken_service.get_ticker(symbol)
             price_map[symbol] = float(ticker.last)
         except Exception as exc:
-            logger.debug("Unable to fetch price for %s: %s", symbol, exc)
+            logger.debug("Unable to fetch price for %s", symbol, exc_info=True)
 
     return [
         _serialize_trade(trade, current_price=price_map.get(trade.symbol))
@@ -508,13 +510,13 @@ async def close_trade(
     try:
         await db.commit()
         await db.refresh(trade)
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Unable to close trade %s: %s", trade_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to close trade",
-        )
+        logger.error("Unable to close trade %s", trade_id, exc_info=True)
+        raise DatabaseException(
+            message="Failed to close trade",
+            details={"operation": "close_trade", "trade_id": trade_id},
+        ) from exc
 
     logger.info("Trade %s closed by user %s", trade_id, current_user.email)
 
@@ -578,13 +580,13 @@ async def adjust_trade(
     try:
         await db.commit()
         await db.refresh(trade)
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Unable to record adjustment for trade %s: %s", trade_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to persist adjustment",
-        )
+        logger.error("Unable to record adjustment for trade %s", trade_id, exc_info=True)
+        raise DatabaseException(
+            message="Failed to persist adjustment",
+            details={"operation": "adjust_trade", "trade_id": trade_id},
+        ) from exc
 
     logger.info(
         "Adjustment recorded for trade %s by %s",
@@ -627,13 +629,13 @@ async def explain_trade_reasoning(
             lookback=20,
         )
     except Exception as exc:
-        logger.warning("Unable to load candles for trade %s: %s", trade_id, exc)
+        logger.warning("Unable to load candles for trade %s", trade_id, exc_info=True)
 
     analyst_insights: List[Dict[str, Any]] = []
     try:
         analyst_insights = await market_analyst_agent.get_recent_insights(trade.symbol, limit=3)
     except Exception as exc:
-        logger.warning("Analyst insights unavailable for %s: %s", trade.symbol, exc)
+        logger.warning("Analyst insights unavailable for %s", trade.symbol, exc_info=True)
 
     decisions = await fetch_decisions_for_trade(db, trade_id)
 
@@ -691,13 +693,13 @@ async def toggle_ai_managed(
     try:
         await db.commit()
         await db.refresh(trade)
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Failed to toggle ai_managed for trade %s: %s", trade_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update trade",
-        )
+        logger.error("Failed to toggle ai_managed for trade %s", trade_id, exc_info=True)
+        raise DatabaseException(
+            message="Failed to update trade",
+            details={"operation": "toggle_ai_managed", "trade_id": trade_id},
+        ) from exc
 
     state = "enabled" if trade.ai_managed else "disabled"
     logger.info("AI management %s for trade %s by %s", state, trade_id, current_user.email)
@@ -741,12 +743,18 @@ async def add_to_position(
     try:
         ticker = await kraken_service.get_ticker(trade.symbol)
         add_price = float(ticker.last)
+    except KrakenAPIError as exc:
+        logger.warning("Unable to fetch live price for %s", trade.symbol, exc_info=True)
+        raise ServiceUnavailableException(
+            service="kraken",
+            details={"symbol": trade.symbol, "operation": "get_ticker"},
+        ) from exc
     except Exception as exc:
-        logger.warning("Unable to fetch live price for %s: %s", trade.symbol, exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not fetch current price from exchange",
-        )
+        logger.error("Unexpected error fetching price for %s", trade.symbol, exc_info=True)
+        raise ServiceUnavailableException(
+            service="kraken",
+            details={"symbol": trade.symbol, "operation": "get_ticker"},
+        ) from exc
 
     old_qty = trade.quantity or 0.0
     new_qty = old_qty + request.quantity
@@ -764,13 +772,13 @@ async def add_to_position(
     try:
         await db.commit()
         await db.refresh(trade)
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Failed to add to position %s: %s", trade_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update position",
-        )
+        logger.error("Failed to add to position %s", trade_id, exc_info=True)
+        raise DatabaseException(
+            message="Failed to update position",
+            details={"operation": "add_to_position", "trade_id": trade_id},
+        ) from exc
 
     logger.info(
         "Added %.4f to trade %s (new qty=%.4f) by %s",
@@ -834,12 +842,21 @@ async def list_trade_orders(
                 order.status = info.status.value
                 order.filled_quantity = float(info.filled_volume)
             except Exception as exc:
-                logger.debug("Could not refresh order %s: %s", order.exchange_order_id, exc)
+                logger.debug("Could not refresh order %s", order.exchange_order_id, exc_info=True)
 
     try:
         await db.commit()
-    except Exception:
+    except SQLAlchemyError as exc:
         await db.rollback()
+        logger.error(
+            "Failed to persist refreshed order statuses for trade %s",
+            trade_id,
+            exc_info=True,
+        )
+        raise DatabaseException(
+            message="Unable to refresh order statuses",
+            details={"operation": "list_trade_orders", "trade_id": trade_id},
+        ) from exc
 
     return [
         OrderInfoResponse(
@@ -896,9 +913,13 @@ async def cancel_order(
     try:
         await db.commit()
         await db.refresh(order)
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         await db.rollback()
-        logger.error("Failed to update canceled order %s: %s", order_id, exc)
+        logger.error("Failed to update canceled order %s", order_id, exc_info=True)
+        raise DatabaseException(
+            message="Failed to update canceled order",
+            details={"operation": "cancel_order", "order_id": order_id},
+        ) from exc
 
     logger.info("Order %s canceled by %s", order_id, current_user.email)
     return CancelOrderResponse(order_id=order.id, status=order.status, message="Order canceled")
@@ -927,10 +948,21 @@ async def get_order_status(
             await db.commit()
             await db.refresh(order)
         except KrakenAPIError as exc:
-            logger.warning("Unable to refresh order %s from exchange: %s", order_id, exc)
+            logger.warning("Unable to refresh order %s from exchange", order_id, exc_info=True)
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            logger.error("DB error syncing order %s", order_id, exc_info=True)
+            raise DatabaseException(
+                message="Unable to sync order status",
+                details={"operation": "get_order_status", "order_id": order_id},
+            ) from exc
         except Exception as exc:
             await db.rollback()
-            logger.error("DB error syncing order %s: %s", order_id, exc)
+            logger.error("Unexpected error syncing order %s", order_id, exc_info=True)
+            raise ServiceUnavailableException(
+                service="orders",
+                details={"operation": "sync_order_status", "order_id": order_id},
+            ) from exc
 
     return OrderInfoResponse(
         id=order.id,
