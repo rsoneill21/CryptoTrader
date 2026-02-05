@@ -11,9 +11,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import get_async_db, get_db
+from db.database import get_async_db
 from db.models import Alert
-from sqlalchemy.orm import Session
 
 router = APIRouter()
 
@@ -212,7 +211,7 @@ def _apply_actioned_timestamp(
 )
 async def create_alert(
     request: AlertCreateRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AlertResponse:
     """Create a new alert entry."""
     alert = Alert(
@@ -230,10 +229,10 @@ async def create_alert(
     _apply_actioned_timestamp(alert, request.status, request.actioned_at)
     try:
         db.add(alert)
-        db.commit()
-        db.refresh(alert)
+        await db.commit()
+        await db.refresh(alert)
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to create alert",
@@ -370,10 +369,10 @@ async def list_alerts(
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
-async def get_alert(alert_id: int, db: Session = Depends(get_db)) -> AlertResponse:
+async def get_alert(alert_id: int, db: AsyncSession = Depends(get_async_db)) -> AlertResponse:
     """Retrieve a single alert by ID."""
     try:
-        alert = db.get(Alert, alert_id)
+        alert = await db.get(Alert, alert_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -388,10 +387,10 @@ async def get_alert(alert_id: int, db: Session = Depends(get_db)) -> AlertRespon
 
 
 @router.get("/{alert_id}/chat-context", response_model=AlertChatContextResponse)
-async def get_alert_chat_context(alert_id: int, db: Session = Depends(get_db)) -> AlertChatContextResponse:
+async def get_alert_chat_context(alert_id: int, db: AsyncSession = Depends(get_async_db)) -> AlertChatContextResponse:
     """Return structured context for starting a chat about an alert."""
     try:
-        alert = db.get(Alert, alert_id)
+        alert = await db.get(Alert, alert_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -420,11 +419,11 @@ async def get_alert_chat_context(alert_id: int, db: Session = Depends(get_db)) -
 async def update_alert(
     alert_id: int,
     request: AlertUpdateRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AlertResponse:
     """Partially update alert metadata."""
     try:
-        alert = db.get(Alert, alert_id)
+        alert = await db.get(Alert, alert_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -450,10 +449,10 @@ async def update_alert(
     _apply_actioned_timestamp(alert, request.status, request.actioned_at)
 
     try:
-        db.commit()
-        db.refresh(alert)
+        await db.commit()
+        await db.refresh(alert)
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to update alert",
@@ -465,11 +464,11 @@ async def update_alert(
 async def update_alert_status(
     alert_id: int,
     request: AlertStatusUpdateRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AlertResponse:
     """Update only the status/action fields of an alert."""
     try:
-        alert = db.get(Alert, alert_id)
+        alert = await db.get(Alert, alert_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -486,10 +485,10 @@ async def update_alert_status(
     _apply_actioned_timestamp(alert, request.status, request.actioned_at)
 
     try:
-        db.commit()
-        db.refresh(alert)
+        await db.commit()
+        await db.refresh(alert)
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to update alert status",
@@ -500,11 +499,12 @@ async def update_alert_status(
 @router.post("/bulk/status", response_model=BulkStatusUpdateResponse)
 async def bulk_update_status(
     request: BulkStatusUpdateRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> BulkStatusUpdateResponse:
     """Update status/action metadata for multiple alerts."""
     try:
-        alerts = db.query(Alert).filter(Alert.id.in_(request.ids)).all()
+        result = await db.execute(select(Alert).where(Alert.id.in_(request.ids)))
+        alerts = list(result.scalars().all())
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -522,9 +522,9 @@ async def bulk_update_status(
         _apply_actioned_timestamp(alert, request.status, request.actioned_at)
 
     try:
-        db.commit()
+        await db.commit()
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to apply bulk alert updates",
