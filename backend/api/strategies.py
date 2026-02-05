@@ -1116,3 +1116,42 @@ async def archive_paper_trading_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to archive paper trading session",
         ) from exc
+
+
+class ArchivePaperTradingResponse(BaseModel):
+    """Response after archiving paper trading session."""
+
+    message: str
+    archived: bool
+    archived_at: datetime
+
+
+@router.post("/paper-trading/archive", response_model=ArchivePaperTradingResponse)
+async def archive_paper_trading_session(
+    current_user: User = Depends(get_current_user),
+):
+    """Archive the current paper trading session without resetting."""
+    try:
+        archived = await paper_trading_engine.archive_current_session()
+
+        logger.info(
+            "Paper trading session archived by %s (success=%s)",
+            current_user.email,
+            archived,
+        )
+
+        return ArchivePaperTradingResponse(
+            message=(
+                "Paper trading session archived successfully"
+                if archived
+                else "No active session to archive"
+            ),
+            archived=archived,
+            archived_at=datetime.utcnow(),
+        )
+    except Exception as exc:
+        logger.error("Failed to archive paper trading session", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to archive paper trading session",
+        ) from exc
