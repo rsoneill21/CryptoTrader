@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-14 completed (14 of 15 in phase)
-**Status:** In progress (final gap-closure tasks remaining)
-**Last activity:** 2026-02-05 - Completed 01-14-PLAN.md
-**Progress:** █████████░ 83% (25/30 plans complete; 14/15 in current phase)
+**Plan:** 01-15 completed (15 of 15 in phase)
+**Status:** Phase complete (ready to transition to Phase 2)
+**Last activity:** 2026-02-05 - Completed 01-15-PLAN.md
+**Progress:** █████████░ 87% (26/30 plans complete; 15/15 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -40,6 +40,7 @@
 - Completed 01-12: Cursor pagination helper enforces DESC comparisons with optional ASC support
 - Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
 - Completed 01-14: Auth, export, AI, and system log APIs now use AsyncSession plus awaited select queries end-to-end
+- Completed 01-15: Market, strategies, trades, and system APIs now raise typed DatabaseException/ServiceUnavailableException with exc_info logging
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -103,6 +104,11 @@
 - ✓ Alerts/activity/model stats queries reuse async select builders to keep pagination + aggregations off the event loop
 - ✓ System logs listing uses AsyncSession select queries for counts and paginated results, removing blocking Session usage
 
+**Fixed in 01-15:**
+- ✓ Market analysis endpoint surfaces ServiceUnavailableException when technical summaries fail so operators receive typed errors
+- ✓ Strategies and trades APIs replaced bare `except Exception` blocks with DatabaseException/ServiceUnavailableException plus contextual details and exc_info logging
+- ✓ System backup create/list/restore paths now propagate ServiceUnavailableException for outages, aligning infrastructure monitoring with other services
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -137,6 +143,8 @@
 | Paper trading reset requires confirmation with archival option | 2026-02-05 | Prevents accidental destruction of active sessions when hit via API | Maintenance endpoints stay safe for UI/agent callers |
 | Cursor helper directional flag | 2026-02-05 | Shared pagination helper now accepts a `descending` flag to support both orderings | Any list endpoint can reuse helper without duplicating comparisons |
 | Password reset helper offloaded via asyncio.to_thread | 2026-02-05 | Avoided rewriting the sync password-reset service mid-plan while ensuring async endpoints stay non-blocking | Allows incremental migration of legacy helpers without stalling auth responses |
+| Strategy suggestion failures -> ServiceUnavailableException | 2026-02-05 | Typed errors ensure UI/operators know AI services are unavailable instead of silently skipping suggestions | Clients can surface actionable outage messaging for AI-powered routes |
+| Backup service outages propagate via ServiceUnavailableException | 2026-02-05 | Infrastructure failures should share consistent structured payloads with Retry-After semantics | Monitoring can treat backup issues like other service outages and respond predictably |
 
 ### Active Todos
 
@@ -161,7 +169,12 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-14):**
+**2026-02-05 (latest - 01-15):**
+- Completed 01-15: Market/strategies/trades/system APIs now raise DatabaseException/ServiceUnavailableException instead of bare HTTPException paths
+- exc_info logging standardized across every catch block so stack traces reach logs even when exceptions are swallowed for best-effort flows
+- Duration: 6 minutes (4 tasks, 4 commits)
+
+**2026-02-05 (01-14):**
 - Completed 01-14: Auth, export, and AI APIs migrated to AsyncSession with awaited select queries (system routes already async)
 - Password reset helper now runs via `asyncio.to_thread`, and export/chat endpoints share async pagination builders
 - Duration: 8 minutes (3 commits, 1 audit-only task)
@@ -275,8 +288,8 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 16:43-16:52 UTC
-**Stopped at:** Completed 01-14-PLAN.md (AsyncSession migration for auth/export/ai gap closure)
+**Last session:** 2026-02-05 17:02-17:08 UTC
+**Stopped at:** Completed 01-15-PLAN.md (typed exception and exc_info gap closure)
 **Resume file:** None
 
 **For next session:**

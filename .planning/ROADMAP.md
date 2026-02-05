@@ -40,9 +40,9 @@ Plans:
 - [x] 01-12-PLAN.md — Fix cursor pagination for DESC ordering
 - [x] 01-13-PLAN.md — Fix auth rate limiter return value assumption
 - [x] 01-14-PLAN.md — AsyncSession migration for auth/export/ai routes
-- [ ] 01-15-PLAN.md — Replace bare except blocks with typed exceptions
+- [x] 01-15-PLAN.md — Replace bare except blocks with typed exceptions
 
-**Plans:** 15 plans (14 complete, 1 gap-closure plan pending)
+**Plans:** 15 plans (15 complete; Phase 1 ready to close)
 
 ### Phase 2: Autonomous Agent Loop
 **Goal:** AI agents run continuously on schedule and coordinate via message queue
@@ -190,6 +190,6 @@ Plans:
 
 **Total phases:** 11
 **Total requirements:** 63
-**Completion:** 0/11 phases (0%)
-**Current phase:** Phase 1 (Infrastructure Hardening)
+**Completion:** 1/11 phases (9%)
+**Current phase:** Phase 1 (Infrastructure Hardening) — complete
 **Updated:** 2026-02-05
