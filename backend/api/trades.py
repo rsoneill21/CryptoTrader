@@ -205,11 +205,7 @@ async def create_manual_trade(
         db.add(trade)
         await db.commit()
         await db.refresh(trade)
-        trade = await db.scalar(
-            select(Trade)
-            .where(Trade.id == trade.id)
-            .options(selectinload(Trade.orders))
-        )
+        await db.refresh(trade, attribute_names=["orders"])
     except SQLAlchemyError as exc:
         await db.rollback()
         logger.error("Failed to create manual trade", exc_info=True)
@@ -252,11 +248,7 @@ async def create_system_trade(
         db.add(trade)
         await db.commit()
         await db.refresh(trade)
-        trade = await db.scalar(
-            select(Trade)
-            .where(Trade.id == trade.id)
-            .options(selectinload(Trade.orders))
-        )
+        await db.refresh(trade, attribute_names=["orders"])
     except SQLAlchemyError as exc:
         await db.rollback()
         logger.error("Failed to create system trade", exc_info=True)

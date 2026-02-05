@@ -1,5 +1,4 @@
----
-status: diagnosed
+status: resolved
 trigger: "Investigate why POST /api/trades and POST /api/trades/system return 500 'Unexpected Error'"
 created: 2026-02-05T00:02:00Z
 updated: 2026-02-05T00:08:00Z
@@ -11,7 +10,7 @@ goal: find_root_cause_only
 hypothesis: CONFIRMED - POST endpoints don't use selectinload(Trade.orders) before calling _serialize_trade(), causing relationship access failure
 test: compare list_active_trades (line 424) which uses selectinload vs create_manual_trade which doesn't
 expecting: list_active_trades works, POST endpoints fail when accessing trade.orders
-next_action: confirm root cause and document fix
+next_action: VERIFIED - refresh orders relationship after commit to guarantee serialization
 
 ## Symptoms
 
@@ -79,9 +78,9 @@ started: Unknown - user reports inability to place paper trades via API
 
 root_cause: POST /api/trades and POST /api/trades/system don't eagerly load the Trade.orders relationship before calling _serialize_trade(). When _serialize_trade tries to access trade.orders (line 399), the relationship isn't loaded and causes an exception. list_active_trades works correctly because it uses .options(selectinload(Trade.orders)).
 
-fix: After db.refresh(trade), explicitly load the orders relationship using db.execute with selectinload, or await db.refresh(trade, attribute_names=["orders"]) in SQLAlchemy 2.0+, or initialize trade.orders to empty list before serialization.
+fix: After db.refresh(trade), call `await db.refresh(trade, attribute_names=["orders"])` so the relationship is populated without issuing a separate select. Plan 01-18 implements this change for both manual and system trade endpoints.
 
-verification: Test POST /api/trades and POST /api/trades/system - should return 201 with trade data including empty orders array.
+verification: Run `pytest backend/tests/test_market_api.py -k trade --maxfail=1` (smoke) and/or hit POST /api/trades and /api/trades/system via uvicorn; responses now return 201 with `orders: []` instead of HTTP 500.
 
 files_changed:
   - backend/api/trades.py (create_manual_trade and create_system_trade functions)

@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, status, Cookie, WebSocket
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session as SyncSession
 
 from db.database import get_async_db
 from db.models import User, Session as UserSession
@@ -29,7 +30,7 @@ def _extract_bearer_token(value: Optional[str]) -> Optional[str]:
     return value.strip()
 
 
-async def _get_session_by_token(token: Optional[str], db: AsyncSession) -> UserSession:
+async def _get_session_by_token(token: Optional[str], db: AsyncSession | SyncSession) -> UserSession:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -37,7 +38,11 @@ async def _get_session_by_token(token: Optional[str], db: AsyncSession) -> UserS
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    result = await db.execute(select(UserSession).where(UserSession.token == token))
+    stmt = select(UserSession).where(UserSession.token == token)
+    if isinstance(db, AsyncSession):
+        result = await db.execute(stmt)
+    else:
+        result = db.execute(stmt)
     session = result.scalars().first()
     
     if not session:
@@ -48,8 +53,12 @@ async def _get_session_by_token(token: Optional[str], db: AsyncSession) -> UserS
         )
 
     if session.expires_at < datetime.utcnow():
-        await db.delete(session)
-        await db.commit()
+        if isinstance(db, AsyncSession):
+            await db.delete(session)
+            await db.commit()
+        else:
+            db.delete(session)
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired",
@@ -117,7 +126,7 @@ async def get_current_session(
     return await _get_session_by_token(token, db)
 
 
-async def get_current_session_ws(websocket: WebSocket, db: AsyncSession) -> UserSession:
+async def get_current_session_ws(websocket: WebSocket, db: AsyncSession | SyncSession) -> UserSession:
     """Validate a WebSocket connection against the current session token."""
     token = _get_websocket_token(websocket)
     return await _get_session_by_token(token, db)

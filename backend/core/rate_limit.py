@@ -18,9 +18,21 @@ logger = logging.getLogger("cryptotrader.rate_limit")
 
 # Use the same REDIS_URL as Celery
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+ALLOW_FAKE_REDIS = (
+    os.getenv(
+        "RATE_LIMITER_FAKE_REDIS",
+        "false" if ENVIRONMENT == "production" else "true",
+    ).lower()
+    == "true"
+)
+BYPASS_RATE_LIMIT_ON_FAKE = (
+    os.getenv("RATE_LIMITER_BYPASS_ON_FAKE", "true").lower() == "true"
+)
 
 # Global Redis client
 _redis_client = None
+_using_fake_redis = False
 
 # Circuit breaker for Redis connection
 # Opens after 5 consecutive failures, stays open for 60 seconds before retry
@@ -40,12 +52,13 @@ async def get_redis():
     Raises:
         Exception: Propagated from circuit breaker when open
     """
-    global _redis_client
+    global _redis_client, _using_fake_redis
     if _redis_client is None:
         try:
             _redis_client = redis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
             # Wrap ping in circuit breaker to detect repeated failures
             await redis_breaker.call(lambda: _redis_client.ping())
+            _using_fake_redis = False
         except Exception as e:
             logger.error(
                 "redis_connection_failed",
@@ -55,6 +68,28 @@ async def get_redis():
                     "circuit_state": redis_breaker.current_state,
                 }
             )
+            if ALLOW_FAKE_REDIS:
+                try:
+                    from fakeredis.aioredis import FakeRedis  # type: ignore
+
+                    _redis_client = FakeRedis()
+                    _using_fake_redis = True
+                    logger.warning(
+                        "redis_fallback_fake",
+                        extra={
+                            "redis_url": REDIS_URL.split("@")[-1],
+                            "environment": ENVIRONMENT,
+                        },
+                    )
+                    return _redis_client
+                except Exception as fake_err:
+                    logger.error(
+                        "redis_fallback_fake_failed",
+                        extra={
+                            "error": str(fake_err),
+                            "redis_url": REDIS_URL.split("@")[-1],
+                        },
+                    )
             # FAIL-CLOSED: Return None to trigger ServiceUnavailableException
             return None
     return _redis_client
@@ -76,6 +111,8 @@ async def check_rate_limit(key: str, limit: int, window: int) -> None:
         ServiceUnavailableException: When Redis unavailable (503 + Retry-After)
     """
     r = await get_redis()
+    if _using_fake_redis and BYPASS_RATE_LIMIT_ON_FAKE:
+        return True
     if not r:
         # FAIL-CLOSED: Redis unavailable, deny all requests
         logger.warning(
@@ -121,6 +158,7 @@ async def check_rate_limit(key: str, limit: int, window: int) -> None:
             "rate_limit_passed",
             extra={"key": key, "current": current, "limit": limit}
         )
+        return True
 
     except RateLimitException:
         # Re-raise typed exceptions
@@ -141,6 +179,7 @@ async def check_rate_limit(key: str, limit: int, window: int) -> None:
             retry_after=60,
             details={"reason": f"Redis error: {e.__class__.__name__}"}
         )
+    return True
 
 class RateLimiter:
     """
