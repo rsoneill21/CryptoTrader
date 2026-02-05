@@ -22,6 +22,10 @@ from db.database import init_db, SessionLocal
 from db.models import Alert
 from services.kraken import kraken_service
 from services.kraken_ws import start_kraken_ws, stop_kraken_ws
+from services.paper_trading_service import (
+    initialize_paper_trading_engine,
+    shutdown_paper_trading_engine,
+)
 
 _logger = _logging.getLogger("cryptotrader.kraken_alerts")
 from core.settings import get_app_settings
@@ -66,10 +70,14 @@ async def lifespan(app: FastAPI):
     # Register Kraken error → alert callback
     kraken_service.on_error(_kraken_error_alert)
 
+    # Initialize paper trading engine
+    await initialize_paper_trading_engine()
+
     asyncio.create_task(start_kraken_ws())
     yield
     # Shutdown
     await stop_kraken_ws()
+    await shutdown_paper_trading_engine()
     print("Shutting down CryptoTrader Backend...")
 
 
