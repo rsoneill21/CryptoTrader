@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-17 completed (16 of 17 in phase; 01-16 gap closure pending)
-**Status:** In progress (final system health gap closure outstanding)
-**Last activity:** 2026-02-05 - Completed 01-17-PLAN.md
-**Progress:** █████████░ 90% (27/30 plans complete; 16/17 in current phase)
+**Plan:** 01-18 ready (17 of 18 in phase; verification rerun pending)
+**Status:** In progress (awaiting final verification after system health fix)
+**Last activity:** 2026-02-05 - Completed 01-16-PLAN.md
+**Progress:** █████████░ 93% (28/30 plans complete; 17/18 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -42,6 +42,7 @@
 - Completed 01-14: Auth, export, AI, and system log APIs now use AsyncSession plus awaited select queries end-to-end
 - Completed 01-15: Market, strategies, trades, and system APIs now raise typed DatabaseException/ServiceUnavailableException with exc_info logging
 - Completed 01-17: Market analysis indicator/sentiment collectors no longer return degraded 200s; outages raise ServiceUnavailableException with regression tests locking the behavior
+- Completed 01-16: System health endpoints probe Kraken latency and raise ServiceUnavailableException so `/health` and `/connection-status` log outages with stack traces
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -152,6 +153,8 @@
 | Strategy suggestion failures -> ServiceUnavailableException | 2026-02-05 | Typed errors ensure UI/operators know AI services are unavailable instead of silently skipping suggestions | Clients can surface actionable outage messaging for AI-powered routes |
 | Backup service outages propagate via ServiceUnavailableException | 2026-02-05 | Infrastructure failures should share consistent structured payloads with Retry-After semantics | Monitoring can treat backup issues like other service outages and respond predictably |
 | Market analysis fails closed on collector outage | 2026-02-05 | Silent partial responses hid upstream outages and bypassed monitors | `/api/market/analysis` now raises 503 with dependency metadata when indicator, insight, or sentiment collectors fail |
+| System health endpoints fail closed on Kraken outages | 2026-02-05 | `/health` and `/connection-status` were swallowing exceptions and returning degraded payloads | Health endpoints now raise ServiceUnavailableException so monitors capture outages |
+| ServiceUnavailableException carries endpoint/dependency metadata | 2026-02-05 | Observability required structured payloads linking failures to specific dependencies | Centralized logging + clients now see which endpoint/dependency failed without parsing stack traces |
 
 ### Active Todos
 
@@ -300,8 +303,8 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 17:17-17:25 UTC
-**Stopped at:** Completed 01-17-PLAN.md (market analysis outage gap closure)
+**Last session:** 2026-02-05 19:20-19:25 UTC
+**Stopped at:** Completed 01-16-PLAN.md (system health gap closure)
 **Resume file:** None
 
 **For next session:**
