@@ -2,17 +2,19 @@
 Authentication API routes.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Response, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import Session
+from sqlalchemy import select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from core.settings import get_app_settings
-from db.database import get_db
+from db.database import get_async_db
 from db.models import User, Session as UserSession
 from core.security import (
     hash_password,
@@ -94,7 +96,7 @@ settings = get_app_settings()
 # --- Routes ---
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+async def register(request: RegisterRequest, db: AsyncSession = Depends(get_async_db)):
     """
     Register a new user account.
 
@@ -115,7 +117,9 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         )
 
     # Check if email already exists (avoid enumeration by returning generic response)
-    existing_user = db.query(User).filter(User.email == request.email).first()
+    stmt = select(User).where(User.email == request.email)
+    result = await db.execute(stmt)
+    existing_user = result.scalars().first()
     if existing_user:
         logger.warning("Registration attempted for existing email %s", request.email)
         if getattr(settings, "allow_email_enumeration", False) is True:
@@ -138,17 +142,18 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
     try:
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         logger.warning("Registration integrity error for %s (likely duplicate)", request.email)
         if getattr(settings, "allow_email_enumeration", False) is True:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered"
             )
-        existing_user = db.query(User).filter(User.email == request.email).first()
+        result = await db.execute(stmt)
+        existing_user = result.scalars().first()
         return RegisterResponse(
             id=existing_user.id if existing_user else 0,
             email=request.email,
@@ -167,7 +172,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 async def login(
     request: LoginRequest,
     response: Response,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> LoginResponse:
     """
     Authenticate user and create session.
@@ -184,7 +189,8 @@ async def login(
     await check_rate_limit(email_limit_key, 5, 60)
 
     # Find user by email
-    user = db.query(User).filter(User.email == request.email).first()
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalars().first()
     if not user:
         logger.warning("Login failed for %s: user not found", request.email)
         raise HTTPException(
@@ -229,7 +235,7 @@ async def login(
 
     # Update last login
     user.last_login = datetime.now(timezone.utc)
-    db.commit()
+    await db.commit()
 
     max_age = int((expires_at - datetime.now(timezone.utc)).total_seconds())
     response.set_cookie(
@@ -260,7 +266,7 @@ async def login(
 async def logout(
     response: Response,
     session: UserSession = Depends(get_current_session),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Logout current user.
@@ -269,8 +275,8 @@ async def logout(
     - Removes session from database
     """
     logger.info("Logout requested for user id=%s", session.user_id)
-    db.delete(session)
-    db.commit()
+    await db.execute(delete(UserSession).where(UserSession.id == session.id))
+    await db.commit()
     if response is not None:
         response.delete_cookie(
             settings.session_cookie_name,
@@ -302,7 +308,7 @@ async def get_session(user: User = Depends(get_current_user)):
 @router.post("/password/reset", response_model=MessageResponse)
 async def request_password_reset(
     request: PasswordResetRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Request password reset.
@@ -316,11 +322,12 @@ async def request_password_reset(
     logger.info("Password reset request received for email %s", request.email)
 
     # Find user by email
-    user = db.query(User).filter(User.email == request.email).first()
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalars().first()
 
     if user:
         # Generate reset token
-        token = password_reset_service.create_token(user.id, user.email, db=db)
+        token = await asyncio.to_thread(password_reset_service.create_token, user.id, user.email)
 
         # Send reset email
         await email_service.send_password_reset_email(
@@ -338,7 +345,7 @@ async def request_password_reset(
 @router.post("/password/reset/confirm", response_model=MessageResponse)
 async def confirm_password_reset(
     request: PasswordResetConfirmRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Confirm password reset with token.
@@ -349,7 +356,7 @@ async def confirm_password_reset(
     """
     logger.info("Confirming password reset token")
     # Validate token
-    reset_token = password_reset_service.validate_token(request.token, db=db)
+    reset_token = await asyncio.to_thread(password_reset_service.validate_token, request.token)
     if not reset_token:
         logger.warning("Password reset confirmation failed: invalid token")
         raise HTTPException(
@@ -366,7 +373,8 @@ async def confirm_password_reset(
         )
 
     # Find user
-    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    result = await db.execute(select(User).where(User.id == reset_token.user_id))
+    user = result.scalars().first()
     if not user:
         logger.warning("Password reset confirmation failed: user %s not found", reset_token.user_id)
         raise HTTPException(
@@ -378,12 +386,12 @@ async def confirm_password_reset(
     user.password_hash = hash_password(request.new_password)
 
     # Invalidate all existing sessions for this user
-    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    await db.execute(delete(UserSession).where(UserSession.user_id == user.id))
 
     # Mark token as used
-    password_reset_service.mark_used(request.token, db=db)
+    await asyncio.to_thread(password_reset_service.mark_used, request.token)
 
-    db.commit()
+    await db.commit()
     logger.info("Password reset completed for user %s", user.email)
 
     return MessageResponse(message="Password has been reset successfully. Please log in with your new password.")
@@ -392,7 +400,7 @@ async def confirm_password_reset(
 @router.post("/mfa/setup", response_model=MFASetupResponse)
 async def setup_mfa(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Setup MFA for current user.
@@ -405,7 +413,7 @@ async def setup_mfa(
     
     secret = generate_totp_secret()
     user.mfa_secret = secret
-    db.commit()
+    await db.commit()
     
     otpauth_url = get_totp_uri(secret, user.email)
     
@@ -420,7 +428,7 @@ async def setup_mfa(
 async def verify_mfa(
     request: MFAVerifyRequest,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Verify MFA code and enable MFA.
@@ -443,7 +451,7 @@ async def verify_mfa(
         )
         
     user.mfa_enabled = True
-    db.commit()
+    await db.commit()
     
     logger.info("MFA enabled for user %s", user.email)
     return MessageResponse(message="MFA enabled successfully")
