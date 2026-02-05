@@ -1,8 +1,5 @@
-"""
-Alerts API routes.
-"""
+"""Alerts API routes."""
 
-import base64
 from datetime import datetime
 from typing import List, Optional
 
@@ -13,46 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_async_db
 from db.models import Alert
+from core.pagination import (
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+    apply_cursor_pagination,
+    decode_cursor,
+    encode_cursor,
+)
 
 router = APIRouter()
 
-# Cursor pagination constants
-DEFAULT_PAGE_LIMIT = 25
-MAX_PAGE_LIMIT = 100
-
 ACTIONED_STATUSES = {"actioned", "dismissed"}
 VALID_SEVERITIES = {"info", "warning", "critical"}
-
-
-def encode_cursor(created_at: datetime, alert_id: int) -> str:
-    """
-    Encode cursor token from timestamp and ID.
-
-    Cursor format: base64(timestamp_iso|id)
-    Example: "MjAyNi0wMi0wNVQwMTowMDowMFp8MTIz" for timestamp + ID 123
-    """
-    cursor_str = f"{created_at.isoformat()}|{alert_id}"
-    return base64.urlsafe_b64encode(cursor_str.encode()).decode()
-
-
-def decode_cursor(cursor: str) -> tuple[datetime, int]:
-    """
-    Decode cursor token to timestamp and ID.
-
-    Returns:
-        (created_at, alert_id) tuple for query filtering
-
-    Raises:
-        ValueError: if cursor format is invalid
-    """
-    try:
-        decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
-        timestamp_str, id_str = decoded.split("|")
-        created_at = datetime.fromisoformat(timestamp_str)
-        alert_id = int(id_str)
-        return created_at, alert_id
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise ValueError(f"Invalid cursor format: {exc}")
 
 
 def _normalize_severity_value(value: Optional[str], *, default: Optional[str] = None) -> Optional[str]:
@@ -279,9 +248,8 @@ async def list_alerts(
                 detail=str(exc),
             )
 
-    # Decode cursor if provided
-    cursor_timestamp = None
-    cursor_id = None
+    cursor_timestamp: Optional[datetime] = None
+    cursor_id: Optional[int] = None
     if cursor:
         try:
             cursor_timestamp, cursor_id = decode_cursor(cursor)
@@ -315,14 +283,17 @@ async def list_alerts(
             query = query.where(Alert.created_at <= until)
 
         # Apply cursor filter (for pagination continuation)
-        if cursor_timestamp and cursor_id:
-            # Cursor filters: (created_at < cursor_timestamp) OR (created_at = cursor_timestamp AND id < cursor_id)
-            query = query.where(
-                or_(
-                    Alert.created_at < cursor_timestamp,
-                    (Alert.created_at == cursor_timestamp) & (Alert.id < cursor_id),
-                )
-            )
+        cursor_tuple = (
+            (cursor_timestamp, cursor_id)
+            if cursor_timestamp is not None and cursor_id is not None
+            else None
+        )
+        query, _, _ = apply_cursor_pagination(
+            query,
+            cursor_values=cursor_tuple,
+            timestamp_column=Alert.created_at,
+            id_column=Alert.id,
+        )
 
         # Order by created_at DESC, id DESC for stable sorting
         query = query.order_by(desc(Alert.created_at), desc(Alert.id))
