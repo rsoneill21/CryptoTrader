@@ -4,7 +4,7 @@ System API routes.
 
 import asyncio
 import logging
-from typing import Any, Optional, List
+from typing import Any, Dict, Optional, List
 
 from datetime import datetime
 from fastapi import APIRouter, Query, Depends, HTTPException, status
@@ -39,6 +39,73 @@ def _log_backup_event(
     if details:
         payload.update(details)
     log_system_error(level, "system.backups", message, payload)
+
+
+def _raise_dependency_unavailable(
+    *,
+    endpoint: str,
+    dependency: str,
+    operation: str,
+    exc: Exception,
+    log_event: Optional[str] = None,
+    extra_details: Optional[Dict[str, Any]] = None,
+    retry_after: int = 60,
+) -> None:
+    """Log a dependency outage and raise ServiceUnavailableException."""
+    context: Dict[str, Any] = {
+        "endpoint": endpoint,
+        "dependency": dependency,
+        "operation": operation,
+    }
+    if extra_details:
+        context.update(extra_details)
+    logger.error(
+        log_event or f"system.{endpoint}.{dependency}_unavailable",
+        extra=context,
+        exc_info=True,
+    )
+    detail_payload = {**context, "error": str(exc), "error_type": exc.__class__.__name__}
+    raise ServiceUnavailableException(
+        service=dependency,
+        retry_after=retry_after,
+        endpoint=endpoint,
+        dependency=dependency,
+        operation=operation,
+        details=detail_payload,
+    ) from exc
+
+
+async def _probe_kraken_latency(*, endpoint: str):
+    """Ping Kraken to calculate latency and raise typed errors on failure."""
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    operation = "kraken.get_server_time"
+    try:
+        await kraken_service.get_server_time()
+        elapsed_ms = (loop.time() - start_time) * 1000
+        return KrakenConnectionStatus(
+            authenticated=True,
+            reachable=True,
+            latency_ms=round(elapsed_ms, 1),
+        )
+    except KrakenAPIError as exc:
+        extra_details = {"kraken_errors": getattr(exc, "errors", [])}
+        _raise_dependency_unavailable(
+            endpoint=endpoint,
+            dependency="kraken",
+            operation=operation,
+            exc=exc,
+            log_event=f"system.{endpoint}.kraken_api_error",
+            extra_details=extra_details,
+        )
+    except Exception as exc:
+        _raise_dependency_unavailable(
+            endpoint=endpoint,
+            dependency="kraken",
+            operation=operation,
+            exc=exc,
+            log_event=f"system.{endpoint}.kraken_unexpected_error",
+        )
 
 
 # --- Request/Response Models ---
@@ -120,28 +187,15 @@ async def health_check():
     """
     Health check endpoint.
 
-    Returns status of all system services including live Kraken API connectivity.
+    Returns status of all system services including live Kraken API connectivity
+    and raises ServiceUnavailableException when dependencies fail.
     """
     kraken_status = "not_configured"
     kraken_details = None
 
     if kraken_service.is_authenticated:
-        kraken_details = KrakenConnectionStatus(
-            authenticated=True, reachable=False
-        )
-        try:
-            start = asyncio.get_event_loop().time()
-            await kraken_service.get_server_time()
-            elapsed = (asyncio.get_event_loop().time() - start) * 1000
-            kraken_status = "connected"
-            kraken_details.reachable = True
-            kraken_details.latency_ms = round(elapsed, 1)
-        except KrakenAPIError as exc:
-            kraken_status = "error"
-            kraken_details.error = str(exc)
-        except Exception as exc:
-            kraken_status = "unreachable"
-            kraken_details.error = str(exc)
+        kraken_details = await _probe_kraken_latency(endpoint="health")
+        kraken_status = "connected"
     else:
         kraken_details = KrakenConnectionStatus(
             authenticated=False, reachable=False,
@@ -162,31 +216,14 @@ async def health_check():
 
 @router.get("/connection-status", response_model=KrakenConnectionStatus)
 async def connection_status():
-    """Check Kraken API connection status independently."""
+    """Check Kraken API connection status independently, failing closed on outages."""
     if not kraken_service.is_authenticated:
         return KrakenConnectionStatus(
             authenticated=False, reachable=False,
             error="API credentials not configured",
         )
 
-    try:
-        start = asyncio.get_event_loop().time()
-        await kraken_service.get_server_time()
-        elapsed = (asyncio.get_event_loop().time() - start) * 1000
-        return KrakenConnectionStatus(
-            authenticated=True, reachable=True,
-            latency_ms=round(elapsed, 1),
-        )
-    except KrakenAPIError as exc:
-        return KrakenConnectionStatus(
-            authenticated=True, reachable=False,
-            error=str(exc),
-        )
-    except Exception as exc:
-        return KrakenConnectionStatus(
-            authenticated=True, reachable=False,
-            error=str(exc),
-        )
+    return await _probe_kraken_latency(endpoint="connection-status")
 
 
 @router.get("/logs", response_model=LogsResponse)
