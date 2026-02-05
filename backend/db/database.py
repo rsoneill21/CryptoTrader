@@ -362,6 +362,41 @@ def fetch_ai_decisions(
     return total, decisions
 
 
+async def fetch_ai_decisions_async(
+    session: AsyncSession,
+    strategy_id: Optional[int] = None,
+    since: Optional[datetime] = None,
+    limit: int = 50,
+) -> Tuple[int, List["AIDecision"]]:
+    """Return recent AI decisions, optionally filtered by strategy or time window."""
+
+    from db.models import AIDecision
+
+    # Count query
+    count_query = select(func.count()).select_from(AIDecision)
+    if strategy_id is not None:
+        count_query = count_query.where(AIDecision.related_strategy_id == strategy_id)
+    if since is not None:
+        count_query = count_query.where(AIDecision.timestamp >= since)
+
+    count_result = await session.execute(count_query)
+    total = count_result.scalar_one()
+
+    # Data query
+    query = select(AIDecision)
+    if strategy_id is not None:
+        query = query.where(AIDecision.related_strategy_id == strategy_id)
+    if since is not None:
+        query = query.where(AIDecision.timestamp >= since)
+
+    query = query.order_by(AIDecision.timestamp.desc()).limit(limit)
+    
+    result = await session.execute(query)
+    decisions = list(result.scalars().all())
+    
+    return total, decisions
+
+
 class DatabaseBackupResult(NamedTuple):
     """Metadata returned after creating a database backup."""
 

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from db.database import fetch_ai_decisions, get_db, get_async_db
+from db.database import fetch_ai_decisions_async, get_async_db
 from db.models import AIDecision
 from core.auth import get_current_session_ws
 from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC, Ticker
@@ -597,10 +597,10 @@ async def list_ai_decisions(
     limit: int = Query(
         50, ge=1, le=200, description="Maximum number of decision records to return"
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> DecisionLogResponse:
     """Return AI decision log entries for auditing paper trading choices."""
-    total, records = fetch_ai_decisions(
+    total, records = await fetch_ai_decisions_async(
         db,
         strategy_id=strategy_id,
         since=since,
@@ -624,7 +624,7 @@ async def market_stream(
     websocket: WebSocket,
     feed: str,
     symbol: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     WebSocket endpoint that streams Kraken updates to connected clients.

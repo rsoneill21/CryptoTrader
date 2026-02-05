@@ -7,9 +7,10 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Cookie, WebSocket
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import get_db
+from db.database import get_async_db
 from db.models import User, Session as UserSession
 from core.settings import get_app_settings
 
@@ -28,7 +29,7 @@ def _extract_bearer_token(value: Optional[str]) -> Optional[str]:
     return value.strip()
 
 
-def _get_session_by_token(token: Optional[str], db: Session) -> UserSession:
+async def _get_session_by_token(token: Optional[str], db: AsyncSession) -> UserSession:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -36,7 +37,9 @@ def _get_session_by_token(token: Optional[str], db: Session) -> UserSession:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    session = db.query(UserSession).filter(UserSession.token == token).first()
+    result = await db.execute(select(UserSession).where(UserSession.token == token))
+    session = result.scalars().first()
+    
     if not session:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -45,8 +48,8 @@ def _get_session_by_token(token: Optional[str], db: Session) -> UserSession:
         )
 
     if session.expires_at < datetime.utcnow():
-        db.delete(session)
-        db.commit()
+        await db.delete(session)
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired",
@@ -70,7 +73,7 @@ def _get_websocket_token(websocket: WebSocket) -> Optional[str]:
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     session_cookie: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> User:
     """
     Dependency to get the current authenticated user.
@@ -82,9 +85,11 @@ async def get_current_user(
     if not token and credentials:
         token = credentials.credentials
 
-    session = _get_session_by_token(token, db)
+    session = await _get_session_by_token(token, db)
 
-    user = db.query(User).filter(User.id == session.user_id).first()
+    result = await db.execute(select(User).where(User.id == session.user_id))
+    user = result.scalars().first()
+    
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -98,7 +103,7 @@ async def get_current_user(
 async def get_current_session(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     session_cookie: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> UserSession:
     """
     Dependency to get the current session.
@@ -109,19 +114,19 @@ async def get_current_session(
     if not token and credentials:
         token = credentials.credentials
 
-    return _get_session_by_token(token, db)
+    return await _get_session_by_token(token, db)
 
 
-async def get_current_session_ws(websocket: WebSocket, db: Session) -> UserSession:
+async def get_current_session_ws(websocket: WebSocket, db: AsyncSession) -> UserSession:
     """Validate a WebSocket connection against the current session token."""
     token = _get_websocket_token(websocket)
-    return _get_session_by_token(token, db)
+    return await _get_session_by_token(token, db)
 
 
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     session_cookie: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> Optional[User]:
     """
     Dependency to optionally get the current user.
