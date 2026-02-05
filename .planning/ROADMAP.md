@@ -37,12 +37,12 @@ Plans:
 - [x] 01-09-PLAN.md — Structured exception handling with exc_info logging
 - [x] 01-10-PLAN.md — Fix trades POST endpoints to load orders relationship
 - [x] 01-11-PLAN.md — Add paper trading session reset/archive API endpoints
-- [ ] 01-12-PLAN.md — Fix cursor pagination for DESC ordering
-- [ ] 01-13-PLAN.md — Fix auth rate limiter return value assumption
+- [x] 01-12-PLAN.md — Fix cursor pagination for DESC ordering
+- [x] 01-13-PLAN.md — Fix auth rate limiter return value assumption
 - [ ] 01-14-PLAN.md — AsyncSession migration for auth/export/ai routes
 - [ ] 01-15-PLAN.md — Replace bare except blocks with typed exceptions
 
-**Plans:** 15 plans (11 complete, 4 gap-closure plans pending)
+**Plans:** 15 plans (13 complete, 2 gap-closure plans pending)
 
 ### Phase 2: Autonomous Agent Loop
 **Goal:** AI agents run continuously on schedule and coordinate via message queue

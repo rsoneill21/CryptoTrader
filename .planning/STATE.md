@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-11 completed (11 of 15 in phase)
+**Plan:** 01-13 completed (13 of 15 in phase)
 **Status:** In progress (gap-closure follow-ups)
-**Last activity:** 2026-02-05 - Completed 01-11-PLAN.md
-**Progress:** ███████░░░ 73% (22/30 plans complete; 11/15 in current phase)
+**Last activity:** 2026-02-05 - Completed 01-13-PLAN.md
+**Progress:** ████████░░ 80% (24/30 plans complete; 13/15 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -37,6 +37,8 @@
 - Completed 01-09: Structured exception handling and exc_info logging across backend APIs
 - Completed 01-10: Trade creation endpoints reload orders before serialization (fixes POST /api/trades 500s)
 - Completed 01-11: Paper trading session reset/archive endpoints exposed via FastAPI
+- Completed 01-12: Cursor pagination helper enforces DESC comparisons with optional ASC support
+- Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -49,7 +51,7 @@
 
 **What doesn't work:**
 - Agents don't run autonomously on schedule
-- Rate limiter fails open when Redis down
+- ~~Rate limiter fails open when Redis down~~ - FIXED in 01-13 (login integration honors exceptions)
 - Dashboard shows placeholder data
 - AI chat doesn't reference trading state
 
@@ -90,6 +92,10 @@
 - ✓ Strategies list endpoint now exposes `StrategyListResponse` with cursor + limit data
 - ✓ Trades API gains a paginated history endpoint ordered by `entry_time` and `id`
 
+**Fixed in 01-13:**
+- ✓ Login endpoint simply awaits `check_rate_limit`, letting RateLimitException/ServiceUnavailableException bubble with Retry-After headers
+- ✓ New pytest coverage validates login success vs throttled responses and Redis outage fail-closed behavior
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -120,7 +126,9 @@
 | Entry_time anchors trade pagination | 2026-02-05 | Keeps cursor ordering tied to real execution timestamp without new schema | Frontend + agents can consume deterministic trade history tokens |
 | DatabaseException for API SQL errors | 2026-02-05 | Encapsulate SQLAlchemyError details without leaking raw traces | Clients receive consistent structured error payloads across backend APIs |
 | ServiceUnavailable for GitHub imports | 2026-02-05 | Surface upstream dependency failures with safe messaging | Makes strategy import outages observable without exposing stack traces |
+| Login rate limiter trusts exceptions | 2026-02-05 | Avoids duplicate boolean checks so RateLimitException/ServiceUnavailableException drive responses | Legitimate logins proceed while Redis outages fail closed with Retry-After headers |
 | Paper trading reset requires confirmation with archival option | 2026-02-05 | Prevents accidental destruction of active sessions when hit via API | Maintenance endpoints stay safe for UI/agent callers |
+| Cursor helper directional flag | 2026-02-05 | Shared pagination helper now accepts a `descending` flag to support both orderings | Any list endpoint can reuse helper without duplicating comparisons |
 
 ### Active Todos
 
@@ -145,7 +153,16 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-11):**
+**2026-02-05 (latest - 01-13):**
+- Completed 01-13: Auth login rate limiter now trusts exception-based `check_rate_limit`; regression tests cover login success, throttling, and Redis outages
+- Duration: 4 minutes (2 tasks, 2 commits)
+
+**2026-02-05 (01-12):**
+- Completed 01-12: Cursor pagination helper now enforces DESC comparisons by default and exposes ASC fallback
+- Added docstring + direction flag so alerts, strategies, trades, or future lists keep stable paging semantics
+- Duration: 3 minutes (1 task, 1 commit)
+
+**2026-02-05 (01-11):**
 - Completed 01-11: Paper trading reset/archive APIs exposed to FastAPI callers
 - Reset endpoint enforces confirmation + optional archival; archive endpoint returns timestamped confirmation payload
 - Duration: ~2 minutes (2 tasks, 2 commits)
@@ -160,7 +177,7 @@ None currently.
 - Added DatabaseException/ServiceUnavailableException responses plus `exc_info=True` logging for every failure path
 - Duration: 5 minutes (3 tasks, 3 commits)
 
-**2026-02-05 (latest - 01-08):**
+**2026-02-05 (01-08):**
 - Completed 01-08: Shared pagination helper plus cursor-based strategies/trades listings
 - Extracted encode/decode helpers + `apply_cursor_pagination` into `backend/core/pagination.py`
 - Strategies endpoint now emits `StrategyListResponse` with `next_cursor` and `has_more`
@@ -235,7 +252,7 @@ None currently.
 - ~~Sync DB queries in trades API (INFRA-03)~~ - FIXED in 01-01 (AsyncSession for all trades endpoints)
 - ~~Paper trading state not persisted (INFRA-01)~~ - FIXED in 01-03 (State persists to DB with archival)
 - ~~No pagination (INFRA-06)~~ - PARTIALLY FIXED in 01-04 (alerts have cursor pagination; other endpoints pending)
-- Rate limiting fails open (INFRA-02) - PLANNED (01-02)
+- ~~Rate limiting fails open (INFRA-02)~~ - FIXED in 01-13 (login integration honors exception-based limiter)
 - Bare exception handling (INFRA-04) - PLANNED (01-02 or separate plan)
 - ~~Sync DB in some endpoints (create_alert, get_alert, update_alert)~~ - FIXED in 01-07 (alerts/market/strategies/risk now async)
 - Partial fills not handled (POS-05)
@@ -244,14 +261,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 16:42-16:44 UTC
-**Stopped at:** Completed 01-11-PLAN.md (paper trading session reset/archive APIs)
+**Last session:** 2026-02-05 16:42-16:46 UTC
+**Stopped at:** Completed 01-13-PLAN.md (auth login rate limiter exception integration)
 **Resume file:** None
 
 **For next session:**
-1. Queue up 01-12-PLAN.md (cursor DESC fix) or revisit optional 01-02 if needed
-2. Confirm transition plan for Phase 2 (autonomous agents) using new structured error foundation
-3. Carry forward exc_info logging requirements for every new backend endpoint
+1. Queue up 01-14-PLAN.md (AsyncSession migration for auth/export/ai routes)
+2. Prep 01-15 gap cleanup (replace bare except blocks) before transitioning to Phase 2
+3. Carry forward exc_info logging + exception-based rate limiting requirements for every backend endpoint
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -264,6 +281,7 @@ None currently.
 - Shared helper `backend/core/pagination.py` exposes encode/decode/apply_cursor_pagination for reuse
 - Fetch limit+1 rows to detect has_more flag without COUNT(*) query
 - Order by composite key (timestamp DESC, id DESC) for deterministic pagination
+- `apply_cursor_pagination` now accepts `descending` flag (default True); pass False for ASC lists to reuse helper safely
 - Paper trading state persists automatically - sessions survive restart
 - PaperTradingEngine has load_state_from_db, persist_state, archive_current_session, reset_to_clean_state
 - State persists after each trade execution and periodically during price updates
@@ -279,7 +297,7 @@ None currently.
 - ~~Paper trading schema: New tables or extend existing?~~ - COMPLETE: New paper_trading_states table with JSON state column (01-03)
 - ~~State serialization: incremental vs snapshot?~~ - COMPLETE: Complete snapshot for atomic restore (01-03)
 - ~~Persistence timing: real-time vs periodic?~~ - COMPLETE: After each trade + periodic throttling on price updates (01-03)
-- Rate limiter fail-closed: Raise exception or return 503? - DEFERRED to 01-02
+- ~~Rate limiter fail-closed: Raise exception or return 503?~~ - COMPLETE: check_rate_limit raises typed exceptions consumed by login (01-13)
 
 ---
 *State initialized: 2026-02-04*
