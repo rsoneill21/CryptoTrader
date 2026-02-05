@@ -301,3 +301,16 @@ class SystemLog(Base):
     message = Column(Text, nullable=False)
     details_json = Column(JSON, nullable=True)
     timestamp = Column(DateTime, server_default=func.now())
+
+
+class PaperTradingState(Base):
+    """Paper trading session state persistence."""
+    __tablename__ = "paper_trading_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(100), nullable=False, unique=True, index=True)
+    state_json = Column(JSON, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    archived_at = Column(DateTime, nullable=True)
