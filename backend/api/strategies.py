@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import get_current_user
 from db.database import get_async_db
@@ -29,6 +30,7 @@ from agents.sentiment_agent import SentimentSummary, sentiment_agent
 from services.market_data import market_data_service
 from services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
 from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
+from core.exceptions import DatabaseException, ServiceUnavailableException
 from core.pagination import (
     DEFAULT_PAGE_LIMIT,
     MAX_PAGE_LIMIT,
@@ -487,7 +489,7 @@ async def _build_strategy_suggestion(
         )
         proposal = await strategy_ai_service.propose_strategy(request_payload)
     except Exception as exc:
-        logger.warning("Strategy AI suggestion failed for %s: %s", symbol, exc)
+        logger.warning("Strategy AI suggestion failed for %s", symbol, exc_info=True)
         ai_error = str(exc)
 
     return StrategySuggestionDetail(
@@ -519,7 +521,7 @@ async def suggest_strategies(
     try:
         risk_context, risk_recommendation = await risk_service.context_and_heuristic()
     except Exception as exc:
-        logger.warning("Failed to collect risk context for suggestions: %s", exc)
+        logger.warning("Failed to collect risk context for suggestions", exc_info=True)
 
     for raw_symbol in payload.symbols:
         normalized_symbol = _normalize_trading_pair(raw_symbol, parameter="symbol")
@@ -535,7 +537,7 @@ async def suggest_strategies(
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("Failed to generate strategy suggestion for %s: %s", normalized_symbol, exc)
+            logger.error("Failed to generate strategy suggestion for %s", normalized_symbol, exc_info=True)
 
     return StrategySuggestionResponse(
         generated_at=datetime.utcnow(),
@@ -595,14 +597,12 @@ async def list_strategies(
         query = query.limit(limit + 1)
         result = await db.execute(query)
         strategies = list(result.scalars().all())
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive DB guard
-        logger.error("Strategy list fetch failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to retrieve strategies",
-        )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive DB guard
+        logger.error("Strategy list fetch failed", exc_info=True)
+        raise DatabaseException(
+            message="Unable to retrieve strategies",
+            details={"operation": "list_strategies"},
+        ) from exc
 
     has_more = len(strategies) > limit
     if has_more:
@@ -690,12 +690,12 @@ async def compare_strategies(
                 )
             )
 
-    except Exception as exc:  # pragma: no cover - defensive guard
-        logger.error("Strategy comparison fetch failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to build strategy comparison data",
-        )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        logger.error("Strategy comparison fetch failed", exc_info=True)
+        raise DatabaseException(
+            message="Unable to build strategy comparison data",
+            details={"operation": "compare_strategies"},
+        ) from exc
 
     return StrategyComparisonResponse(
         strategies=comparisons,
@@ -713,11 +713,11 @@ async def import_from_github(
     try:
         report = await github_import_service.import_strategies(payload.github_url)
     except Exception as exc:
-        logger.error("GitHub import service failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc)
-        )
+        logger.error("GitHub import service failed", exc_info=True)
+        raise ServiceUnavailableException(
+            service="github_import",
+            details={"error": str(exc)},
+        ) from exc
 
     imported_count = 0
     for candidate in report.candidates:
@@ -733,8 +733,9 @@ async def import_from_github(
             )
             db.add(strategy)
             imported_count += 1
-        except Exception as exc:
-            logger.warning("Failed to save imported strategy %s: %s", candidate.path, exc)
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            logger.error("Failed to persist imported strategy %s", candidate.path, exc_info=True)
 
     if imported_count > 0:
         await db.commit()
@@ -756,12 +757,12 @@ async def get_strategy(
     """Return a single strategy by id."""
     try:
         strategy = await db.get(Strategy, strategy_id)
-    except Exception as exc:  # pragma: no cover
-        logger.error("Failed loading strategy %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load strategy",
-        )
+    except SQLAlchemyError as exc:  # pragma: no cover
+        logger.error("Failed loading strategy %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "get_strategy", "strategy_id": strategy_id},
+        ) from exc
 
     if not strategy:
         raise HTTPException(
@@ -782,12 +783,12 @@ async def promote_strategy(
     """Mark a strategy as live after explicit confirmation."""
     try:
         strategy = await db.get(Strategy, strategy_id)
-    except Exception as exc:
-        logger.error("Failed loading strategy for promotion %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load strategy",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed loading strategy for promotion %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "promote_strategy_load", "strategy_id": strategy_id},
+        ) from exc
 
     if not strategy:
         raise HTTPException(
@@ -814,13 +815,13 @@ async def promote_strategy(
     try:
         await db.commit()
         await db.refresh(strategy)
-    except Exception as exc:  # pragma: no cover
+    except SQLAlchemyError as exc:  # pragma: no cover
         await db.rollback()
-        logger.error("Failed to persist strategy promotion %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to promote strategy",
-        )
+        logger.error("Failed to persist strategy promotion %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to promote strategy",
+            details={"operation": "promote_strategy", "strategy_id": strategy_id},
+        ) from exc
 
     return _serialize_strategy(strategy)
 
@@ -847,13 +848,13 @@ async def create_strategy(
         db.add(strategy)
         await db.commit()
         await db.refresh(strategy)
-    except Exception as exc:  # pragma: no cover
+    except SQLAlchemyError as exc:  # pragma: no cover
         await db.rollback()
-        logger.error("Failed to create strategy %s: %s", payload.name, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to create strategy",
-        )
+        logger.error("Failed to create strategy %s", payload.name, exc_info=True)
+        raise DatabaseException(
+            message="Unable to create strategy",
+            details={"operation": "create_strategy", "strategy_name": payload.name},
+        ) from exc
 
     return _serialize_strategy(strategy)
 
@@ -868,12 +869,12 @@ async def update_strategy(
     """Modify a strategy definition."""
     try:
         strategy = await db.get(Strategy, strategy_id)
-    except Exception as exc:
-        logger.error("Failed loading strategy for update %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load strategy",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed loading strategy for update %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "update_strategy_load", "strategy_id": strategy_id},
+        ) from exc
 
     if not strategy:
         raise HTTPException(
@@ -912,13 +913,13 @@ async def update_strategy(
     try:
         await db.commit()
         await db.refresh(strategy)
-    except Exception as exc:  # pragma: no cover
+    except SQLAlchemyError as exc:  # pragma: no cover
         await db.rollback()
-        logger.error("Failed to persist strategy update %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to update strategy",
-        )
+        logger.error("Failed to persist strategy update %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to update strategy",
+            details={"operation": "update_strategy", "strategy_id": strategy_id},
+        ) from exc
 
     return _serialize_strategy(strategy)
 
@@ -932,12 +933,12 @@ async def delete_strategy(
     """Remove a strategy from the catalog."""
     try:
         strategy = await db.get(Strategy, strategy_id)
-    except Exception as exc:
-        logger.error("Failed to load strategy for deletion %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load strategy",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to load strategy for deletion %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "delete_strategy_load", "strategy_id": strategy_id},
+        ) from exc
 
     if not strategy:
         raise HTTPException(
@@ -948,13 +949,13 @@ async def delete_strategy(
     try:
         await db.delete(strategy)
         await db.commit()
-    except Exception as exc:  # pragma: no cover
+    except SQLAlchemyError as exc:  # pragma: no cover
         await db.rollback()
-        logger.error("Failed to delete strategy %s: %s", strategy_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to delete strategy",
-        )
+        logger.error("Failed to delete strategy %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to delete strategy",
+            details={"operation": "delete_strategy", "strategy_id": strategy_id},
+        ) from exc
 
 
 @router.post("/{strategy_id}/simulate")
@@ -965,7 +966,14 @@ async def simulate_strategy_signal(
     db: AsyncSession = Depends(get_async_db),
 ):
     """Execute a paper trading signal for a strategy."""
-    strategy = await db.get(Strategy, strategy_id)
+    try:
+        strategy = await db.get(Strategy, strategy_id)
+    except SQLAlchemyError as exc:
+        logger.error("Failed to load strategy %s for simulation", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "simulate_strategy_load", "strategy_id": strategy_id},
+        ) from exc
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
@@ -991,9 +999,16 @@ async def simulate_strategy_signal(
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        await db.rollback()
+        logger.error("Failed to persist decision for strategy %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to persist strategy simulation",
+            details={"operation": "simulate_strategy_commit", "strategy_id": strategy_id},
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive guard
         await db.rollback()
-        logger.error("Failed to simulate strategy %s: %s", strategy_id, exc)
+        logger.error("Failed to simulate strategy %s", strategy_id, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to process strategy simulation",

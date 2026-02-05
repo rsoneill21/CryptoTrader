@@ -1,5 +1,6 @@
 """Risk management API routes."""
 
+import logging
 from datetime import datetime
 import re
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from db.models import RiskSettings
 from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
 router = APIRouter()
+logger = logging.getLogger("cryptotrader.risk")
 
 
 class RiskSettingsResponse(BaseModel):
@@ -369,6 +371,7 @@ async def update_notification_settings(
     try:
         updated = store.update_notifications(**update_payload)
     except Exception as exc:
+        logger.error("Unable to persist notification preferences", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to persist notification preferences.",
@@ -423,6 +426,7 @@ async def update_api_keys(payload: APIKeyUpdateRequest) -> APIKeyListResponse:
     try:
         store.apply_api_key_updates(updates)
     except Exception as exc:
+        logger.error("Unable to persist API key changes", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to persist API key changes.",
