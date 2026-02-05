@@ -20,9 +20,9 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-08 completed (8 of 9 in phase)
-**Status:** In progress
-**Progress:** ████████░░ 80% (0/11 phases complete, 8/9 plans in current phase)
+**Plan:** 01-09 completed (9 of 9 in phase)
+**Status:** Phase complete
+**Progress:** ██████████ 100% (1/11 phases complete, 9/9 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -33,7 +33,7 @@
 - Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
 - Completed 01-07: AsyncSession migration for alerts, market, strategies, and risk APIs
 - Completed 01-08: Shared pagination helper plus cursor-based strategies & trades listings
-- Next: Execute 01-09 (final infrastructure hardening task in phase)
+- Completed 01-09: Structured exception handling and exc_info logging across backend APIs
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -115,6 +115,8 @@
 | Relative imports from backend/ | 2026-02-05 | Use 'from core.X', 'from api.X' pattern when running from backend/ directory; no backend. prefix | All backend code uses consistent import pattern, eliminates ModuleNotFoundError |
 | pybreaker for circuit breakers | 2026-02-05 | Install pybreaker>=1.0.0 for CircuitBreaker pattern in rate limiter | Enables fail-closed behavior when Redis unavailable |
 | Entry_time anchors trade pagination | 2026-02-05 | Keeps cursor ordering tied to real execution timestamp without new schema | Frontend + agents can consume deterministic trade history tokens |
+| DatabaseException for API SQL errors | 2026-02-05 | Encapsulate SQLAlchemyError details without leaking raw traces | Clients receive consistent structured error payloads across backend APIs |
+| ServiceUnavailable for GitHub imports | 2026-02-05 | Surface upstream dependency failures with safe messaging | Makes strategy import outages observable without exposing stack traces |
 
 ### Active Todos
 
@@ -138,6 +140,11 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-05 (latest - 01-09):**
+- Completed 01-09: Structured exception handling across alerts, market, strategies, risk, AI chat, and export endpoints
+- Added DatabaseException/ServiceUnavailableException responses plus `exc_info=True` logging for every failure path
+- Duration: 5 minutes (3 tasks, 3 commits)
 
 **2026-02-05 (latest - 01-08):**
 - Completed 01-08: Shared pagination helper plus cursor-based strategies/trades listings
@@ -223,15 +230,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 12:20-12:25 UTC
-**Stopped at:** Completed 01-08-PLAN.md (shared pagination utilities + strategies/trades listings)
+**Last session:** 2026-02-05 12:28-12:34 UTC
+**Stopped at:** Completed 01-09-PLAN.md (structured exception handling across backend APIs)
 **Resume file:** None
 
 **For next session:**
-1. Read this STATE.md for current position
-2. Phase 1 now has 8/9 plans complete (01-01 through 01-08, except optional 01-02)
-3. 01-02 (rate limiting) still optional; decide whether to run it before or after the final plan
-4. Next planned execution target: 01-09-PLAN.md (wrap up infrastructure hardening)
+1. Review optional 01-02 (rate limiter fail-closed) to decide if it should run despite phase completion
+2. Confirm transition plan for Phase 2 (autonomous agents) using new structured error foundation
+3. Carry forward exc_info logging requirements for every new backend endpoint
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -250,6 +256,7 @@ None currently.
 - initialize_paper_trading_engine/shutdown_paper_trading_engine hooks need wiring to FastAPI lifecycle
 - aiosqlite installed for development; production needs asyncpg
 - Sync SessionLocal still available for legacy utilities (logging, backups)
+- All API endpoints now log errors with `exc_info=True` and should raise DatabaseException/ServiceUnavailableException for structured responses
 
 **Questions resolved:**
 - ~~Async DB migration: AsyncSession (big change) or asyncio.to_thread (wrapper)?~~ - COMPLETE: AsyncSession with aiosqlite (01-01)
