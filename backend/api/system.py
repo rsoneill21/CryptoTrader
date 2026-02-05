@@ -23,6 +23,7 @@ from db.database import (
 )
 from db.models import SystemLog, User
 from services.kraken import kraken_service, KrakenAPIError
+from core.exceptions import ServiceUnavailableException
 
 router = APIRouter()
 logger = logging.getLogger("cryptotrader.system")
@@ -276,7 +277,7 @@ async def create_database_backup(user: User = Depends(get_current_user)):
             retention_days=settings.database_backup_retention_days,
         )
     except ValueError as exc:
-        logger.error("Invalid backup configuration: %s", exc)
+        logger.error("Invalid backup configuration", exc_info=True)
         _log_backup_event(
             "warning",
             "create_backup",
@@ -284,8 +285,8 @@ async def create_database_backup(user: User = Depends(get_current_user)):
             {"user_id": user.id, "error": str(exc)},
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except FileNotFoundError:
-        logger.error("Database file missing when creating backup")
+    except FileNotFoundError as exc:
+        logger.error("Database file missing when creating backup", exc_info=True)
         _log_backup_event(
             "error",
             "create_backup",
@@ -296,7 +297,7 @@ async def create_database_backup(user: User = Depends(get_current_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database file not available for backup",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Unexpected error while creating database backup")
         _log_backup_event(
             "error",
@@ -304,10 +305,10 @@ async def create_database_backup(user: User = Depends(get_current_user)):
             "Unexpected error while creating database backup",
             {"user_id": user.id},
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create database backup",
-        )
+        raise ServiceUnavailableException(
+            service="database_backup",
+            details={"operation": "create_backup"},
+        ) from exc
 
     return DatabaseBackupResponse(
         file_name=result.file_name,
@@ -341,7 +342,7 @@ async def list_database_backups(user: User = Depends(get_current_user)):
             prefix=settings.database_backup_prefix,
         )
     except ValueError as exc:
-        logger.error("Invalid backup configuration: %s", exc)
+        logger.error("Invalid backup configuration", exc_info=True)
         _log_backup_event(
             "warning",
             "list_backups",
@@ -352,7 +353,7 @@ async def list_database_backups(user: User = Depends(get_current_user)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Unexpected error while listing database backups")
         _log_backup_event(
             "error",
@@ -360,10 +361,10 @@ async def list_database_backups(user: User = Depends(get_current_user)):
             "Unexpected error while listing database backups",
             {"user_id": user.id},
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to read database backups",
-        )
+        raise ServiceUnavailableException(
+            service="database_backup",
+            details={"operation": "list_backups"},
+        ) from exc
 
     entries = [
         DatabaseBackupEntry(
@@ -416,7 +417,7 @@ async def restore_database_backup(
             file_name=payload.file_name,
         )
     except ValueError as exc:
-        logger.error("Invalid restore request: %s", exc)
+        logger.error("Invalid restore request", exc_info=True)
         _log_backup_event(
             "warning",
             "restore_backup",
@@ -427,8 +428,8 @@ async def restore_database_backup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
-    except FileNotFoundError:
-        logger.warning("Requested backup missing: %s", payload.file_name)
+    except FileNotFoundError as exc:
+        logger.warning("Requested backup missing: %s", payload.file_name, exc_info=True)
         _log_backup_event(
             "error",
             "restore_backup",
@@ -439,7 +440,7 @@ async def restore_database_backup(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Backup file not found",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Unexpected error while restoring database backup")
         _log_backup_event(
             "error",
@@ -447,10 +448,10 @@ async def restore_database_backup(
             "Unexpected error while restoring database backup",
             {"user_id": user.id, "file_name": payload.file_name},
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to restore database backup",
-        )
+        raise ServiceUnavailableException(
+            service="database_backup",
+            details={"operation": "restore_backup"},
+        ) from exc
 
     return DatabaseRestoreResponse(
         file_name=result.file_name,
