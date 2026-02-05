@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from backend.core.exceptions import BaseAppException
 from db.database import log_system_error, sanitize_log_details
 
 
@@ -165,6 +166,32 @@ def build_validation_error_payload(exc: RequestValidationError) -> APIErrorRespo
     )
 
 
+async def base_app_exception_handler(request: Request, exc: BaseAppException) -> JSONResponse:
+    """
+    FastAPI exception handler for BaseAppException instances.
+
+    Handles typed application exceptions (RateLimitException, ServiceUnavailableException,
+    DatabaseException) with structured payloads and optional headers (e.g., Retry-After).
+    """
+    payload = APIErrorResponse(
+        error=APIErrorDetail(
+            code=exc.error_code,
+            message=exc.message,
+            details=exc.details,
+        )
+    )
+
+    # Use existing logging infrastructure
+    _log_api_error(request, exc.status_code, payload, exc)
+
+    # Include headers from exception (e.g., Retry-After)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=payload.model_dump(),
+        headers=exc.headers if exc.headers else None,
+    )
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """FastAPI exception handler for HTTPException instances."""
 
@@ -194,8 +221,18 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Register the structured error handlers on the FastAPI app."""
+    """
+    Register the structured error handlers on the FastAPI app.
 
+    Handler priority (most specific to least specific):
+    1. BaseAppException (typed exceptions: RateLimitException, etc.)
+    2. HTTPException (generic FastAPI HTTP errors)
+    3. RequestValidationError (Pydantic validation failures)
+    4. Exception (catch-all for unexpected errors)
+    """
+    # Register BaseAppException BEFORE HTTPException since it inherits from HTTPException
+    # FastAPI checks handlers in registration order, so more specific must come first
+    app.add_exception_handler(BaseAppException, base_app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
