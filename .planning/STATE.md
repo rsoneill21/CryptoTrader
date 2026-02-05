@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-15 completed (15 of 15 in phase)
-**Status:** Phase complete (ready to transition to Phase 2)
-**Last activity:** 2026-02-05 - Completed 01-15-PLAN.md
-**Progress:** █████████░ 87% (26/30 plans complete; 15/15 in current phase)
+**Plan:** 01-17 completed (16 of 17 in phase; 01-16 gap closure pending)
+**Status:** In progress (final system health gap closure outstanding)
+**Last activity:** 2026-02-05 - Completed 01-17-PLAN.md
+**Progress:** █████████░ 90% (27/30 plans complete; 16/17 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -41,6 +41,7 @@
 - Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
 - Completed 01-14: Auth, export, AI, and system log APIs now use AsyncSession plus awaited select queries end-to-end
 - Completed 01-15: Market, strategies, trades, and system APIs now raise typed DatabaseException/ServiceUnavailableException with exc_info logging
+- Completed 01-17: Market analysis indicator/sentiment collectors no longer return degraded 200s; outages raise ServiceUnavailableException with regression tests locking the behavior
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -109,6 +110,11 @@
 - ✓ Strategies and trades APIs replaced bare `except Exception` blocks with DatabaseException/ServiceUnavailableException plus contextual details and exc_info logging
 - ✓ System backup create/list/restore paths now propagate ServiceUnavailableException for outages, aligning infrastructure monitoring with other services
 
+**Fixed in 01-17:**
+- ✓ Indicator, insight, and sentiment collectors now log stack traces and raise `ServiceUnavailableException` so `/api/market/analysis` never returns silent partial responses
+- ✓ Regression tests cover each dependency failure to guarantee typed errors surface in CI
+- ✓ Backend requirements enumerate `aiosqlite` so the async SQLite driver installs for dev environments and pytest
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -145,6 +151,7 @@
 | Password reset helper offloaded via asyncio.to_thread | 2026-02-05 | Avoided rewriting the sync password-reset service mid-plan while ensuring async endpoints stay non-blocking | Allows incremental migration of legacy helpers without stalling auth responses |
 | Strategy suggestion failures -> ServiceUnavailableException | 2026-02-05 | Typed errors ensure UI/operators know AI services are unavailable instead of silently skipping suggestions | Clients can surface actionable outage messaging for AI-powered routes |
 | Backup service outages propagate via ServiceUnavailableException | 2026-02-05 | Infrastructure failures should share consistent structured payloads with Retry-After semantics | Monitoring can treat backup issues like other service outages and respond predictably |
+| Market analysis fails closed on collector outage | 2026-02-05 | Silent partial responses hid upstream outages and bypassed monitors | `/api/market/analysis` now raises 503 with dependency metadata when indicator, insight, or sentiment collectors fail |
 
 ### Active Todos
 
@@ -160,7 +167,7 @@
 - [ ] Add composite index on alerts (created_at, id) for pagination performance
 - [x] Wire paper trading engine lifecycle hooks into FastAPI startup/shutdown
 - [x] ~~Install pybreaker in requirements.txt~~ - Completed in 01-05
-- [ ] Install aiosqlite in production requirements.txt
+- [x] ~~Install aiosqlite in production requirements.txt~~ - Completed in 01-17
 - [ ] Document asyncpg migration for production PostgreSQL
 
 ### Blockers
@@ -169,7 +176,12 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-15):**
+**2026-02-05 (latest - 01-17):**
+- Completed 01-17: Market analysis indicator, insight, and sentiment collectors now raise ServiceUnavailableException with logger.exception traces instead of returning degraded data silently
+- Added pytest coverage to lock the failure contract and pinned `aiosqlite` in backend requirements so async sqlite installs for dev/test
+- Duration: 7 minutes (2 tasks, 2 commits)
+
+**2026-02-05 (01-15):**
 - Completed 01-15: Market/strategies/trades/system APIs now raise DatabaseException/ServiceUnavailableException instead of bare HTTPException paths
 - exc_info logging standardized across every catch block so stack traces reach logs even when exceptions are swallowed for best-effort flows
 - Duration: 6 minutes (4 tasks, 4 commits)
@@ -288,8 +300,8 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 17:02-17:08 UTC
-**Stopped at:** Completed 01-15-PLAN.md (typed exception and exc_info gap closure)
+**Last session:** 2026-02-05 17:17-17:25 UTC
+**Stopped at:** Completed 01-17-PLAN.md (market analysis outage gap closure)
 **Resume file:** None
 
 **For next session:**

@@ -41,8 +41,10 @@ Plans:
 - [x] 01-13-PLAN.md — Fix auth rate limiter return value assumption
 - [x] 01-14-PLAN.md — AsyncSession migration for auth/export/ai routes
 - [x] 01-15-PLAN.md — Replace bare except blocks with typed exceptions
+- [ ] 01-16-PLAN.md — System health endpoints raise typed errors
+- [x] 01-17-PLAN.md — Market analysis surfaces upstream outages
 
-**Plans:** 15 plans (15 complete; Phase 1 ready to close)
+**Plans:** 17 plans (16 complete, 1 gap-closure plan pending)
 
 ### Phase 2: Autonomous Agent Loop
 **Goal:** AI agents run continuously on schedule and coordinate via message queue
