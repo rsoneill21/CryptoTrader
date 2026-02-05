@@ -6,11 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, conint, confloat, model_validator, validator
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.settings import ThemeMode, get_user_settings_store
-from db.database import get_db
+from db.database import get_async_db
 from db.models import RiskSettings
 from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
@@ -185,21 +186,23 @@ class RiskAIContextResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-def _get_latest_settings(db: Session) -> RiskSettings:
+async def _get_latest_settings(db: AsyncSession) -> RiskSettings:
     """Return the most recently written risk settings record, creating one if necessary."""
 
-    settings = (
-        db.query(RiskSettings)
-        .order_by(RiskSettings.updated_at.desc())
-        .first()
-    )
+    query = select(RiskSettings).order_by(RiskSettings.updated_at.desc()).limit(1)
+    result = await db.execute(query)
+    settings = result.scalars().first()
     if settings:
         return settings
 
     settings = RiskSettings()
     db.add(settings)
-    db.commit()
-    db.refresh(settings)
+    try:
+        await db.commit()
+        await db.refresh(settings)
+    except SQLAlchemyError:
+        await db.rollback()
+        raise
     return settings
 
 
@@ -236,11 +239,11 @@ def _build_score_response(settings: RiskSettings) -> RiskScoreResponse:
 
 
 @router.get("/settings", response_model=RiskSettingsResponse)
-async def get_risk_settings(db: Session = Depends(get_db)) -> RiskSettingsResponse:
+async def get_risk_settings(db: AsyncSession = Depends(get_async_db)) -> RiskSettingsResponse:
     """Return the latest risk configuration so the UI can render the active guardrails."""
 
     try:
-        settings = _get_latest_settings(db)
+        settings = await _get_latest_settings(db)
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -251,11 +254,11 @@ async def get_risk_settings(db: Session = Depends(get_db)) -> RiskSettingsRespon
 
 @router.put("/settings", response_model=RiskSettingsResponse)
 async def update_risk_settings(
-    payload: RiskSettingsUpdate, db: Session = Depends(get_db)
+    payload: RiskSettingsUpdate, db: AsyncSession = Depends(get_async_db)
 ) -> RiskSettingsResponse:
     """Persist configuration changes that are either manually entered or confirmed from AI recommendations."""
 
-    settings = _get_latest_settings(db)
+    settings = await _get_latest_settings(db)
     update_payload = payload.model_dump(exclude_unset=True)
     if not update_payload:
         return _build_settings_response(settings)
@@ -265,10 +268,10 @@ async def update_risk_settings(
 
     try:
         db.add(settings)
-        db.commit()
-        db.refresh(settings)
+        await db.commit()
+        await db.refresh(settings)
     except SQLAlchemyError as exc:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to persist risk settings",
@@ -278,11 +281,11 @@ async def update_risk_settings(
 
 
 @router.get("/score", response_model=RiskScoreResponse)
-async def get_risk_score(db: Session = Depends(get_db)) -> RiskScoreResponse:
+async def get_risk_score(db: AsyncSession = Depends(get_async_db)) -> RiskScoreResponse:
     """Expose the current risk score and compare it with the configured alert threshold."""
 
     try:
-        settings = _get_latest_settings(db)
+        settings = await _get_latest_settings(db)
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
