@@ -8,7 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import get_current_user
 from db.database import get_async_db
@@ -29,6 +29,13 @@ from agents.sentiment_agent import SentimentSummary, sentiment_agent
 from services.market_data import market_data_service
 from services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
 from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
+from core.pagination import (
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+    apply_cursor_pagination,
+    decode_cursor,
+    encode_cursor,
+)
 
 logger = logging.getLogger("cryptotrader.strategies")
 router = APIRouter()
@@ -119,6 +126,13 @@ class StrategyResponse(BaseModel):
     promoted_by_recommendation: bool
     created_at: datetime
     updated_at: datetime
+
+
+class StrategyListResponse(BaseModel):
+    strategies: List[StrategyResponse]
+    next_cursor: Optional[str] = None
+    limit: int
+    has_more: bool = False
 
 
 class StrategyPromoteRequest(BaseModel):
@@ -529,24 +543,60 @@ async def suggest_strategies(
     )
 
 
-@router.get("/", response_model=List[StrategyResponse], status_code=status.HTTP_200_OK)
+@router.get("/", response_model=StrategyListResponse, status_code=status.HTTP_200_OK)
 async def list_strategies(
     status: Optional[List[str]] = Query(
         None,
         alias="status",
         description=f"Return strategies matching a status ({STATUS_HINT}).",
     ),
+    cursor: Optional[str] = Query(
+        None,
+        description="Cursor token for pagination",
+    ),
+    limit: int = Query(
+        DEFAULT_PAGE_LIMIT,
+        ge=1,
+        le=MAX_PAGE_LIMIT,
+        description="Number of strategies per page",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
-) -> List[StrategyResponse]:
-    """List strategies, optionally filtering by status."""
+) -> StrategyListResponse:
+    """List strategies with cursor-based pagination."""
     filters = _normalize_status_filters(status)
+    cursor_timestamp: Optional[datetime] = None
+    cursor_id: Optional[int] = None
+    if cursor:
+        try:
+            cursor_timestamp, cursor_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cursor: {exc}",
+            )
+
     try:
         query = select(Strategy)
         if filters:
             query = query.where(Strategy.status.in_(filters))
-        result = await db.execute(query.order_by(Strategy.updated_at.desc()))
+        cursor_tuple = (
+            (cursor_timestamp, cursor_id)
+            if cursor_timestamp is not None and cursor_id is not None
+            else None
+        )
+        query, _, _ = apply_cursor_pagination(
+            query,
+            cursor_values=cursor_tuple,
+            timestamp_column=Strategy.created_at,
+            id_column=Strategy.id,
+        )
+        query = query.order_by(desc(Strategy.created_at), desc(Strategy.id))
+        query = query.limit(limit + 1)
+        result = await db.execute(query)
         strategies = list(result.scalars().all())
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover - defensive DB guard
         logger.error("Strategy list fetch failed: %s", exc)
         raise HTTPException(
@@ -554,7 +604,21 @@ async def list_strategies(
             detail="Unable to retrieve strategies",
         )
 
-    return [_serialize_strategy(strategy) for strategy in strategies]
+    has_more = len(strategies) > limit
+    if has_more:
+        strategies = strategies[:limit]
+
+    next_cursor = None
+    if has_more and strategies:
+        last_strategy = strategies[-1]
+        next_cursor = encode_cursor(last_strategy.created_at, last_strategy.id)
+
+    return StrategyListResponse(
+        strategies=[_serialize_strategy(strategy) for strategy in strategies],
+        next_cursor=next_cursor,
+        limit=limit,
+        has_more=has_more,
+    )
 
 
 @router.get("/comparison", response_model=StrategyComparisonResponse)
