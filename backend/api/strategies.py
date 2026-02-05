@@ -538,6 +538,10 @@ async def suggest_strategies(
             raise
         except Exception as exc:
             logger.error("Failed to generate strategy suggestion for %s", normalized_symbol, exc_info=True)
+            raise ServiceUnavailableException(
+                service="strategy_ai",
+                details={"symbol": normalized_symbol, "operation": "build_strategy_suggestion"},
+            ) from exc
 
     return StrategySuggestionResponse(
         generated_at=datetime.utcnow(),
@@ -1009,9 +1013,9 @@ async def simulate_strategy_signal(
     except Exception as exc:  # pragma: no cover - defensive guard
         await db.rollback()
         logger.error("Failed to simulate strategy %s", strategy_id, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to process strategy simulation",
+        raise ServiceUnavailableException(
+            service="strategy_simulation",
+            details={"strategy_id": strategy_id, "operation": "simulate_strategy"},
         ) from exc
 
 
@@ -1073,9 +1077,9 @@ async def reset_paper_trading_session(
         )
     except Exception as exc:
         logger.error("Failed to reset paper trading session", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to reset paper trading session",
+        raise ServiceUnavailableException(
+            service="paper_trading_reset",
+            details={"operation": "reset_paper_trading_session"},
         ) from exc
 
 
@@ -1112,9 +1116,9 @@ async def archive_paper_trading_session(
         )
     except Exception as exc:
         logger.error("Failed to archive paper trading session", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to archive paper trading session",
+        raise ServiceUnavailableException(
+            service="paper_trading_archive",
+            details={"operation": "archive_paper_trading_session"},
         ) from exc
 
 
@@ -1151,7 +1155,7 @@ async def archive_paper_trading_session(
         )
     except Exception as exc:
         logger.error("Failed to archive paper trading session", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to archive paper trading session",
+        raise ServiceUnavailableException(
+            service="paper_trading_archive",
+            details={"operation": "archive_paper_trading_session"},
         ) from exc
