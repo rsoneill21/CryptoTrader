@@ -1021,3 +1021,60 @@ async def get_paper_portfolio(
 ):
     """Return a snapshot of the current paper trading portfolio."""
     return await paper_trading_engine.snapshot()
+
+
+class ResetPaperTradingRequest(BaseModel):
+    """Request to reset paper trading session."""
+
+    confirm: bool = Field(..., description="Explicit confirmation required to reset session")
+    archive_current: bool = Field(
+        True, description="Whether to archive current session before reset"
+    )
+
+
+class ResetPaperTradingResponse(BaseModel):
+    """Response after resetting paper trading session."""
+
+    message: str
+    previous_session_archived: bool
+    new_session_cash: float
+    reset_at: datetime
+
+
+@router.post("/paper-trading/reset", response_model=ResetPaperTradingResponse)
+async def reset_paper_trading_session(
+    payload: ResetPaperTradingRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Reset paper trading to a clean state, optionally archiving the current session."""
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset requires explicit confirmation",
+        )
+
+    try:
+        await paper_trading_engine.reset_to_clean_state(
+            archive_current=payload.archive_current
+        )
+        snapshot = await paper_trading_engine.snapshot()
+
+        logger.info(
+            "Paper trading session reset by %s (archived=%s)",
+            current_user.email,
+            payload.archive_current,
+        )
+
+        return ResetPaperTradingResponse(
+            message="Paper trading session reset successfully",
+            previous_session_archived=payload.archive_current,
+            new_session_cash=snapshot.cash,
+            reset_at=datetime.utcnow(),
+        )
+    except Exception as exc:
+        logger.error("Failed to reset paper trading session", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to reset paper trading session",
+        ) from exc
+
