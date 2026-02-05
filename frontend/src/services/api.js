@@ -212,5 +212,13 @@ export const tradesAPI = {
     api.post(`/api/trades/orders/${orderId}/cancel`),
 };
 
+export const aiAPI = {
+  listModels: () => api.get('/api/ai/models'),
+  activateModel: (provider) =>
+    api.put('/api/ai/models/active', { provider }),
+  chatHistory: (params = {}) =>
+    api.get('/api/ai/chat/history', { params }),
+};
+
 // Export default instance for custom requests
 export default api;

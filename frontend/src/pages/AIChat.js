@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import ChatWindow from '../components/ChatWindow';
-import api from '../services/api';
+import api, { aiAPI } from '../services/api';
 
 const CHAT_TONE_EVENT = 'cryptotrader:chatTonePreferenceChanged';
 const CHAT_TONE_STORAGE_KEY = 'cryptotrader.ai_chat_tone';
@@ -202,6 +202,10 @@ const AIChat = () => {
   const [resolvedAlertContext, setResolvedAlertContext] = useState(null);
   const [alertContextLoading, setAlertContextLoading] = useState(false);
   const [alertContextError, setAlertContextError] = useState('');
+  const [modelInventory, setModelInventory] = useState([]);
+  const [modelLoading, setModelLoading] = useState(true);
+  const [modelError, setModelError] = useState('');
+  const [desiredProvider, setDesiredProvider] = useState('');
 
   useEffect(() => {
     setGlobalChatTone(tonePreference);
@@ -311,6 +315,26 @@ const AIChat = () => {
     };
   }, []);
 
+  const loadModelInventory = useCallback(async () => {
+    setModelLoading(true);
+    setModelError('');
+    try {
+      const response = await aiAPI.listModels();
+      const models = response.data?.models ?? [];
+      setModelInventory(models);
+      const active = models.find((entry) => entry.active)?.provider ?? '';
+      setDesiredProvider(active);
+    } catch (error) {
+      setModelError(error?.message || 'Unable to load AI models');
+    } finally {
+      setModelLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModelInventory();
+  }, [loadModelInventory]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -382,6 +406,9 @@ const AIChat = () => {
   }
   const alertContextMetaLabel = alertContextMeta.length ? alertContextMeta.join(' · ') : 'Alert';
 
+  const activeModel = modelInventory.find((entry) => entry.active);
+  const activeLabel = activeModel ? activeModel.provider.toUpperCase() : '—';
+
   return (
     <section className="space-y-6 text-white">
       <header className="space-y-2">
@@ -396,6 +423,59 @@ const AIChat = () => {
           <span className="rounded-full border border-sky-500/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-sky-100">
             {currentToneDetails.label}
           </span>
+          <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-xs uppercase tracking-[0.3em] text-gray-400">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[9px] uppercase tracking-[0.5em] text-slate-500">Model</p>
+              {modelLoading ? (
+                <span className="text-[10px] text-gray-400">Loading…</span>
+              ) : (
+                <span className="text-[10px] font-semibold uppercase tracking-[0.3em] text-emerald-400">
+                  {activeLabel}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                className="flex-1 bg-transparent text-[11px] font-semibold uppercase tracking-[0.3em] text-white outline-none"
+                value={desiredProvider}
+                onChange={(event) => setDesiredProvider(event.target.value)}
+              >
+                {modelInventory.map((entry) => (
+                  <option
+                    key={entry.provider}
+                    value={entry.provider}
+                    disabled={!entry.available}
+                  >
+                    {entry.provider.toUpperCase()}
+                    {!entry.available ? ' (offline)' : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!desiredProvider) {
+                    return;
+                  }
+                  setModelLoading(true);
+                  setModelError('');
+                  try {
+                    await aiAPI.activateModel(desiredProvider);
+                    await loadModelInventory();
+                  } catch (error) {
+                    setModelError(error?.message || 'Unable to activate provider');
+                  } finally {
+                    setModelLoading(false);
+                  }
+                }}
+                disabled={modelLoading || !desiredProvider}
+                className="rounded-full border border-emerald-500/70 px-3 py-0.5 text-[9px] font-semibold uppercase tracking-[0.3em] text-emerald-300 disabled:opacity-40"
+              >
+                Activate
+              </button>
+            </div>
+            {modelError && <p className="text-[10px] text-rose-300">{modelError}</p>}
+          </div>
           <p className="text-xs text-gray-400 max-w-3xl">{currentToneDetails.description}</p>
         </div>
       </header>

@@ -83,6 +83,7 @@ class AppSettings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
     @validator("frontend_origins", pre=True)
     def _normalize_frontend_origins(cls, value: Iterable[str] | str) -> List[str]:

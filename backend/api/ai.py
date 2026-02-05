@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import httpx
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ from anthropic import AI_PROMPT, Anthropic, HUMAN_PROMPT
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 import pydantic as _pydantic
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -65,6 +66,7 @@ class ChatProvider(str, Enum):
 
     OPENAI = "openai"
     CLAUDE = "claude"
+    OLLAMA = "ollama"
 
 
 def _env_provider() -> ChatProvider:
@@ -79,7 +81,23 @@ def _env_provider() -> ChatProvider:
 class ChatRequest(BaseModel):
     """Payload that seeds the user side of the conversation."""
 
-    message: str = Field(..., min_length=1)
+    message: Optional[str] = Field(
+        None,
+        min_length=1,
+        description="Primary user prompt text",
+        alias="prompt",
+    )
+    temperature: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature (0-2)",
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Maximum tokens to generate",
+    )
     tone: Optional[str] = Field(None, description="Desired communication style")
     context_json: Optional[Dict[str, Any]] = Field(
         None, description="Optional structured context shared with the AI"
@@ -93,6 +111,14 @@ class ChatRequest(BaseModel):
     provider: Optional[ChatProvider] = Field(
         None, description="Override the configured AI provider"
     )
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _ensure_message(self) -> "ChatRequest":
+        if self.message is None:
+            raise ValueError("Either 'message' or 'prompt' is required")
+        return self
 
 
 class ChatHistoryEntry(BaseModel):
@@ -340,6 +366,18 @@ class ChatAIService:
             else None
         )
 
+        self._ollama_model = os.getenv("CHAT_OLLAMA_MODEL", "gemma3")
+        self._ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api").rstrip("/")
+        self._ollama_api_key = os.getenv("OLLAMA_API_KEY")
+        ollama_headers: Dict[str, str] = {}
+        if self._ollama_api_key:
+            ollama_headers["Authorization"] = f"Bearer {self._ollama_api_key}"
+        self._ollama_client = httpx.AsyncClient(
+            base_url=self._ollama_base_url,
+            headers=ollama_headers,
+            timeout=httpx.Timeout(20.0, connect=5.0, read=5.0),
+        )
+
     @property
     def last_provider(self) -> Optional[ChatProvider]:
         return self._last_provider
@@ -357,9 +395,13 @@ class ChatAIService:
             self._last_model = self._openai_model
             async for piece in self._stream_openai(request):
                 yield piece
-        else:
+        elif provider == ChatProvider.CLAUDE:
             self._last_model = self._claude_model
             async for piece in self._stream_claude(request):
+                yield piece
+        else:
+            self._last_model = self._ollama_model
+            async for piece in self._stream_ollama(request):
                 yield piece
 
     async def _stream_openai(self, request: ChatRequest) -> AsyncIterator[str]:
@@ -395,6 +437,28 @@ class ChatAIService:
             temperature=0.25,
         )
         text = (response.completion or "").strip()
+        for chunk in self._chunk_text(text):
+            await asyncio.sleep(0)
+            yield chunk
+
+    async def _stream_ollama(self, request: ChatRequest) -> AsyncIterator[str]:
+        if not self._ollama_client:
+            raise RuntimeError("Ollama client not configured")
+
+        payload: Dict[str, Any] = {
+            "model": self._ollama_model,
+            "prompt": self._compose_user_prompt(request),
+            "stream": False,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_tokens:
+            payload["num_predict"] = request.max_tokens
+
+        response = await self._ollama_client.post("/generate", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        text = (parsed.get("response") or "").strip()
         for chunk in self._chunk_text(text):
             await asyncio.sleep(0)
             yield chunk
@@ -441,6 +505,8 @@ class ChatAIService:
             return bool(self._openai_api_key)
         if provider == ChatProvider.CLAUDE:
             return bool(self._anthropic_api_key and self._anthropic_client)
+        if provider == ChatProvider.OLLAMA:
+            return bool(self._ollama_client)
         return False
 
     @staticmethod
