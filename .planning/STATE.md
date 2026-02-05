@@ -20,16 +20,18 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-05 completed (4 of 4 in phase)
-**Status:** Phase complete
-**Progress:** ████░░░░░░ 36% (0/11 phases complete, 4/4 plans in current phase)
+**Plan:** 01-06 completed (6 of 9 in phase)
+**Status:** In progress
+**Progress:** ██████░░░░ 60% (0/11 phases complete, 6/9 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
+- Completed 01-02: Structured exceptions & fail-closed rate limiting
 - Completed 01-03: Paper trading state persistence
 - Completed 01-04: Cursor-based pagination for alerts
 - Completed 01-05: Backend import path fixes and pybreaker dependency
-- Next: Execute 01-02 (rate limiting) or move to Phase 2
+- Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
+- Next: Execute 01-07 (Migrate strategies to AsyncSession)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -112,7 +114,7 @@
 - [ ] Migrate other list endpoints to cursor pagination (strategies, trades, decisions)
 - [ ] Frontend adaptation: use cursor tokens instead of page numbers for alerts
 - [ ] Add composite index on alerts (created_at, id) for pagination performance
-- [ ] Wire paper trading engine lifecycle hooks into FastAPI startup/shutdown
+- [x] Wire paper trading engine lifecycle hooks into FastAPI startup/shutdown
 - [x] ~~Install pybreaker in requirements.txt~~ - Completed in 01-05
 - [ ] Install aiosqlite in production requirements.txt
 - [ ] Document asyncpg migration for production PostgreSQL
@@ -123,7 +125,14 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-05):**
+**2026-02-05 (latest - 01-06):**
+- Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
+- Imported initialize_paper_trading_engine and shutdown_paper_trading_engine
+- Added await calls to lifespan startup and shutdown
+- Ensures paper trading state is restored on boot and saved on exit
+- Duration: 2 minutes (1 task, 1 commit)
+
+**2026-02-05 (01-05):**
 - Completed 01-05: Backend import path fixes and pybreaker dependency
 - Fixed all 38 incorrect 'from backend.X' imports to relative paths
 - Installed pybreaker>=1.0.0 for circuit breaker support
