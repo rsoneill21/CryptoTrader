@@ -1,6 +1,6 @@
 """
 Database configuration and initialization.
-"""00
+"""
 
 import json
 import logging
@@ -16,26 +16,45 @@ from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 # Database URL - SQLite for development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./cryptotrader.db")
 
-# Create engine
+# Async Database URL - convert sqlite:/// to sqlite+aiosqlite:///
+ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+if "postgresql" in DATABASE_URL and "asyncpg" not in DATABASE_URL:
+    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+
+# Create sync engine (for legacy/logging code)
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
     echo=False
 )
 
-# Session factory
+# Create async engine
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    echo=False,
+    # pool_pre_ping ensures connections are valid before use
+    pool_pre_ping=True if "postgresql" in ASYNC_DATABASE_URL else False,
+)
+
+# Session factories
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,  # Prevent attribute expiration after commit in async context
+)
 
 # Base class for models
 Base = declarative_base()
 
 
 def get_db():
-    """Dependency that provides database session."""
+    """Dependency that provides database session (sync - for legacy code)."""
     db = SessionLocal()
     try:
         yield db
@@ -43,13 +62,32 @@ def get_db():
         db.close()
 
 
+async def get_async_db():
+    """Async dependency that provides database session."""
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
 def init_db():
     """Apply migrations so the database schema is up to date."""
-
+    import asyncio
     from db import models  # Import models to register them
     from db.migrations import run_migrations
 
+    # Run Alembic migrations (uses sync engine)
     run_migrations()
+
+    # Verify async engine can connect
+    async def _verify_async_engine():
+        async with async_engine.begin() as conn:
+            # Just verify the connection works
+            pass
+
+    try:
+        asyncio.run(_verify_async_engine())
+    except Exception as exc:
+        logger.warning("Async engine verification skipped or failed: %s", exc)
+
     _register_user_email_listeners()
     print("Database schema verified via Alembic migrations")
 
