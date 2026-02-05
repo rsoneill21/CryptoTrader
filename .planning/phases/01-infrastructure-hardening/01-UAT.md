@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: complete
 phase: 01-infrastructure-hardening
-source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md]
-started: 2026-02-05T16:50:00Z
-updated: 2026-02-05T17:00:00Z
+source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md, 01-07-SUMMARY.md, 01-08-SUMMARY.md, 01-09-SUMMARY.md]
+started: 2026-02-05T18:10:00Z
+updated: 2026-02-05T16:20:00Z
 ---
 
 ## Current Test
@@ -13,61 +13,77 @@ updated: 2026-02-05T17:00:00Z
 ## Tests
 
 ### 1. Async Trades API Response
-expected: Start the FastAPI server and call a trades endpoint (e.g., GET /api/trades). The endpoint should return trades data without blocking. Server logs should show async session being used. Multiple concurrent requests should not queue up.
-result: issue
-reported: "http://192.168.4.129:8000/api/trades just keep spinning and http://192.168.4.129:5173/login says: Unable to connect to CryptoTrader. Ensure the backend is running and retry."
-severity: blocker
+expected: Start the FastAPI server and call GET /api/trades (or another trades endpoint). Response returns promptly with trades data; concurrent requests do not block because AsyncSession is used end-to-end.
+result: pass
 
 ### 2. Rate Limiter Fail-Closed Behavior
-expected: With Redis stopped/unavailable, make an API request to a rate-limited endpoint. The endpoint should return HTTP 503 (Service Unavailable) with a Retry-After header, NOT succeed or return 200. This verifies fail-closed behavior.
-result: skipped
-reason: Backend not reachable - blocked by Test 1
+expected: Stop/disable Redis, hit a rate-limited endpoint (e.g., POST /api/auth/login). Response should be HTTP 503 with Retry-After, proving fail-closed logic.
+result: pass
 
 ### 3. Paper Trading State Persists on Restart
-expected: Start the paper trading engine, make a trade (or observe existing positions), then restart the backend server. After restart, the paper trading state (positions, cash balance, P&L) should be restored exactly as it was before restart.
-result: skipped
-reason: Backend not reachable - blocked by Test 1
+expected: After placing a trade, restart the backend. Paper trading positions, balances, and P&L should restore exactly as before.
+result: issue
+reported: "Unable to place a paper trade via API. Both POST /api/trades and POST /api/trades/system return 500 Unexpected Error (even on clean uvicorn instance), so there is no state change to validate across restarts."
+severity: major
 
 ### 4. Paper Trading Session Reset
-expected: Use the reset/archive functionality to start a fresh paper trading session. The old session should be archived (not deleted), and the new session should start with clean state (no positions, default cash balance).
-result: skipped
-reason: Backend not reachable - blocked by Test 1
+expected: Trigger the session reset/archive workflow. Previous session is archived, and a new clean session (no positions, default cash) starts.
+result: issue
+reported: "No API endpoint exposes the session reset/archive functionality. reset_to_clean_state and archive_current_session methods exist in PaperTradingEngine but are not callable via REST API."
+severity: major
 
 ### 5. Alerts Cursor Pagination
-expected: Call GET /api/alerts?limit=5. Response should include next_cursor and has_more fields instead of page/total. Calling GET /api/alerts?cursor={next_cursor}&limit=5 should return the next page of results. Results should be stable even if new alerts are added between requests.
-result: skipped
-reason: Backend not reachable - blocked by Test 1
+expected: GET /api/alerts?limit=5 returns alerts plus next_cursor + has_more. Using the cursor retrieves the next page with stable ordering even if new alerts arrive.
+result: issue
+reported: "Cursor pagination is broken. Page 1 returns IDs 8,7,6 with next_cursor. Page 2 using that cursor returns the SAME IDs 8,7,6 instead of the next page (5,4,3). The cursor is not being applied to filter results."
+severity: major
 
 ### 6. Structured Exception Response
-expected: Trigger an application error (e.g., rate limit exceeded, database error). The error response should be a structured JSON with error_code, message, and details fields - not a generic 500 error.
-result: skipped
-reason: Backend not reachable - blocked by Test 1
+expected: Force an application error (e.g., exceed rate limit). Error payload should follow the structured format with error_code/message/details rather than raw 500.
+result: pass
 
 ## Summary
 
 total: 6
-passed: 0
-issues: 1
+passed: 3
+issues: 3
 pending: 0
-skipped: 5
+skipped: 0
 
 ## Gaps
 
-- truth: "Trades API endpoint responds without blocking"
+- truth: "Paper trading positions persist across backend restarts"
   status: failed
-  reason: "User reported: http://192.168.4.129:8000/api/trades just keep spinning and http://192.168.4.129:5173/login says: Unable to connect to CryptoTrader. Ensure the backend is running and retry."
-  severity: blocker
-  test: 1
-  root_cause: "Missing pybreaker package in requirements.txt - server fails on startup with ModuleNotFoundError"
+  reason: "User reported: Unable to place a paper trade via API. POST /api/trades and POST /api/trades/system both return 500 Unexpected Error even on a clean uvicorn instance, so no state change can be made to verify persistence."
+  severity: major
+  test: 3
+  artifacts: []
+  missing: []
+
+- truth: "User can trigger session reset/archive to start fresh paper trading session"
+  status: failed
+  reason: "No API endpoint exposes reset_to_clean_state or archive_current_session methods. Functionality exists in PaperTradingEngine but isn't callable via REST API."
+  severity: major
+  test: 4
   artifacts:
-    - path: "backend/requirements.txt"
-      issue: "Missing pybreaker dependency"
-    - path: "backend/core/rate_limit.py"
-      issue: "Line 13: from pybreaker import CircuitBreaker - requires missing package"
-    - path: "backend/core/rate_limit.py"
-      issue: "Line 15: from backend.core.exceptions - incorrect import path (secondary)"
+    - path: "backend/core/paper_trading.py"
+      issue: "reset_to_clean_state and archive_current_session methods exist but not exposed"
+    - path: "backend/api/strategies.py"
+      issue: "No route defined for session reset/archive"
   missing:
-    - "Add pybreaker>=1.0.0 to backend/requirements.txt"
-    - "Run pip install -r requirements.txt"
-    - "Fix import paths from 'from backend.X' to relative imports across 30+ files"
-  debug_session: ".planning/debug/backend-not-responding.md"
+    - "Add POST /api/paper-trading/reset endpoint"
+    - "Add POST /api/paper-trading/archive endpoint"
+
+- truth: "Cursor pagination returns next page when cursor token is provided"
+  status: failed
+  reason: "Page 1 returns IDs 8,7,6 with next_cursor. Page 2 using that cursor returns SAME IDs 8,7,6 instead of next page 5,4,3. Cursor not being applied as filter."
+  severity: major
+  test: 5
+  artifacts:
+    - path: "backend/api/alerts.py"
+      issue: "Cursor parameter not correctly filtering results"
+    - path: "backend/core/pagination.py"
+      issue: "apply_cursor_pagination may not be correctly building WHERE clause"
+  missing:
+    - "Fix cursor filter to exclude items at or before cursor position"
+    - "Verify cursor decode produces correct timestamp+id values"
