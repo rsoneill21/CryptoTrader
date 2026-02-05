@@ -9,12 +9,13 @@ from typing import Dict, Iterator, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator, validator
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
 from core.exceptions import DatabaseException
-from db.database import get_db
+from db.database import get_async_db
 from db.models import Strategy, Trade, User
 
 logger = logging.getLogger("cryptotrader.export")
@@ -210,16 +211,18 @@ def _generate_trade_csv_rows(trades: List[Trade]) -> Iterator[bytes]:
 async def export_trades(
     filters: TradeExportParams = Depends(),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StreamingResponse:
     """Stream trades as a CSV file, optionally filtering by entry time."""
     try:
-        query = db.query(Trade)
+        stmt = select(Trade)
         if filters.start_time:
-            query = query.filter(Trade.entry_time >= filters.start_time)
+            stmt = stmt.where(Trade.entry_time >= filters.start_time)
         if filters.end_time:
-            query = query.filter(Trade.entry_time <= filters.end_time)
-        trades = query.order_by(Trade.entry_time.desc()).all()
+            stmt = stmt.where(Trade.entry_time <= filters.end_time)
+        stmt = stmt.order_by(Trade.entry_time.desc())
+        result = await db.execute(stmt)
+        trades = list(result.scalars().all())
     except SQLAlchemyError as exc:
         logger.error("Failed to query trades for export", exc_info=True)
         raise DatabaseException(
@@ -242,16 +245,18 @@ async def export_trades(
 async def export_strategies(
     filters: StrategyExportParams = Depends(),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> List[StrategyExportItem]:
     """Return strategies matching the requested creation date range."""
     try:
-        query = db.query(Strategy)
+        stmt = select(Strategy)
         if filters.start_date:
-            query = query.filter(Strategy.created_at >= filters.start_date)
+            stmt = stmt.where(Strategy.created_at >= filters.start_date)
         if filters.end_date:
-            query = query.filter(Strategy.created_at <= filters.end_date)
-        strategies = query.order_by(Strategy.created_at.desc()).all()
+            stmt = stmt.where(Strategy.created_at <= filters.end_date)
+        stmt = stmt.order_by(Strategy.created_at.desc())
+        result = await db.execute(stmt)
+        strategies = list(result.scalars().all())
     except SQLAlchemyError as exc:
         logger.error("Failed to query strategies for export", exc_info=True)
         raise DatabaseException(
