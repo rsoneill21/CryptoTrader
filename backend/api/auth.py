@@ -181,13 +181,7 @@ async def login(
 
     # Rate limit by email (5 attempts per 60 seconds)
     email_limit_key = f"rate_limit:login:email:{request.email}"
-    allowed = await check_rate_limit(email_limit_key, 5, 60)
-    if not allowed:
-        logger.warning("Login rate limit exceeded for email %s", request.email)
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later."
-        )
+    await check_rate_limit(email_limit_key, 5, 60)
 
     # Find user by email
     user = db.query(User).filter(User.email == request.email).first()
