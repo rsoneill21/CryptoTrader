@@ -15,7 +15,7 @@ from db.models import Strategy, StrategyPerformance, User, AIDecision
 from services.github_import import GitHubImportService
 from services.paper_trading_service import paper_trading_engine
 from core.paper_trading import PaperTradeSignal, PaperPortfolioSnapshot
-from backend.api.market import (
+from api.market import (
     AnalystIndicatorSnapshot,
     TechnicalSnapshot,
     _build_indicator_snapshot,
@@ -23,11 +23,11 @@ from backend.api.market import (
     _build_technical_snapshot,
     _normalize_trading_pair,
 )
-from backend.agents.market_analyst import market_analyst_agent
-from backend.agents.sentiment_agent import SentimentSummary, sentiment_agent
-from backend.services.market_data import market_data_service
-from backend.services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
-from backend.services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
+from agents.market_analyst import market_analyst_agent
+from agents.sentiment_agent import SentimentSummary, sentiment_agent
+from services.market_data import market_data_service
+from services.strategy_ai import StrategyProposal, StrategyProposalInput, strategy_ai_service
+from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
 logger = logging.getLogger("cryptotrader.strategies")
 router = APIRouter()

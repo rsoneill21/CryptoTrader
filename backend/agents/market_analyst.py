@@ -11,10 +11,10 @@ from typing import Any, Deque, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from backend.agents.base import AgentMessage, BaseAgent
-from backend.core.message_queue import Channels, message_queue
-from backend.core.tasks import log_system_event
-from backend.services.kraken_ws import KrakenWSFeed, TickerUpdate, kraken_ws
+from agents.base import AgentMessage, BaseAgent
+from core.message_queue import Channels, message_queue
+from core.tasks import log_system_event
+from services.kraken_ws import KrakenWSFeed, TickerUpdate, kraken_ws
 
 logger = logging.getLogger(__name__)
 

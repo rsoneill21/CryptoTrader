@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive
 
-from backend.core.tasks import log_system_event
+from core.tasks import log_system_event
 
 logger = logging.getLogger(__name__)
 

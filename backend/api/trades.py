@@ -16,8 +16,8 @@ from core.auth import get_current_user
 from core.indicators import side_color
 from db.database import get_async_db
 from db.models import Order, Trade, User
-from backend.api.market import DecisionRecord, fetch_decisions_for_trade
-from backend.agents.market_analyst import market_analyst_agent
+from api.market import DecisionRecord, fetch_decisions_for_trade
+from agents.market_analyst import market_analyst_agent
 from services.market_data import market_data_service
 from services.kraken import kraken_service, KrakenAPIError
 

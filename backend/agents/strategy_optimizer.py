@@ -9,15 +9,15 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
 
-from backend.agents.base import BaseAgent
-from backend.core.message_queue import Channels, message_queue
-from backend.core.paper_trading import (
+from agents.base import BaseAgent
+from core.message_queue import Channels, message_queue
+from core.paper_trading import (
     PaperTradeSignal,
     PaperTradingEngine,
     TradeIntent,
     TradeSide,
 )
-from backend.core.tasks import log_system_event
+from core.tasks import log_system_event
 from db.database import SessionLocal
 from db.models import MarketData, Strategy
 

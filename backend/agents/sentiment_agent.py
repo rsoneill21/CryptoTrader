@@ -8,9 +8,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from backend.agents.base import AgentMessage, BaseAgent
-from backend.core.message_queue import Channels, message_queue
-from backend.core.tasks import log_system_event
+from agents.base import AgentMessage, BaseAgent
+from core.message_queue import Channels, message_queue
+from core.tasks import log_system_event
 from db.database import SessionLocal
 from db.models import DataSourceConfig, SentimentData
 

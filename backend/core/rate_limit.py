@@ -12,7 +12,7 @@ from fastapi import Request, HTTPException, status
 import redis.asyncio as redis
 from pybreaker import CircuitBreaker
 
-from backend.core.exceptions import RateLimitException, ServiceUnavailableException
+from core.exceptions import RateLimitException, ServiceUnavailableException
 
 logger = logging.getLogger("cryptotrader.rate_limit")
 
@@ -26,7 +26,7 @@ _redis_client = None
 # Opens after 5 consecutive failures, stays open for 60 seconds before retry
 redis_breaker = CircuitBreaker(
     fail_max=5,
-    timeout_duration=60,
+    reset_timeout=60,
     name="redis_rate_limiter"
 )
 

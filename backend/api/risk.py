@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from core.settings import ThemeMode, get_user_settings_store
 from db.database import get_db
 from db.models import RiskSettings
-from backend.services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
+from services.risk_ai import RiskAIService, RiskContext, RiskRecommendation
 
 router = APIRouter()
 

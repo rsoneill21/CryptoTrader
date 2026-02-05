@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from api import market as market_module
-from backend.agents.sentiment_agent import SentimentSummary
+from agents.sentiment_agent import SentimentSummary
 from services.kraken import KrakenAPIError, OHLC, Ticker
 
 

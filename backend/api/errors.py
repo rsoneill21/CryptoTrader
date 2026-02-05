@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from backend.core.exceptions import BaseAppException
+from core.exceptions import BaseAppException
 from db.database import log_system_error, sanitize_log_details
 
 

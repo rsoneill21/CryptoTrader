@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 01-infrastructure-hardening
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md]
 started: 2026-02-05T16:50:00Z
-updated: 2026-02-05T16:55:00Z
+updated: 2026-02-05T17:00:00Z
 ---
 
 ## Current Test
@@ -58,7 +58,16 @@ skipped: 5
   reason: "User reported: http://192.168.4.129:8000/api/trades just keep spinning and http://192.168.4.129:5173/login says: Unable to connect to CryptoTrader. Ensure the backend is running and retry."
   severity: blocker
   test: 1
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Missing pybreaker package in requirements.txt - server fails on startup with ModuleNotFoundError"
+  artifacts:
+    - path: "backend/requirements.txt"
+      issue: "Missing pybreaker dependency"
+    - path: "backend/core/rate_limit.py"
+      issue: "Line 13: from pybreaker import CircuitBreaker - requires missing package"
+    - path: "backend/core/rate_limit.py"
+      issue: "Line 15: from backend.core.exceptions - incorrect import path (secondary)"
+  missing:
+    - "Add pybreaker>=1.0.0 to backend/requirements.txt"
+    - "Run pip install -r requirements.txt"
+    - "Fix import paths from 'from backend.X' to relative imports across 30+ files"
+  debug_session: ".planning/debug/backend-not-responding.md"

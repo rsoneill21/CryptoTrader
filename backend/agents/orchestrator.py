@@ -10,12 +10,12 @@ from typing import Any, Deque, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from backend.api.ai import ChatAIService, ChatRequest
-from backend.agents.base import AgentMessage, BaseAgent
-from backend.core.message_queue import Channels, message_queue
-from backend.core.tasks import log_system_event
-from backend.core.trading_control import trading_control
-from backend.services.kraken import OrderSide, OrderType, kraken_service
+from api.ai import ChatAIService, ChatRequest
+from agents.base import AgentMessage, BaseAgent
+from core.message_queue import Channels, message_queue
+from core.tasks import log_system_event
+from core.trading_control import trading_control
+from services.kraken import OrderSide, OrderType, kraken_service
 
 logger = logging.getLogger(__name__)
 

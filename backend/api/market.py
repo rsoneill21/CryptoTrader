@@ -19,8 +19,8 @@ from services.kraken import KrakenAPIError, KrakenService, kraken_service, OHLC,
 from services.kraken_ws import KrakenWSFeed, kraken_ws
 from services.market_data import market_data_service
 from services.portfolio import PortfolioSnapshot, portfolio_service
-from backend.agents.market_analyst import market_analyst_agent
-from backend.agents.sentiment_agent import SentimentSummary, sentiment_agent
+from agents.market_analyst import market_analyst_agent
+from agents.sentiment_agent import SentimentSummary, sentiment_agent
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

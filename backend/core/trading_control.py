@@ -9,8 +9,8 @@ from datetime import datetime
 from threading import RLock
 from typing import Any, Dict, Optional
 
-from backend.core.message_queue import Channels, message_queue
-from backend.core.tasks import log_system_event
+from core.message_queue import Channels, message_queue
+from core.tasks import log_system_event
 
 logger = logging.getLogger(__name__)
 
