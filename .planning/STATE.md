@@ -20,9 +20,9 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-07 completed (7 of 9 in phase)
+**Plan:** 01-08 completed (8 of 9 in phase)
 **Status:** In progress
-**Progress:** ███████░░░ 70% (0/11 phases complete, 7/9 plans in current phase)
+**Progress:** ████████░░ 80% (0/11 phases complete, 8/9 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -32,7 +32,8 @@
 - Completed 01-05: Backend import path fixes and pybreaker dependency
 - Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
 - Completed 01-07: AsyncSession migration for alerts, market, strategies, and risk APIs
-- Next: Execute 01-08 (pending infrastructure hardening task)
+- Completed 01-08: Shared pagination helper plus cursor-based strategies & trades listings
+- Next: Execute 01-09 (final infrastructure hardening task in phase)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -81,6 +82,11 @@
 - ✓ Strategy CRUD and simulation routes now await AsyncSession commits with rollback handling
 - ✓ Risk settings helper and endpoints run entirely on AsyncSession/select queries
 
+**Fixed in 01-08:**
+- ✓ Extracted cursor encode/decode helpers plus `apply_cursor_pagination` into `backend/core/pagination.py`
+- ✓ Strategies list endpoint now exposes `StrategyListResponse` with cursor + limit data
+- ✓ Trades API gains a paginated history endpoint ordered by `entry_time` and `id`
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -108,6 +114,7 @@
 | Limit+1 fetch strategy | 2026-02-05 | Fetch limit+1 rows to detect has_more flag; eliminates expensive COUNT(*) queries on large tables | Better performance for pagination, no total count needed |
 | Relative imports from backend/ | 2026-02-05 | Use 'from core.X', 'from api.X' pattern when running from backend/ directory; no backend. prefix | All backend code uses consistent import pattern, eliminates ModuleNotFoundError |
 | pybreaker for circuit breakers | 2026-02-05 | Install pybreaker>=1.0.0 for CircuitBreaker pattern in rate limiter | Enables fail-closed behavior when Redis unavailable |
+| Entry_time anchors trade pagination | 2026-02-05 | Keeps cursor ordering tied to real execution timestamp without new schema | Frontend + agents can consume deterministic trade history tokens |
 
 ### Active Todos
 
@@ -118,7 +125,7 @@
 - [x] ~~Execute 01-05: Backend import path fixes~~ - Completed: Fixed all backend.X imports, added pybreaker
 - [x] ~~Migrate remaining API endpoints to AsyncSession (market, strategies, alerts, risk)~~ - Completed: 01-07 converted all remaining routes
 - [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker (optional - 01-05 was gap closure for UAT blocker)
-- [ ] Migrate other list endpoints to cursor pagination (strategies, trades, decisions)
+- [ ] Migrate other list endpoints to cursor pagination (remaining: decisions + future dashboards; strategies/trades done in 01-08)
 - [ ] Frontend adaptation: use cursor tokens instead of page numbers for alerts
 - [ ] Add composite index on alerts (created_at, id) for pagination performance
 - [x] Wire paper trading engine lifecycle hooks into FastAPI startup/shutdown
@@ -132,7 +139,14 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-07):**
+**2026-02-05 (latest - 01-08):**
+- Completed 01-08: Shared pagination helper plus cursor-based strategies/trades listings
+- Extracted encode/decode helpers + `apply_cursor_pagination` into `backend/core/pagination.py`
+- Strategies endpoint now emits `StrategyListResponse` with `next_cursor` and `has_more`
+- Trades API gained paginated history feed ordered by entry_time/id
+- Duration: 4 minutes (3 tasks, 3 commits)
+
+**2026-02-05 (01-07):**
 - Completed 01-07: Async API migration for alerts, market, strategies, and risk routes
 - Removed lingering synchronous Session imports and standardized on `get_async_db`
 - Added rollback-aware error handling for strategy simulation logging and AsyncSession helper for risk settings
@@ -209,15 +223,15 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 12:12-12:17 UTC
-**Stopped at:** Completed 01-07-PLAN.md (async API migration across alerts/market/strategies/risk)
+**Last session:** 2026-02-05 12:20-12:25 UTC
+**Stopped at:** Completed 01-08-PLAN.md (shared pagination utilities + strategies/trades listings)
 **Resume file:** None
 
 **For next session:**
 1. Read this STATE.md for current position
-2. Phase 1 now has 7/9 plans complete (01-01 through 01-07, except optional 01-02)
-3. 01-02 (rate limiting) still optional; decide whether to tackle it before 01-08
-4. Next planned execution target: 01-08 per roadmap when ready
+2. Phase 1 now has 8/9 plans complete (01-01 through 01-08, except optional 01-02)
+3. 01-02 (rate limiting) still optional; decide whether to run it before or after the final plan
+4. Next planned execution target: 01-09-PLAN.md (wrap up infrastructure hardening)
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -227,6 +241,7 @@ None currently.
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
 - Use `selectinload` for eager loading relationships in async context
 - Cursor pagination pattern established - use encode_cursor/decode_cursor for list endpoints
+- Shared helper `backend/core/pagination.py` exposes encode/decode/apply_cursor_pagination for reuse
 - Fetch limit+1 rows to detect has_more flag without COUNT(*) query
 - Order by composite key (timestamp DESC, id DESC) for deterministic pagination
 - Paper trading state persists automatically - sessions survive restart
