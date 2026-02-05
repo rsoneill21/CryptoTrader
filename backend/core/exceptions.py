@@ -65,7 +65,7 @@ class BaseAppException(HTTPException):
             "app_exception",
             extra={
                 "error_code": error_code,
-                "message": message,
+                "error_message": message,
                 "status_code": status_code,
                 "details": self.details,
             },
@@ -131,7 +131,8 @@ class ServiceUnavailableException(BaseAppException):
     External service temporarily unavailable.
 
     Raised when dependency (e.g., Redis, database, external API) is down
-    or circuit breaker is open. Includes Retry-After header.
+    or circuit breaker is open. Includes Retry-After header and supports
+    structured context (endpoint, dependency, operation) for observability.
     """
 
     def __init__(
@@ -139,6 +140,10 @@ class ServiceUnavailableException(BaseAppException):
         service: str,
         retry_after: int = 60,
         details: Optional[Dict[str, Any]] = None,
+        *,
+        endpoint: Optional[str] = None,
+        dependency: Optional[str] = None,
+        operation: Optional[str] = None,
     ):
         """
         Initialize service unavailable exception.
@@ -147,8 +152,20 @@ class ServiceUnavailableException(BaseAppException):
             service: Name of unavailable service (e.g., "rate_limiter", "database")
             retry_after: Seconds until client can retry
             details: Additional context (e.g., error message from service)
+            endpoint: API endpoint where failure occurred (e.g., "health")
+            dependency: Specific dependency name if different from ``service``
+            operation: Operation attempted when the failure occurred
         """
-        merged_details = {"service": service, "retry_after": retry_after}
+        merged_details: Dict[str, Any] = {
+            "service": service,
+            "retry_after": retry_after,
+        }
+        if endpoint:
+            merged_details["endpoint"] = endpoint
+        if dependency:
+            merged_details["dependency"] = dependency
+        if operation:
+            merged_details["operation"] = operation
         if details:
             merged_details.update(details)
 
