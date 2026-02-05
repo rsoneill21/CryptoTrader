@@ -8,9 +8,10 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import get_current_user
-from db.database import get_db
+from db.database import get_async_db
 from db.models import Strategy, StrategyPerformance, User, AIDecision
 from services.github_import import GitHubImportService
 from services.paper_trading_service import paper_trading_engine
@@ -536,15 +537,16 @@ async def list_strategies(
         description=f"Return strategies matching a status ({STATUS_HINT}).",
     ),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> List[StrategyResponse]:
     """List strategies, optionally filtering by status."""
     filters = _normalize_status_filters(status)
     try:
-        query = db.query(Strategy)
+        query = select(Strategy)
         if filters:
-            query = query.filter(Strategy.status.in_(filters))
-        strategies = query.order_by(Strategy.updated_at.desc()).all()
+            query = query.where(Strategy.status.in_(filters))
+        result = await db.execute(query.order_by(Strategy.updated_at.desc()))
+        strategies = list(result.scalars().all())
     except Exception as exc:  # pragma: no cover - defensive DB guard
         logger.error("Strategy list fetch failed: %s", exc)
         raise HTTPException(
@@ -568,7 +570,7 @@ async def compare_strategies(
         description="Repeatable filter to limit comparison to specific strategy IDs.",
     ),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StrategyComparisonResponse:
     """Return comparison-ready strategy metadata and latest performance metrics."""
     filters = _normalize_status_filters(status)
@@ -576,13 +578,15 @@ async def compare_strategies(
         filters = COMPARISON_DEFAULT_STATUSES
 
     try:
-        query = db.query(Strategy)
+        query = select(Strategy)
         if filters:
-            query = query.filter(Strategy.status.in_(filters))
+            query = query.where(Strategy.status.in_(filters))
         if strategy_ids:
-            query = query.filter(Strategy.id.in_(strategy_ids))
+            query = query.where(Strategy.id.in_(strategy_ids))
 
-        strategies = query.order_by(Strategy.updated_at.desc()).all()
+        result = await db.execute(query.order_by(Strategy.updated_at.desc()))
+        strategies = list(result.scalars().all())
+        
         if strategy_ids:
             ordered = _order_strategies_by_requested_ids(strategies, strategy_ids)
             if ordered:
@@ -591,15 +595,17 @@ async def compare_strategies(
         strategy_ids_list = [strategy.id for strategy in strategies]
         performance_map: Dict[int, StrategyPerformance] = {}
         if strategy_ids_list:
-            performance_rows = (
-                db.query(StrategyPerformance)
-                .filter(StrategyPerformance.strategy_id.in_(strategy_ids_list))
+            perf_query = (
+                select(StrategyPerformance)
+                .where(StrategyPerformance.strategy_id.in_(strategy_ids_list))
                 .order_by(
                     StrategyPerformance.strategy_id.asc(),
                     StrategyPerformance.period_end.desc(),
                 )
-                .all()
             )
+            perf_result = await db.execute(perf_query)
+            performance_rows = perf_result.scalars().all()
+            
             for row in performance_rows:
                 if row.strategy_id not in performance_map:
                     performance_map[row.strategy_id] = row
@@ -637,7 +643,7 @@ async def compare_strategies(
 async def import_from_github(
     payload: GitHubImportRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> GitHubImportResponse:
     """Import strategy definitions from a GitHub URL."""
     try:
@@ -667,7 +673,7 @@ async def import_from_github(
             logger.warning("Failed to save imported strategy %s: %s", candidate.path, exc)
 
     if imported_count > 0:
-        db.commit()
+        await db.commit()
 
     return GitHubImportResponse(
         imported_count=imported_count,
@@ -681,11 +687,11 @@ async def import_from_github(
 async def get_strategy(
     strategy_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StrategyResponse:
     """Return a single strategy by id."""
     try:
-        strategy = db.get(Strategy, strategy_id)
+        strategy = await db.get(Strategy, strategy_id)
     except Exception as exc:  # pragma: no cover
         logger.error("Failed loading strategy %s: %s", strategy_id, exc)
         raise HTTPException(
@@ -707,11 +713,11 @@ async def promote_strategy(
     strategy_id: int,
     payload: StrategyPromoteRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StrategyResponse:
     """Mark a strategy as live after explicit confirmation."""
     try:
-        strategy = db.get(Strategy, strategy_id)
+        strategy = await db.get(Strategy, strategy_id)
     except Exception as exc:
         logger.error("Failed loading strategy for promotion %s: %s", strategy_id, exc)
         raise HTTPException(
@@ -742,10 +748,10 @@ async def promote_strategy(
     strategy.promoted_by_recommendation = False
 
     try:
-        db.commit()
-        db.refresh(strategy)
+        await db.commit()
+        await db.refresh(strategy)
     except Exception as exc:  # pragma: no cover
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to persist strategy promotion %s: %s", strategy_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -759,7 +765,7 @@ async def promote_strategy(
 async def create_strategy(
     payload: StrategyCreate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StrategyResponse:
     """Create a new strategy definition."""
     try:
@@ -775,10 +781,10 @@ async def create_strategy(
             promoted_by_recommendation=payload.promoted_by_recommendation,
         )
         db.add(strategy)
-        db.commit()
-        db.refresh(strategy)
+        await db.commit()
+        await db.refresh(strategy)
     except Exception as exc:  # pragma: no cover
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to create strategy %s: %s", payload.name, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -793,11 +799,11 @@ async def update_strategy(
     strategy_id: int,
     payload: StrategyUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> StrategyResponse:
     """Modify a strategy definition."""
     try:
-        strategy = db.get(Strategy, strategy_id)
+        strategy = await db.get(Strategy, strategy_id)
     except Exception as exc:
         logger.error("Failed loading strategy for update %s: %s", strategy_id, exc)
         raise HTTPException(
@@ -840,10 +846,10 @@ async def update_strategy(
         return _serialize_strategy(strategy)
 
     try:
-        db.commit()
-        db.refresh(strategy)
+        await db.commit()
+        await db.refresh(strategy)
     except Exception as exc:  # pragma: no cover
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to persist strategy update %s: %s", strategy_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -857,11 +863,11 @@ async def update_strategy(
 async def delete_strategy(
     strategy_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> None:
     """Remove a strategy from the catalog."""
     try:
-        strategy = db.get(Strategy, strategy_id)
+        strategy = await db.get(Strategy, strategy_id)
     except Exception as exc:
         logger.error("Failed to load strategy for deletion %s: %s", strategy_id, exc)
         raise HTTPException(
@@ -876,10 +882,10 @@ async def delete_strategy(
         )
 
     try:
-        db.delete(strategy)
-        db.commit()
+        await db.delete(strategy)
+        await db.commit()
     except Exception as exc:  # pragma: no cover
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to delete strategy %s: %s", strategy_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -892,10 +898,10 @@ async def simulate_strategy_signal(
     strategy_id: int,
     signal: PaperTradeSignal,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Execute a paper trading signal for a strategy."""
-    strategy = db.get(Strategy, strategy_id)
+    strategy = await db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
@@ -915,11 +921,19 @@ async def simulate_strategy_signal(
             related_strategy_id=strategy_id,
         )
         db.add(decision)
-        db.commit()
-        
+        await db.commit()
+
         return {"status": "success", "results_count": len(results)}
     except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        await db.rollback()
+        logger.error("Failed to simulate strategy %s: %s", strategy_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to process strategy simulation",
+        ) from exc
 
 
 @router.get("/paper-portfolio", response_model=PaperPortfolioSnapshot)
