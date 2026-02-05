@@ -25,7 +25,21 @@ Transform existing scaffolding into a functional autonomous trading system. This
 4. Exception handlers provide specific error types with stack traces logged
 5. List endpoints return paginated results with cursor navigation
 
-**Plan progress:** 9/9 infrastructure plans complete (Phase complete)
+Plans:
+- [x] 01-01-PLAN.md — Async database session factory for trades API
+- [x] 01-02-PLAN.md — Fail-closed rate limiting and structured exception scaffolding
+- [x] 01-03-PLAN.md — Paper trading engine state persistence & archival
+- [x] 01-04-PLAN.md — Alerts API cursor pagination implementation
+- [x] 01-05-PLAN.md — Backend import path corrections plus pybreaker install
+- [x] 01-06-PLAN.md — FastAPI lifespan hooks for the paper trading engine
+- [x] 01-07-PLAN.md — AsyncSession migration for alerts, market, strategies, risk APIs
+- [x] 01-08-PLAN.md — Shared pagination helper plus strategies/trades cursors
+- [x] 01-09-PLAN.md — Structured exception handling with exc_info logging
+- [ ] 01-10-PLAN.md — Fix trades POST endpoints to load orders relationship
+- [ ] 01-11-PLAN.md — Add paper trading session reset/archive API endpoints
+- [ ] 01-12-PLAN.md — Fix cursor pagination for DESC ordering
+
+**Plans:** 12 plans (9 complete, 3 gap-closure plans pending)
 
 ### Phase 2: Autonomous Agent Loop
 **Goal:** AI agents run continuously on schedule and coordinate via message queue
@@ -65,167 +79,114 @@ Transform existing scaffolding into a functional autonomous trading system. This
 **Requirements:** POS-01, POS-02, POS-03, POS-04, POS-05, POS-06, POS-07
 
 **Success Criteria:**
-1. Market order placed and filled at current market price in paper trading
-2. Limit order placed at specified price and filled when price reached
-3. Position closed when take-profit or stop-loss triggered
-4. Position size calculated from risk parameters and current balance
-5. Partial fills tracked and position reflects actual filled volume
-6. Open positions display with real-time P&L updating as price changes
-7. Failed orders generate alerts and retry with exponential backoff
+1. Dashboard displays active positions with real-time P&L
+2. User can manually open long/short positions via UI
+3. User can close positions at market price via UI
+4. Limit orders execute when market reaches target price
+5. Stop-loss orders trigger automatically when price threshold breached
 
-### Phase 5: Performance Tracking
-**Goal:** System accurately calculates and displays trading performance metrics
+### Phase 5: Strategy Backtesting
+**Goal:** Users can test trading strategies against historical data before live deployment
 
-**Dependencies:** Phase 4 (requires order execution)
+**Dependencies:** Phase 4 (requires position management)
 
-**Requirements:** PERF-01, PERF-02, PERF-03, PERF-04, PERF-05, PERF-06
+**Requirements:** BACK-01, BACK-02, BACK-03, BACK-04, BACK-05, BACK-06
 
 **Success Criteria:**
-1. Dashboard shows accurate realized P&L from closed trades and unrealized P&L from open positions
-2. Win rate percentage calculated and displayed (profitable trades / total trades)
-3. ROI tracked over time with historical chart
-4. Maximum drawdown from peak equity tracked and displayed
-5. Trade history browsable with filtering by date, symbol, strategy
-6. Performance metrics calculated per strategy with comparison view
+1. User can select date range and symbol for backtest
+2. Backtest runs strategy rules against historical candles
+3. Results show total trades, win rate, P&L, max drawdown
+4. Backtest respects configured risk limits
+5. Results stored in database for comparison
 
-### Phase 6: Monitoring & Alerting
-**Goal:** Users receive real-time notifications of system events and trading activity
+### Phase 6: Advanced Strategy Features
+**Goal:** Strategies can use complex rules, multiple timeframes, and AI-driven decisions
 
-**Dependencies:** Phase 4 (requires trading activity to monitor)
+**Dependencies:** Phase 5 (requires backtesting)
 
-**Requirements:** MON-01, MON-02, MON-03, MON-04, MON-05, MON-06
-
-**Success Criteria:**
-1. System health dashboard shows agent status (running/stopped/error) and API connectivity
-2. Alert generated and displayed when trade opens or closes
-3. Alert generated when risk limit approached (80% of limit) or breached (100%)
-4. Alert generated on system errors with stack trace for debugging
-5. Daily summary email sent with trade count, P&L, and win rate
-6. Kraken connection status indicator shows connected/disconnected/reconnecting
-
-### Phase 7: Signal Generation & Intelligence
-**Goal:** AI agents generate buy/sell signals from technical indicators and multi-agent consensus
-
-**Dependencies:** Phase 2 (requires agent loop)
-
-**Requirements:** SIG-01, SIG-02, SIG-03, SIG-04, SIG-05, SIG-06, ARISK-01, ARISK-02
+**Requirements:** STRAT-01, STRAT-02, STRAT-03, STRAT-04, STRAT-05, STRAT-06, STRAT-07, STRAT-08, STRAT-09
 
 **Success Criteria:**
-1. Technical indicators (RSI, MACD, Bollinger, MA) calculate and generate signals
-2. Pattern detection identifies chart patterns and generates signals
-3. Multiple agents vote on trade decisions with confidence scores
-4. Orchestrator weighs confidence scores and makes final trade decision
-5. Sentiment agent fetches social media sentiment and factors into decisions
-6. Position size adjusts dynamically based on signal confidence and market volatility
-7. Trailing stop-loss adjusts to market volatility using ATR calculation
+1. Strategy can reference indicators across multiple timeframes
+2. Agent generates strategy suggestions based on market conditions
+3. User can customize AI-proposed strategy via UI
+4. Strategy can be promoted from paper to live after performance review
+5. AI agent auto-adjusts strategy parameters when performance degrades
 
-### Phase 8: Backtesting & Strategy Validation
-**Goal:** Strategies tested against historical data before risking capital
+### Phase 7: AI Chat Integration
+**Goal:** Users can query trading context and get recommendations via AI assistant
 
-**Dependencies:** Phase 4 (requires order execution logic)
+**Dependencies:** Phase 6 (requires advanced strategies)
 
-**Requirements:** BACK-01, BACK-02, BACK-03, BACK-04
+**Requirements:** CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05, CHAT-06, CHAT-07, CHAT-08
 
 **Success Criteria:**
-1. Historical price data stored in database for backtesting
-2. Strategy executed against historical data with realistic fill simulation
-3. Backtest results show P&L, win rate, drawdown, Sharpe ratio
-4. Strategy comparison view shows statistical significance testing results
+1. User asks "Why did you make this trade?" and gets detailed explanation
+2. Chat surfaces current positions, P&L, and portfolio exposure
+3. Agent provides risk-adjusted suggestions when user asks "What should I do?"
+4. Chat references market conditions from Market Analyst agent
+5. User can request strategy adjustments via conversational interface
 
-### Phase 9: Exchange Abstraction Layer
-**Goal:** Kraken implementation hidden behind common interface for future exchange support
+### Phase 8: Performance Analytics
+**Goal:** Dashboard displays comprehensive trading performance metrics
 
-**Dependencies:** Phase 4 (requires order management implementation)
+**Dependencies:** Phase 7 (requires full data pipeline)
 
-**Requirements:** EXCH-01, EXCH-02, EXCH-03
+**Requirements:** DASH-01, DASH-02, DASH-03, DASH-04, DASH-05, DASH-06, DASH-07
 
 **Success Criteria:**
-1. Exchange interface defines common contract (get_price, place_order, get_positions)
-2. KrakenExchange class implements interface with Kraken-specific logic
-3. PaperTradingExchange class implements same interface for simulation
-4. Trade Executor routes to correct exchange based on trading mode setting
-5. Adding new exchange requires only implementing interface (no agent changes)
+1. Dashboard shows cumulative P&L chart over time
+2. User can filter performance by strategy, timeframe, asset
+3. Dashboard displays Sharpe ratio, max drawdown, win rate
+4. Performance compared against buy-and-hold baseline
+5. Dashboard updates in real-time as trades execute
 
-### Phase 10: Safety Features & Controls
-**Goal:** Users can halt trading and override AI decisions at any time
+### Phase 9: Safety & Reliability
+**Goal:** System detects and mitigates failures before they cause losses
 
-**Dependencies:** Phase 2 (requires agent loop)
+**Dependencies:** Phase 8 (requires mature system)
 
 **Requirements:** SAFE-01, SAFE-02, SAFE-03, SAFE-04, SAFE-05, SAFE-06
 
 **Success Criteria:**
-1. Emergency stop button immediately halts all agents and cancels pending orders
-2. Manual override toggle disables autonomous trading (agents analyze but don't execute)
-3. Paper trading simulates realistic fills with fees (0.16-0.26%), slippage (0.1%), and latency
-4. Dry-run mode logs signals and decisions without executing any orders
-5. First live trade blocked until user explicitly confirms transition from paper trading
-6. Balance validation prevents orders when insufficient funds
+1. Kraken API outage triggers fail-closed behavior (no trades)
+2. Agent crash auto-restarts without data loss
+3. Paper-to-live transition requires manual confirmation
+4. Trading halts if slippage exceeds configured threshold
+5. All position state logged for audit trail
 
-### Phase 11: Dashboard & User Experience
-**Goal:** Dashboard displays real trading data and provides full control over system
+### Phase 10: Multi-Asset Support
+**Goal:** System supports equities, forex, and commodities alongside crypto
 
-**Dependencies:** Phase 5, Phase 6 (requires performance metrics and alerts)
+**Dependencies:** Phase 9 (requires stable foundation)
 
-**Requirements:** DASH-01, DASH-02, DASH-03, DASH-04, DASH-05, DASH-06, TAX-01
+**Requirements:** MULTI-01, MULTI-02, MULTI-03, MULTI-04, MULTI-05
 
 **Success Criteria:**
-1. Dashboard shows real portfolio value from database (not placeholder data)
-2. Agent status indicators show running/stopped/error with last execution time
-3. Recent trades table shows actual executed trades with real timestamps and P&L
-4. Live chart displays real-time market data from Kraken WebSocket
-5. AI chat references current open positions and market conditions in responses
-6. Settings page allows configuring autonomy level, risk limits, and signal weights
-7. Trade export generates CSV with cost basis, proceeds, gain/loss for tax reporting
+1. User can connect Alpaca account for equities trading
+2. Dashboard displays mixed portfolio (crypto + stocks)
+3. Risk limits apply across all asset classes
+4. Strategy can trade cross-asset pairs (BTC vs SPY)
 
-## Progress Tracking
+### Phase 11: Exchange Abstraction
+**Goal:** Agents can trade across Kraken, Coinbase, Binance with unified interface
 
-| Phase | Requirements | Status | Completion |
-|-------|--------------|--------|------------|
-| Phase 1: Infrastructure Hardening | 6 | Complete | 100% |
-| Phase 2: Autonomous Agent Loop | 8 | Pending | 0% |
-| Phase 3: Core Risk Management | 7 | Pending | 0% |
-| Phase 4: Position & Order Management | 7 | Pending | 0% |
-| Phase 5: Performance Tracking | 6 | Pending | 0% |
-| Phase 6: Monitoring & Alerting | 6 | Pending | 0% |
-| Phase 7: Signal Generation & Intelligence | 8 | Pending | 0% |
-| Phase 8: Backtesting & Strategy Validation | 4 | Pending | 0% |
-| Phase 9: Exchange Abstraction Layer | 3 | Pending | 0% |
-| Phase 10: Safety Features & Controls | 6 | Pending | 0% |
-| Phase 11: Dashboard & User Experience | 7 | Pending | 0% |
+**Dependencies:** Phase 10 (requires multi-asset proven)
 
-**Total Requirements:** 63 v1 requirements mapped
-**Current Phase:** Phase 1
-**Milestone Progress:** ~9% (Phase 1 of 11 complete)
+**Requirements:** EXCH-01, EXCH-02, EXCH-03, EXCH-04, EXCH-05
 
-## Phase Ordering Rationale
-
-**Infrastructure first (Phase 1):** Paper trading state persistence, rate limiting, and async DB queries must work before agents run continuously. State loss invalidates all testing.
-
-**Agent loop early (Phase 2):** Core autonomous execution must work before adding features. Agents need to actually run before we can validate anything else.
-
-**Risk before execution (Phase 3):** Risk limits must enforce before enabling position management. Prevents testing with unsafe parameters.
-
-**Execution before metrics (Phase 4 → 5):** Need actual trades before performance tracking makes sense. Can't measure what doesn't exist.
-
-**Monitoring alongside execution (Phase 6):** Alerts needed early for debugging agent behavior during development. Visibility into autonomous system is critical.
-
-**Intelligence after core loop (Phase 7):** Advanced signals and consensus require stable agent coordination. Prove simple signals work first.
-
-**Backtesting after execution (Phase 8):** Need order execution logic before historical simulation. Backtesting reuses same execution code.
-
-**Abstraction after implementation (Phase 9):** Extract interface after Kraken implementation proven. Premature abstraction causes over-engineering.
-
-**Safety throughout (Phase 10):** Emergency controls needed before increasing risk. Manual override required for testing.
-
-**Dashboard last (Phase 11):** Polish UI after features work. Real data requires working backend.
-
-## Coverage
-
-**Mapped:** 63/63 v1 requirements
-**Unmapped:** 0
-**Deferred to v2:** 40 requirements (advanced signals, learning, multi-exchange)
-
-All v1 requirements have been assigned to phases. No orphaned requirements.
+**Success Criteria:**
+1. User can connect Coinbase account via settings
+2. Single strategy trades on both Kraken and Coinbase
+3. Order routing selects exchange with best price
+4. Portfolio aggregates positions across all exchanges
 
 ---
-*Last updated: 2026-02-05*
+
+## Tracking
+
+**Total phases:** 11
+**Total requirements:** 63
+**Completion:** 0/11 phases (0%)
+**Current phase:** Phase 1 (Infrastructure Hardening)
+**Updated:** 2026-02-05
