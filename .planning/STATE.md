@@ -39,7 +39,7 @@
 - Completed 01-11: Paper trading session reset/archive endpoints exposed via FastAPI
 - Completed 01-12: Cursor pagination helper enforces DESC comparisons with optional ASC support
 - Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
-- Completed 01-14: Auth, export, and AI APIs now use AsyncSession plus awaited select queries end-to-end
+- Completed 01-14: Auth, export, AI, and system log APIs now use AsyncSession plus awaited select queries end-to-end
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -101,6 +101,7 @@
 - ✓ Auth, export, and AI APIs inject AsyncSession dependencies and await every ORM call
 - ✓ Password reset token helper runs inside `asyncio.to_thread` so auth endpoints remain non-blocking until the service is rewritten
 - ✓ Alerts/activity/model stats queries reuse async select builders to keep pagination + aggregations off the event loop
+- ✓ System logs listing uses AsyncSession select queries for counts and paginated results, removing blocking Session usage
 
 ## Performance Metrics
 
