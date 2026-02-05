@@ -20,13 +20,13 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-02 completed (2 of 4 in phase)
+**Plan:** 01-01 completed (1 of 4 in phase)
 **Status:** In progress
-**Progress:** ██░░░░░░░░ 18% (2/11 phases, 2/4 plans in current phase)
+**Progress:** █░░░░░░░░░ 9% (0/11 phases complete, 1/4 plans in current phase)
 
 **What's happening:**
-- Completed 01-02: Structured exceptions and fail-closed rate limiting
-- Next: 01-03 Async DB migration or 01-04 Pagination (can run in parallel)
+- Completed 01-01: Async database session factory
+- Next: 01-02, 01-03, 01-04 (rate limiting, state persistence, pagination)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -40,15 +40,15 @@
 **What doesn't work:**
 - Agents don't run autonomously on schedule
 - Paper trading state lost on restart
-- Async routes use sync DB queries (blocks event loop)
+- Rate limiter fails open when Redis down
 - No pagination on list endpoints
 - Dashboard shows placeholder data
 - AI chat doesn't reference trading state
 
-**Fixed in 01-02:**
-- ✓ Rate limiter now fails closed with circuit breaker when Redis down
-- ✓ Structured exception hierarchy with RFC9457-style error envelopes
-- ✓ Error handlers forward headers (Retry-After) to clients
+**Fixed in 01-01:**
+- ✓ Trades API endpoints use AsyncSession (non-blocking database queries)
+- ✓ Async engine and session factory available for all async routes
+- ✓ Relationship eager loading with selectinload for async context
 
 ## Performance Metrics
 
@@ -67,19 +67,20 @@
 | Agent loop in Phase 2 | 2026-02-04 | Can't test anything until agents actually run; core autonomous execution must work first | Unblocks all subsequent phases |
 | Risk management before position management | 2026-02-04 | Risk limits must enforce before enabling trades; prevents unsafe testing | Safety by design, not afterthought |
 | Exchange abstraction after Kraken proven | 2026-02-04 | Premature abstraction causes over-engineering; extract interface from working implementation | Avoids speculation about future exchanges |
-| Circuit breaker for Redis rate limiter | 2026-02-05 | 5 failures to open, 60s timeout - conservative defaults prevent false positives while detecting failures | May need tuning based on production Redis patterns |
-| Exception-based rate limiting | 2026-02-05 | Raise exceptions instead of returning bool eliminates all fail-open code paths | Callers cannot ignore rate limit failures |
-| BaseAppException handler registration order | 2026-02-05 | Registered before HTTPException due to inheritance - FastAPI checks handlers in order | Ensures typed exceptions use specialized handler |
+| AsyncSession for trades API | 2026-02-05 | Use AsyncSession instead of asyncio.to_thread wrapper - native async provides better performance and follows SQLAlchemy 2.0 patterns | All new endpoints must use async_sessionmaker pattern |
+| Dual session factories (sync + async) | 2026-02-05 | Keep sync SessionLocal for legacy utilities (logging, backups) during migration period | Allows gradual migration without breaking existing code |
+| aiosqlite for development | 2026-02-05 | Thread-pool async bridge sufficient for dev/testing; production will use asyncpg | Development workflow unaffected, production deployment needs asyncpg setup |
 
 ### Active Todos
 
 - [x] ~~Create Phase 1 execution plans (infrastructure fixes)~~ - Completed: 01-01 through 01-04 created
-- [x] ~~Rate limiter fail-closed: Raise exception or return 503?~~ - Completed: Raises ServiceUnavailableException (503) with circuit breaker
-- [ ] Execute 01-03: Async DB migration (AsyncSession)
+- [x] ~~Execute 01-01: Async DB session factory~~ - Completed: AsyncSession with aiosqlite
+- [ ] Migrate remaining API endpoints to AsyncSession (market, strategies, alerts)
+- [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker
+- [ ] Execute 01-03: Paper trading state persistence
 - [ ] Execute 01-04: Pagination (cursor-based for trading data)
-- [ ] Verify async DB migration path (AsyncSession vs asyncio.to_thread)
-- [ ] Document paper trading schema (positions, portfolio_snapshots tables)
-- [ ] Install pybreaker dependency for circuit breaker support
+- [ ] Install aiosqlite in production requirements.txt
+- [ ] Document asyncpg migration for production PostgreSQL
 
 ### Blockers
 
@@ -88,11 +89,13 @@ None currently.
 ### Recent Changes
 
 **2026-02-05:**
-- Completed 01-02: Structured exceptions and fail-closed rate limiting
-- Created BaseAppException hierarchy (RateLimitException, ServiceUnavailableException, DatabaseException)
-- Implemented circuit breaker-protected Redis rate limiter (fail-closed)
-- Wired structured exceptions into FastAPI error handlers with header forwarding
-- Duration: 3 minutes (3 tasks, 3 commits)
+- Completed 01-01: Async database session factory
+- Created AsyncEngine and AsyncSessionLocal with aiosqlite driver
+- Converted trades API (11 endpoints) to use AsyncSession
+- Added get_async_db dependency for FastAPI async routes
+- Installed aiosqlite dependency (Rule 3 - blocking fix)
+- Converted fetch_decisions_for_trade helper to async (Rule 3 - blocking fix)
+- Duration: ~5 minutes (2 tasks, 2 commits)
 
 **2026-02-04:**
 - Roadmap created with 11 phases
@@ -109,36 +112,37 @@ None currently.
 3. **State persistence bugs:** Paper trading state loss invalidates all performance metrics and risks duplicate positions in live trading.
 
 **Known tech debt (from PROJECT.md):**
-- ~~Rate limiting fails open (INFRA-02)~~ - FIXED in 01-02
-- ~~Bare exception handling (INFRA-04)~~ - FIXED in 01-02 (structured exception hierarchy)
-- Sync DB queries in async routes (INFRA-03) - IN PROGRESS (01-03 planned)
-- No pagination (INFRA-06) - IN PROGRESS (01-04 planned)
-- Paper trading state not persisted (INFRA-01) - PLANNED (01-01 completed async session, state persistence next)
+- ~~Sync DB queries in trades API (INFRA-03)~~ - FIXED in 01-01 (AsyncSession for all trades endpoints)
+- Rate limiting fails open (INFRA-02) - PLANNED (01-02)
+- Bare exception handling (INFRA-04) - PLANNED (01-02 or separate plan)
+- No pagination (INFRA-06) - PLANNED (01-04)
+- Paper trading state not persisted (INFRA-01) - PLANNED (01-03)
 - Partial fills not handled (POS-05)
 - Slippage/fees not modeled (SAFE-03)
 - Stop-loss not enforced (RISK-02)
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 16:42-16:45 UTC
-**Stopped at:** Completed 01-02-PLAN.md (structured exceptions and fail-closed rate limiting)
-**Resume file:** None (can execute 01-03 or 01-04 in parallel)
+**Last session:** 2026-02-05 01:48-01:53 UTC
+**Stopped at:** Completed 01-01-PLAN.md (async database session factory)
+**Resume file:** None (can execute 01-02, 01-03, or 01-04)
 
 **For next session:**
 1. Read this STATE.md for current position
-2. Execute 01-03-PLAN.md (async DB migration) OR 01-04-PLAN.md (pagination)
-3. Both plans are independent and can run in parallel
+2. Execute 01-02-PLAN.md (rate limiting) OR 01-03-PLAN.md (state persistence) OR 01-04-PLAN.md (pagination)
+3. Plans can run independently in any order
 
 **Context to carry forward:**
-- Plan 01-02 establishes exception patterns - use RateLimitException, ServiceUnavailableException, DatabaseException
-- Circuit breaker infrastructure in place for Redis - can extend to other services
-- Error handlers forward headers - use Retry-After for service degradation
-- pybreaker dependency needs installation before 01-03/01-04 execution
+- AsyncSession pattern established - use `get_async_db` dependency for all new async routes
+- All database operations in async endpoints must be awaited
+- Use `selectinload` for eager loading relationships in async context
+- aiosqlite installed for development; production needs asyncpg
+- Sync SessionLocal still available for legacy utilities (logging, backups)
 
 **Questions resolved:**
-- ~~Async DB migration: AsyncSession (big change) or asyncio.to_thread (wrapper)?~~ - RESEARCH COMPLETE: AsyncSession with asyncpg/aiosqlite (see 01-RESEARCH.md)
-- ~~Rate limiter fail-closed: Raise exception or return 503?~~ - COMPLETE: Raises ServiceUnavailableException (503) with Retry-After header
-- Paper trading schema: New tables or extend existing? - DEFERRED to state persistence plan
+- ~~Async DB migration: AsyncSession (big change) or asyncio.to_thread (wrapper)?~~ - COMPLETE: AsyncSession with aiosqlite (01-01)
+- Paper trading schema: New tables or extend existing? - DEFERRED to 01-03 (state persistence plan)
+- Rate limiter fail-closed: Raise exception or return 503? - DEFERRED to 01-02
 
 ---
 *State initialized: 2026-02-04*
