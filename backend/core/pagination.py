@@ -41,8 +41,18 @@ def apply_cursor_pagination(
     cursor_values: Optional[Tuple[datetime, int]] = None,
     timestamp_column: ColumnElement[Any],
     id_column: ColumnElement[Any],
+    descending: bool = True,
 ) -> Tuple[Select, Optional[datetime], Optional[int]]:
-    """Apply cursor pagination filters to a SQLAlchemy select query."""
+    """Apply cursor pagination filters to a SQLAlchemy select query.
+
+    Args:
+        query: Base select query with ordering already applied.
+        cursor: Encoded cursor token from client, if provided.
+        cursor_values: Explicit cursor tuple to skip decode step.
+        timestamp_column: Column used for chronological ordering.
+        id_column: Column used as deterministic tie-breaker.
+        descending: Whether the underlying ORDER BY uses DESC columns.
+    """
 
     if cursor_values is not None:
         cursor_timestamp, cursor_id = cursor_values
@@ -51,10 +61,16 @@ def apply_cursor_pagination(
     else:
         return query, None, None
 
-    query = query.where(
-        or_(
+    if descending:
+        comparison = or_(
             timestamp_column > cursor_timestamp,
             (timestamp_column == cursor_timestamp) & (id_column > cursor_id),
         )
-    )
+    else:
+        comparison = or_(
+            timestamp_column < cursor_timestamp,
+            (timestamp_column == cursor_timestamp) & (id_column < cursor_id),
+        )
+
+    query = query.where(comparison)
     return query, cursor_timestamp, cursor_id
