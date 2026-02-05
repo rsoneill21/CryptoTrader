@@ -20,15 +20,16 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-03 completed (3 of 4 in phase)
-**Status:** In progress
-**Progress:** ███░░░░░░░ 27% (0/11 phases complete, 3/4 plans in current phase)
+**Plan:** 01-05 completed (4 of 4 in phase)
+**Status:** Phase complete
+**Progress:** ████░░░░░░ 36% (0/11 phases complete, 4/4 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
 - Completed 01-03: Paper trading state persistence
 - Completed 01-04: Cursor-based pagination for alerts
-- Next: 01-02 (rate limiting)
+- Completed 01-05: Backend import path fixes and pybreaker dependency
+- Next: Execute 01-02 (rate limiting) or move to Phase 2
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -65,6 +66,12 @@
 - ✓ Cursor tokens encode timestamp+id for deterministic ordering
 - ✓ Alerts endpoint migrated to AsyncSession
 
+**Fixed in 01-05:**
+- ✓ All import paths corrected (from backend.X → from X)
+- ✓ pybreaker dependency installed for circuit breaker
+- ✓ Backend server starts without ModuleNotFoundError
+- ✓ API endpoints respond to HTTP requests
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -90,6 +97,8 @@
 | Session archival instead of deletion | 2026-02-05 | Keep historical sessions for audit trail and performance comparison | Enables "reset to fresh" while preserving past session data |
 | Cursor-based pagination for lists | 2026-02-05 | Cursor pagination with timestamp+id composite key ensures stable results when alerts inserted between pages; avoids offset drift | All list endpoints should use cursor pattern for consistency |
 | Limit+1 fetch strategy | 2026-02-05 | Fetch limit+1 rows to detect has_more flag; eliminates expensive COUNT(*) queries on large tables | Better performance for pagination, no total count needed |
+| Relative imports from backend/ | 2026-02-05 | Use 'from core.X', 'from api.X' pattern when running from backend/ directory; no backend. prefix | All backend code uses consistent import pattern, eliminates ModuleNotFoundError |
+| pybreaker for circuit breakers | 2026-02-05 | Install pybreaker>=1.0.0 for CircuitBreaker pattern in rate limiter | Enables fail-closed behavior when Redis unavailable |
 
 ### Active Todos
 
@@ -97,13 +106,14 @@
 - [x] ~~Execute 01-01: Async DB session factory~~ - Completed: AsyncSession with aiosqlite
 - [x] ~~Execute 01-03: Paper trading state persistence~~ - Completed: State persists to DB with archival
 - [x] ~~Execute 01-04: Pagination (cursor-based for alerts)~~ - Completed: cursor pagination with AsyncSession
+- [x] ~~Execute 01-05: Backend import path fixes~~ - Completed: Fixed all backend.X imports, added pybreaker
 - [ ] Migrate remaining API endpoints to AsyncSession (market, strategies, create_alert, get_alert, update_alert)
-- [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker
+- [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker (optional - 01-05 was gap closure for UAT blocker)
 - [ ] Migrate other list endpoints to cursor pagination (strategies, trades, decisions)
 - [ ] Frontend adaptation: use cursor tokens instead of page numbers for alerts
 - [ ] Add composite index on alerts (created_at, id) for pagination performance
 - [ ] Wire paper trading engine lifecycle hooks into FastAPI startup/shutdown
-- [ ] Install pybreaker in requirements.txt (needed for 01-02 rate limiter)
+- [x] ~~Install pybreaker in requirements.txt~~ - Completed in 01-05
 - [ ] Install aiosqlite in production requirements.txt
 - [ ] Document asyncpg migration for production PostgreSQL
 
@@ -113,7 +123,17 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest):**
+**2026-02-05 (latest - 01-05):**
+- Completed 01-05: Backend import path fixes and pybreaker dependency
+- Fixed all 38 incorrect 'from backend.X' imports to relative paths
+- Installed pybreaker>=1.0.0 for circuit breaker support
+- Fixed CircuitBreaker parameter: timeout_duration → reset_timeout
+- Added missing get_db/Session imports to alerts.py
+- Backend server now starts without ModuleNotFoundError
+- API endpoints respond correctly to HTTP requests
+- Duration: ~5 minutes (3 tasks, 3 commits)
+
+**2026-02-05 (earlier):**
 - Completed 01-03: Paper trading state persistence
 - Added PaperTradingState model with session_id, state_json, is_active, timestamps
 - Created PaperTradingStateService with async load/save/archive methods
@@ -166,16 +186,19 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 01:57-02:17 UTC
-**Stopped at:** Completed 01-03-PLAN.md (paper trading state persistence)
-**Resume file:** None (can execute 01-02 next)
+**Last session:** 2026-02-05 10:06-10:11 UTC
+**Stopped at:** Completed 01-05-PLAN.md (backend import fixes - gap closure)
+**Resume file:** None
 
 **For next session:**
 1. Read this STATE.md for current position
-2. Execute 01-02-PLAN.md (rate limiting) to complete Phase 1
-3. Phase 1 will be complete after 01-02
+2. Phase 1 has 4 completed plans (01-01, 01-03, 01-04, 01-05)
+3. 01-02 (rate limiting) exists but was not needed for UAT blocker
+4. Consider moving to Phase 2 or executing 01-02 for completeness
 
 **Context to carry forward:**
+- **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
+- **Dependencies:** pybreaker>=1.0.0 installed for circuit breaker support
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Use `selectinload` for eager loading relationships in async context
