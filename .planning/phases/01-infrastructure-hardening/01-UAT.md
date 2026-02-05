@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 01-infrastructure-hardening
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md, 01-07-SUMMARY.md, 01-08-SUMMARY.md, 01-09-SUMMARY.md]
 started: 2026-02-05T18:10:00Z
-updated: 2026-02-05T16:20:00Z
+updated: 2026-02-05T16:25:00Z
 ---
 
 ## Current Test
@@ -57,8 +57,13 @@ skipped: 0
   reason: "User reported: Unable to place a paper trade via API. POST /api/trades and POST /api/trades/system both return 500 Unexpected Error even on a clean uvicorn instance, so no state change can be made to verify persistence."
   severity: major
   test: 3
-  artifacts: []
-  missing: []
+  root_cause: "POST endpoints don't eagerly load Trade.orders relationship before calling _serialize_trade(). Line 399 accesses trade.orders but relationship isn't loaded."
+  artifacts:
+    - path: "backend/api/trades.py"
+      issue: "create_manual_trade and create_system_trade don't use selectinload(Trade.orders)"
+  missing:
+    - "After db.refresh(trade), reload trade with selectinload(Trade.orders) before serialization"
+  debug_session: ".planning/debug/api-trades-post-500-error.md"
 
 - truth: "User can trigger session reset/archive to start fresh paper trading session"
   status: failed
@@ -79,11 +84,12 @@ skipped: 0
   reason: "Page 1 returns IDs 8,7,6 with next_cursor. Page 2 using that cursor returns SAME IDs 8,7,6 instead of next page 5,4,3. Cursor not being applied as filter."
   severity: major
   test: 5
+  root_cause: "apply_cursor_pagination uses `timestamp_column < cursor_timestamp` and `id_column < cursor_id` which is correct for ASC ordering, but alerts are sorted DESC (newest first). For DESC, comparisons should use `>` not `<`."
   artifacts:
-    - path: "backend/api/alerts.py"
-      issue: "Cursor parameter not correctly filtering results"
     - path: "backend/core/pagination.py"
-      issue: "apply_cursor_pagination may not be correctly building WHERE clause"
+      issue: "Lines 56-57 use < comparison assuming ASC order, but list endpoints sort DESC"
   missing:
-    - "Fix cursor filter to exclude items at or before cursor position"
-    - "Verify cursor decode produces correct timestamp+id values"
+    - "Change line 56 to `timestamp_column > cursor_timestamp`"
+    - "Change line 57 to `id_column > cursor_id`"
+    - "Or add direction parameter to handle both ASC and DESC ordering"
+  debug_session: "inline diagnosis"
