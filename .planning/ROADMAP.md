@@ -61,6 +61,18 @@ Plans:
 5. Agents continue running after individual agent failure without crashing system
 6. Agents shut down gracefully when application stops (no zombie processes)
 
+**Plans:** 8 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — AgentManager with staggered startup and FastAPI lifespan wiring
+- [ ] 02-02-PLAN.md — Redis Streams for reliable message delivery with priority queues
+- [ ] 02-03-PLAN.md — Agent control API (pause/resume/status endpoints)
+- [ ] 02-04-PLAN.md — Heartbeat monitoring for stuck agent detection
+- [ ] 02-05-PLAN.md — Queue metrics, pipeline events, and operator actions
+- [ ] 02-06-PLAN.md — Dashboard API endpoints for observability
+- [ ] 02-07-PLAN.md — Wire agents to use Redis Streams with full audit bundles
+- [ ] 02-08-PLAN.md — Trade Executor fallback strategy for order failures
+
 ### Phase 3: Core Risk Management
 **Goal:** Configurable risk limits prevent excessive losses and over-trading
 
