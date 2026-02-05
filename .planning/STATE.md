@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-13 completed (13 of 15 in phase)
-**Status:** In progress (gap-closure follow-ups)
-**Last activity:** 2026-02-05 - Completed 01-13-PLAN.md
-**Progress:** ████████░░ 80% (24/30 plans complete; 13/15 in current phase)
+**Plan:** 01-14 completed (14 of 15 in phase)
+**Status:** In progress (final gap-closure tasks remaining)
+**Last activity:** 2026-02-05 - Completed 01-14-PLAN.md
+**Progress:** █████████░ 83% (25/30 plans complete; 14/15 in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -39,6 +39,7 @@
 - Completed 01-11: Paper trading session reset/archive endpoints exposed via FastAPI
 - Completed 01-12: Cursor pagination helper enforces DESC comparisons with optional ASC support
 - Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
+- Completed 01-14: Auth, export, and AI APIs now use AsyncSession plus awaited select queries end-to-end
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -96,6 +97,11 @@
 - ✓ Login endpoint simply awaits `check_rate_limit`, letting RateLimitException/ServiceUnavailableException bubble with Retry-After headers
 - ✓ New pytest coverage validates login success vs throttled responses and Redis outage fail-closed behavior
 
+**Fixed in 01-14:**
+- ✓ Auth, export, and AI APIs inject AsyncSession dependencies and await every ORM call
+- ✓ Password reset token helper runs inside `asyncio.to_thread` so auth endpoints remain non-blocking until the service is rewritten
+- ✓ Alerts/activity/model stats queries reuse async select builders to keep pagination + aggregations off the event loop
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -129,6 +135,7 @@
 | Login rate limiter trusts exceptions | 2026-02-05 | Avoids duplicate boolean checks so RateLimitException/ServiceUnavailableException drive responses | Legitimate logins proceed while Redis outages fail closed with Retry-After headers |
 | Paper trading reset requires confirmation with archival option | 2026-02-05 | Prevents accidental destruction of active sessions when hit via API | Maintenance endpoints stay safe for UI/agent callers |
 | Cursor helper directional flag | 2026-02-05 | Shared pagination helper now accepts a `descending` flag to support both orderings | Any list endpoint can reuse helper without duplicating comparisons |
+| Password reset helper offloaded via asyncio.to_thread | 2026-02-05 | Avoided rewriting the sync password-reset service mid-plan while ensuring async endpoints stay non-blocking | Allows incremental migration of legacy helpers without stalling auth responses |
 
 ### Active Todos
 
@@ -152,6 +159,11 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-05 (latest - 01-14):**
+- Completed 01-14: Auth, export, and AI APIs migrated to AsyncSession with awaited select queries (system routes already async)
+- Password reset helper now runs via `asyncio.to_thread`, and export/chat endpoints share async pagination builders
+- Duration: 8 minutes (3 commits, 1 audit-only task)
 
 **2026-02-05 (latest - 01-13):**
 - Completed 01-13: Auth login rate limiter now trusts exception-based `check_rate_limit`; regression tests cover login success, throttling, and Redis outages
@@ -258,16 +270,17 @@ None currently.
 - Partial fills not handled (POS-05)
 - Slippage/fees not modeled (SAFE-03)
 - Stop-loss not enforced (RISK-02)
+- Local execution environment missing FastAPI dependency; install backend requirements before running uvicorn verification
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 16:42-16:46 UTC
-**Stopped at:** Completed 01-13-PLAN.md (auth login rate limiter exception integration)
+**Last session:** 2026-02-05 16:43-16:52 UTC
+**Stopped at:** Completed 01-14-PLAN.md (AsyncSession migration for auth/export/ai gap closure)
 **Resume file:** None
 
 **For next session:**
-1. Queue up 01-14-PLAN.md (AsyncSession migration for auth/export/ai routes)
-2. Prep 01-15 gap cleanup (replace bare except blocks) before transitioning to Phase 2
+1. Execute 01-15-PLAN.md (replace bare except blocks) to finish Phase 1 gap closure
+2. Install backend requirements (FastAPI et al.) locally before attempting uvicorn + curl verification again
 3. Carry forward exc_info logging + exception-based rate limiting requirements for every backend endpoint
 
 **Context to carry forward:**
