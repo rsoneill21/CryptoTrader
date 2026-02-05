@@ -20,9 +20,9 @@
 ## Current Position
 
 **Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-06 completed (6 of 9 in phase)
+**Plan:** 01-07 completed (7 of 9 in phase)
 **Status:** In progress
-**Progress:** ██████░░░░ 60% (0/11 phases complete, 6/9 plans in current phase)
+**Progress:** ███████░░░ 70% (0/11 phases complete, 7/9 plans in current phase)
 
 **What's happening:**
 - Completed 01-01: Async database session factory
@@ -31,7 +31,8 @@
 - Completed 01-04: Cursor-based pagination for alerts
 - Completed 01-05: Backend import path fixes and pybreaker dependency
 - Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
-- Next: Execute 01-07 (Migrate strategies to AsyncSession)
+- Completed 01-07: AsyncSession migration for alerts, market, strategies, and risk APIs
+- Next: Execute 01-08 (pending infrastructure hardening task)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -74,6 +75,12 @@
 - ✓ Backend server starts without ModuleNotFoundError
 - ✓ API endpoints respond to HTTP requests
 
+**Fixed in 01-07:**
+- ✓ Alerts response models updated to ConfigDict to align with AsyncSession serialization
+- ✓ Market endpoints removed their final synchronous Session dependency
+- ✓ Strategy CRUD and simulation routes now await AsyncSession commits with rollback handling
+- ✓ Risk settings helper and endpoints run entirely on AsyncSession/select queries
+
 ## Performance Metrics
 
 **Velocity:** N/A (no completed plans yet)
@@ -109,7 +116,7 @@
 - [x] ~~Execute 01-03: Paper trading state persistence~~ - Completed: State persists to DB with archival
 - [x] ~~Execute 01-04: Pagination (cursor-based for alerts)~~ - Completed: cursor pagination with AsyncSession
 - [x] ~~Execute 01-05: Backend import path fixes~~ - Completed: Fixed all backend.X imports, added pybreaker
-- [ ] Migrate remaining API endpoints to AsyncSession (market, strategies, create_alert, get_alert, update_alert)
+- [x] ~~Migrate remaining API endpoints to AsyncSession (market, strategies, alerts, risk)~~ - Completed: 01-07 converted all remaining routes
 - [ ] Execute 01-02: Rate limiter fail-closed with circuit breaker (optional - 01-05 was gap closure for UAT blocker)
 - [ ] Migrate other list endpoints to cursor pagination (strategies, trades, decisions)
 - [ ] Frontend adaptation: use cursor tokens instead of page numbers for alerts
@@ -125,7 +132,14 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-06):**
+**2026-02-05 (latest - 01-07):**
+- Completed 01-07: Async API migration for alerts, market, strategies, and risk routes
+- Removed lingering synchronous Session imports and standardized on `get_async_db`
+- Added rollback-aware error handling for strategy simulation logging and AsyncSession helper for risk settings
+- Refreshed alert response models to use ConfigDict for Pydantic v2 compatibility
+- Duration: ~5 minutes (4 tasks, 4 commits)
+
+**2026-02-05 (01-06):**
 - Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
 - Imported initialize_paper_trading_engine and shutdown_paper_trading_engine
 - Added await calls to lifespan startup and shutdown
@@ -188,28 +202,29 @@ None currently.
 - ~~No pagination (INFRA-06)~~ - PARTIALLY FIXED in 01-04 (alerts have cursor pagination; other endpoints pending)
 - Rate limiting fails open (INFRA-02) - PLANNED (01-02)
 - Bare exception handling (INFRA-04) - PLANNED (01-02 or separate plan)
-- Sync DB in some endpoints (create_alert, get_alert, update_alert) - NOT PLANNED (low priority)
+- ~~Sync DB in some endpoints (create_alert, get_alert, update_alert)~~ - FIXED in 01-07 (alerts/market/strategies/risk now async)
 - Partial fills not handled (POS-05)
 - Slippage/fees not modeled (SAFE-03)
 - Stop-loss not enforced (RISK-02)
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 10:06-10:11 UTC
-**Stopped at:** Completed 01-05-PLAN.md (backend import fixes - gap closure)
+**Last session:** 2026-02-05 12:12-12:17 UTC
+**Stopped at:** Completed 01-07-PLAN.md (async API migration across alerts/market/strategies/risk)
 **Resume file:** None
 
 **For next session:**
 1. Read this STATE.md for current position
-2. Phase 1 has 4 completed plans (01-01, 01-03, 01-04, 01-05)
-3. 01-02 (rate limiting) exists but was not needed for UAT blocker
-4. Consider moving to Phase 2 or executing 01-02 for completeness
+2. Phase 1 now has 7/9 plans complete (01-01 through 01-07, except optional 01-02)
+3. 01-02 (rate limiting) still optional; decide whether to tackle it before 01-08
+4. Next planned execution target: 01-08 per roadmap when ready
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
 - **Dependencies:** pybreaker>=1.0.0 installed for circuit breaker support
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
+- Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
 - Use `selectinload` for eager loading relationships in async context
 - Cursor pagination pattern established - use encode_cursor/decode_cursor for list endpoints
 - Fetch limit+1 rows to detect has_more flag without COUNT(*) query
