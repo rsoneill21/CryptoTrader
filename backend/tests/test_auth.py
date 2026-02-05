@@ -22,6 +22,8 @@ from fastapi import HTTPException, Response
 import sys
 from unittest.mock import MagicMock, patch, AsyncMock
 
+from core.exceptions import RateLimitException
+
 # Mock core.settings because of pydantic version mismatch in environment
 mock_settings_module = MagicMock()
 mock_settings = MagicMock()
@@ -367,18 +369,18 @@ async def test_login_enforces_mfa(db_session):
 @pytest.mark.asyncio
 async def test_login_rate_limit_exceeded(db_session):
     await _create_user(db_session)
-    # Patch check_rate_limit in api.auth to return False (limit exceeded)
+    # Patch check_rate_limit in api.auth to raise RateLimitException (limit exceeded)
     with patch("api.auth.check_rate_limit", new_callable=AsyncMock) as mock_check:
-        mock_check.return_value = False
-        
-        with pytest.raises(HTTPException) as exc:
+        mock_check.side_effect = RateLimitException(retry_after=60)
+
+        with pytest.raises(RateLimitException) as exc:
             await login(
                 LoginRequest(email=VALID_EMAIL, password=VALID_PASSWORD),
                 response=Response(),
                 db=db_session
             )
         assert exc.value.status_code == 429
-        assert "Too many login attempts" in exc.value.detail
+        assert exc.value.detail["code"] == "rate_limit_exceeded"
 
 
 @pytest.mark.asyncio
