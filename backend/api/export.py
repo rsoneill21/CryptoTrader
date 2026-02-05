@@ -9,9 +9,11 @@ from typing import Dict, Iterator, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator, validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.auth import get_current_user
+from core.exceptions import DatabaseException
 from db.database import get_db
 from db.models import Strategy, Trade, User
 
@@ -218,12 +220,12 @@ async def export_trades(
         if filters.end_time:
             query = query.filter(Trade.entry_time <= filters.end_time)
         trades = query.order_by(Trade.entry_time.desc()).all()
-    except Exception as exc:
-        logger.error("Failed to query trades for export: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to export trades",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to query trades for export", exc_info=True)
+        raise DatabaseException(
+            message="Unable to export trades",
+            details={"operation": "export_trades"},
+        ) from exc
 
     headers = {
         "Content-Disposition": "attachment; filename=trades_export.csv",
@@ -250,11 +252,11 @@ async def export_strategies(
         if filters.end_date:
             query = query.filter(Strategy.created_at <= filters.end_date)
         strategies = query.order_by(Strategy.created_at.desc()).all()
-    except Exception as exc:
-        logger.error("Failed to query strategies for export: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to export strategies",
-        )
+    except SQLAlchemyError as exc:
+        logger.error("Failed to query strategies for export", exc_info=True)
+        raise DatabaseException(
+            message="Unable to export strategies",
+            details={"operation": "export_strategies"},
+        ) from exc
 
     return [_serialize_strategy(strategy) for strategy in strategies]

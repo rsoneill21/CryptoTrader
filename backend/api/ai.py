@@ -301,7 +301,7 @@ async def alerts_activity(
         )
         unread_alerts = int(unread_alerts)
     except SQLAlchemyError as exc:
-        logger.exception("Unable to query alerts for activity feed: %s", exc)
+        logger.error("Unable to query alerts for activity feed", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to load alerts data",
@@ -317,7 +317,7 @@ async def alerts_activity(
             .all()
         )
     except SQLAlchemyError as exc:
-        logger.exception("Unable to query activity log entries: %s", exc)
+        logger.error("Unable to query activity log entries", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to load activity log data",
@@ -415,7 +415,7 @@ class ChatAIService:
                 stream=True,
             )
         except Exception as exc:
-            logger.exception("OpenAI chat request failed: %s", exc)
+            logger.error("OpenAI chat request failed", exc_info=True)
             raise
 
         async for chunk in completion:
@@ -554,7 +554,7 @@ async def _persist_chat_history(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        logger.exception("Failed to persist chat history: %s", exc)
+        logger.error("Failed to persist chat history", exc_info=True)
 
 
 async def _streaming_chat_response(
@@ -569,7 +569,7 @@ async def _streaming_chat_response(
             payload = {"chunk": chunk}
             yield f"data: {json.dumps(payload)}\n\n"
     except Exception as exc:
-        logger.exception("Chat stream error: %s", exc)
+        logger.error("Chat stream error", exc_info=True)
         error_payload = {"error": "AI chat request failed", "details": str(exc)}
         yield f"data: {json.dumps(error_payload)}\n\n"
         raise
@@ -620,7 +620,7 @@ async def chat_history(
             .all()
         )
     except SQLAlchemyError as exc:
-        logger.exception("Failed to query chat history: %s", exc)
+        logger.error("Failed to query chat history", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to load chat history",
@@ -736,7 +736,7 @@ async def model_comparison(
             )
         return ModelComparisonResponse(comparisons=comparison_entries)
     except SQLAlchemyError as exc:
-        logger.exception("Failed to query model comparison data: %s", exc)
+        logger.error("Failed to query model comparison data", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to load AI model comparison data",
