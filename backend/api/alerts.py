@@ -2,21 +2,57 @@
 Alerts API routes.
 """
 
+import base64
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import desc, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import get_db
+from db.database import get_async_db
 from db.models import Alert
 
 router = APIRouter()
 
+# Cursor pagination constants
+DEFAULT_PAGE_LIMIT = 25
+MAX_PAGE_LIMIT = 100
+
 ACTIONED_STATUSES = {"actioned", "dismissed"}
 VALID_SEVERITIES = {"info", "warning", "critical"}
+
+
+def encode_cursor(created_at: datetime, alert_id: int) -> str:
+    """
+    Encode cursor token from timestamp and ID.
+
+    Cursor format: base64(timestamp_iso|id)
+    Example: "MjAyNi0wMi0wNVQwMTowMDowMFp8MTIz" for timestamp + ID 123
+    """
+    cursor_str = f"{created_at.isoformat()}|{alert_id}"
+    return base64.urlsafe_b64encode(cursor_str.encode()).decode()
+
+
+def decode_cursor(cursor: str) -> tuple[datetime, int]:
+    """
+    Decode cursor token to timestamp and ID.
+
+    Returns:
+        (created_at, alert_id) tuple for query filtering
+
+    Raises:
+        ValueError: if cursor format is invalid
+    """
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+        timestamp_str, id_str = decoded.split("|")
+        created_at = datetime.fromisoformat(timestamp_str)
+        alert_id = int(id_str)
+        return created_at, alert_id
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ValueError(f"Invalid cursor format: {exc}")
 
 
 def _normalize_severity_value(value: Optional[str], *, default: Optional[str] = None) -> Optional[str]:
@@ -50,10 +86,20 @@ class AlertResponse(BaseModel):
 
 
 class AlertListResponse(BaseModel):
+    """
+    Cursor-paginated alert list response.
+
+    Uses cursor-based pagination to provide stable results even when
+    new alerts are inserted. Cursors encode (timestamp, id) to maintain
+    consistent ordering across page fetches.
+
+    Default limit: 25 alerts per page
+    """
     alerts: List[AlertResponse]
-    total: int
-    page: int
-    page_size: int
+    next_cursor: Optional[str] = None
+    prev_cursor: Optional[str] = None
+    limit: int
+    has_more: bool = False
 
 
 class AlertChatContextResponse(BaseModel):
