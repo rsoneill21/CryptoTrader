@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import get_async_db
+from db.database import get_async_db, get_db
 from db.models import Alert
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
