@@ -8,11 +8,18 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.auth import get_current_user
+from core.pagination import (
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+    apply_cursor_pagination,
+    decode_cursor,
+    encode_cursor,
+)
 from core.indicators import side_color
 from db.database import get_async_db
 from db.models import Order, Trade, User
@@ -62,6 +69,31 @@ class ActiveTradeResponse(BaseModel):
     ai_managed: bool
     orders: List[OrderSummary]
     side_color: str
+
+
+class TradeSummary(BaseModel):
+    id: int
+    strategy_id: Optional[int]
+    symbol: str
+    side: str
+    entry_price: Optional[float]
+    exit_price: Optional[float]
+    quantity: float
+    entry_time: Optional[datetime]
+    exit_time: Optional[datetime]
+    pnl: Optional[float]
+    is_paper: bool
+    is_manual: bool
+    ai_model_used: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TradeListResponse(BaseModel):
+    trades: List[TradeSummary]
+    next_cursor: Optional[str] = None
+    limit: int
+    has_more: bool = False
 
 
 class CloseTradeRequest(BaseModel):
@@ -226,6 +258,79 @@ async def create_system_trade(
         trade.id, trade.symbol, trade.ai_model_used,
     )
     return _serialize_trade(trade)
+
+
+@router.get(
+    "/",
+    response_model=TradeListResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def list_trades(
+    cursor: Optional[str] = Query(
+        None,
+        description="Cursor token for pagination",
+    ),
+    limit: int = Query(
+        DEFAULT_PAGE_LIMIT,
+        ge=1,
+        le=MAX_PAGE_LIMIT,
+        description="Number of trades per page",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> TradeListResponse:
+    """Return historical trades using cursor-based pagination."""
+    cursor_timestamp: Optional[datetime] = None
+    cursor_id: Optional[int] = None
+    if cursor:
+        try:
+            cursor_timestamp, cursor_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cursor: {exc}",
+            )
+
+    try:
+        query = select(Trade).where(Trade.entry_time.is_not(None))
+        cursor_tuple = (
+            (cursor_timestamp, cursor_id)
+            if cursor_timestamp is not None and cursor_id is not None
+            else None
+        )
+        query, _, _ = apply_cursor_pagination(
+            query,
+            cursor_values=cursor_tuple,
+            timestamp_column=Trade.entry_time,
+            id_column=Trade.id,
+        )
+        query = query.order_by(desc(Trade.entry_time), desc(Trade.id))
+        query = query.limit(limit + 1)
+        result = await db.execute(query)
+        trades = list(result.scalars().all())
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error("Trade list fetch failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve trades",
+        )
+
+    has_more = len(trades) > limit
+    if has_more:
+        trades = trades[:limit]
+
+    next_cursor = None
+    if has_more and trades and trades[-1].entry_time is not None:
+        next_cursor = encode_cursor(trades[-1].entry_time, trades[-1].id)
+
+    return TradeListResponse(
+        trades=[TradeSummary.model_validate(trade) for trade in trades],
+        next_cursor=next_cursor,
+        limit=limit,
+        has_more=has_more,
+    )
 
 
 class AdjustTradeRequest(BaseModel):
