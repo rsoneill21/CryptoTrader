@@ -38,6 +38,7 @@ email-validator>=2.1.0
 # Utilities
 python-dotenv>=1.0.0
 pytz>=2024.1
+pybreaker>=1.0.0
 
 # Testing
 pytest>=7.4.4
