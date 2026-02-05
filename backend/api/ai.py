@@ -19,11 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 import pydantic as _pydantic
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import desc, func, or_
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import get_db
+from db.database import get_async_db
 from db.models import Alert, ChatHistory, StrategyPerformance, SystemLog
 
 from services.ai_models import AIModelDescriptor, AIModelsService, AIProvider
@@ -216,7 +216,7 @@ class AlertsActivityResponse(BaseModel):
 
 
 def _apply_alert_filters(
-    query,
+    stmt,
     severity: Optional[str],
     status_filter: Optional[str],
     alert_type: Optional[str],
@@ -225,38 +225,38 @@ def _apply_alert_filters(
     until: Optional[datetime],
 ):
     if severity:
-        query = query.filter(Alert.severity == severity)
+        stmt = stmt.where(Alert.severity == severity)
     if status_filter:
-        query = query.filter(Alert.status == status_filter)
+        stmt = stmt.where(Alert.status == status_filter)
     if alert_type:
-        query = query.filter(Alert.type == alert_type)
+        stmt = stmt.where(Alert.type == alert_type)
     if search:
         trimmed = search.strip()
         if trimmed:
             pattern = f"%{trimmed}%"
-            query = query.filter(
+            stmt = stmt.where(
                 or_(
                     Alert.title.ilike(pattern),
                     Alert.message.ilike(pattern),
                 )
             )
     if since:
-        query = query.filter(Alert.created_at >= since)
+        stmt = stmt.where(Alert.created_at >= since)
     if until:
-        query = query.filter(Alert.created_at <= until)
-    return query
+        stmt = stmt.where(Alert.created_at <= until)
+    return stmt
 
 
 def _apply_activity_filters(
-    query,
+    stmt,
     log_level: Optional[str],
     log_source: Optional[str],
 ):
     if log_level:
-        query = query.filter(SystemLog.level == log_level)
+        stmt = stmt.where(SystemLog.level == log_level)
     if log_source:
-        query = query.filter(SystemLog.source.ilike(f"%{log_source}%"))
-    return query
+        stmt = stmt.where(SystemLog.source.ilike(f"%{log_source}%"))
+    return stmt
 
 
 @router.get("/alerts-activity", response_model=AlertsActivityResponse)
@@ -273,12 +273,12 @@ async def alerts_activity(
     log_source: Optional[str] = Query(None, description="Filter activity log source/component"),
     activity_page: int = Query(1, ge=1, description="Activity log page number"),
     activity_page_size: int = Query(25, ge=1, le=100, description="Number of activity entries per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> AlertsActivityResponse:
     """Return a combined alerts feed and activity log for the dashboard."""
     try:
-        alert_query = _apply_alert_filters(
-            db.query(Alert),
+        alert_stmt = _apply_alert_filters(
+            select(Alert),
             severity,
             status_filter,
             alert_type,
@@ -286,20 +286,24 @@ async def alerts_activity(
             since,
             until,
         )
-        alerts_total = alert_query.count()
-        alerts_records = (
-            alert_query.order_by(desc(Alert.created_at))
+        alerts_count_stmt = _apply_alert_filters(
+            select(func.count(Alert.id)).select_from(Alert),
+            severity,
+            status_filter,
+            alert_type,
+            search,
+            since,
+            until,
+        )
+        alerts_total = int((await db.execute(alerts_count_stmt)).scalar_one() or 0)
+        paginated_alerts = (
+            alert_stmt.order_by(desc(Alert.created_at))
             .offset((alerts_page - 1) * alerts_page_size)
             .limit(alerts_page_size)
-            .all()
         )
-        unread_alerts = (
-            db.query(func.count(Alert.id))
-            .filter(Alert.status == "new")
-            .scalar()
-            or 0
-        )
-        unread_alerts = int(unread_alerts)
+        alert_rows = (await db.execute(paginated_alerts)).scalars().all()
+        unread_stmt = select(func.count(Alert.id)).where(Alert.status == "new")
+        unread_alerts = int((await db.execute(unread_stmt)).scalar_one() or 0)
     except SQLAlchemyError as exc:
         logger.error("Unable to query alerts for activity feed", exc_info=True)
         raise HTTPException(
@@ -308,14 +312,19 @@ async def alerts_activity(
         ) from exc
 
     try:
-        activity_query = _apply_activity_filters(db.query(SystemLog), log_level, log_source)
-        activity_total = activity_query.count()
-        activity_records = (
-            activity_query.order_by(desc(SystemLog.timestamp))
+        activity_stmt = _apply_activity_filters(select(SystemLog), log_level, log_source)
+        activity_count_stmt = _apply_activity_filters(
+            select(func.count(SystemLog.id)).select_from(SystemLog),
+            log_level,
+            log_source,
+        )
+        activity_total = int((await db.execute(activity_count_stmt)).scalar_one() or 0)
+        paginated_activity = (
+            activity_stmt.order_by(desc(SystemLog.timestamp))
             .offset((activity_page - 1) * activity_page_size)
             .limit(activity_page_size)
-            .all()
         )
+        activity_records = (await db.execute(paginated_activity)).scalars().all()
     except SQLAlchemyError as exc:
         logger.error("Unable to query activity log entries", exc_info=True)
         raise HTTPException(
@@ -324,7 +333,7 @@ async def alerts_activity(
         ) from exc
 
     return AlertsActivityResponse(
-        alerts=[AlertResponse.from_orm(record) for record in alerts_records],
+        alerts=[AlertResponse.from_orm(record) for record in alert_rows],
         alerts_total=alerts_total,
         alerts_page=alerts_page,
         alerts_page_size=alerts_page_size,
@@ -534,7 +543,7 @@ def _prepare_context_snapshot(
 
 
 async def _persist_chat_history(
-    db: Session,
+    db: AsyncSession,
     request: ChatRequest,
     ai_response: str,
     provider: ChatProvider,
@@ -551,16 +560,16 @@ async def _persist_chat_history(
     )
     try:
         db.add(entry)
-        db.commit()
+        await db.commit()
     except SQLAlchemyError as exc:
-        db.rollback()
+        await db.rollback()
         logger.error("Failed to persist chat history", exc_info=True)
 
 
 async def _streaming_chat_response(
     request: ChatRequest,
     service: ChatAIService,
-    db: Session,
+    db: AsyncSession,
 ) -> AsyncIterator[str]:
     accumulator: List[str] = []
     try:
@@ -587,7 +596,7 @@ async def _streaming_chat_response(
 
 @router.post("/chat")
 async def chat_stream(
-    payload: ChatRequest, db: Session = Depends(get_db)
+    payload: ChatRequest, db: AsyncSession = Depends(get_async_db)
 ) -> StreamingResponse:
     """Stream the AI chat response while persisting the conversation."""
     service = ChatAIService()
@@ -606,19 +615,24 @@ async def chat_history(
     before_id: Optional[int] = Query(
         None, description="Return entries with ID less than this value"
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> ChatHistoryList:
     """Return the most recent chat entries."""
     try:
-        query = db.query(ChatHistory)
+        conditions = []
         if before_id:
-            query = query.filter(ChatHistory.id < before_id)
-        total = query.count()
-        entries = (
-            query.order_by(desc(ChatHistory.timestamp))
-            .limit(limit)
-            .all()
-        )
+            conditions.append(ChatHistory.id < before_id)
+
+        count_stmt = select(func.count(ChatHistory.id)).select_from(ChatHistory)
+        for condition in conditions:
+            count_stmt = count_stmt.where(condition)
+        total = int((await db.execute(count_stmt)).scalar_one() or 0)
+
+        entries_stmt = select(ChatHistory)
+        for condition in conditions:
+            entries_stmt = entries_stmt.where(condition)
+        entries_stmt = entries_stmt.order_by(desc(ChatHistory.timestamp)).limit(limit)
+        entries = (await db.execute(entries_stmt)).scalars().all()
     except SQLAlchemyError as exc:
         logger.error("Failed to query chat history", exc_info=True)
         raise HTTPException(
@@ -647,9 +661,9 @@ def _normalize_optional_float(value: Optional[Any]) -> Optional[float]:
     return float(value)
 
 
-def _fetch_model_performance_stats(db: Session, model_name: str) -> Dict[str, Any]:
-    row = (
-        db.query(
+async def _fetch_model_performance_stats(db: AsyncSession, model_name: str) -> Dict[str, Any]:
+    stmt = (
+        select(
             func.count(StrategyPerformance.id).label("strategy_count"),
             func.sum(StrategyPerformance.total_trades).label("total_trades"),
             func.sum(StrategyPerformance.winning_trades).label("winning_trades"),
@@ -657,9 +671,9 @@ def _fetch_model_performance_stats(db: Session, model_name: str) -> Dict[str, An
             func.avg(StrategyPerformance.win_rate).label("average_win_rate"),
             func.sum(StrategyPerformance.total_pnl).label("total_pnl"),
         )
-        .filter(StrategyPerformance.ai_model_used == model_name)
-        .one()
+        .where(StrategyPerformance.ai_model_used == model_name)
     )
+    row = (await db.execute(stmt)).one()
     return {
         "strategy_count": _normalize_int(row.strategy_count),
         "total_trades": _normalize_int(row.total_trades),
@@ -710,7 +724,7 @@ async def set_active_ai_model(
 
 @router.get("/models/comparison", response_model=ModelComparisonResponse)
 async def model_comparison(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> ModelComparisonResponse:
     """Provide per-provider stats that support the model comparison UI."""
     service = AIModelsService()
@@ -718,7 +732,7 @@ async def model_comparison(
         inventory = service.list_model_inventory()
         comparison_entries: List[ModelComparisonEntry] = []
         for descriptor in inventory:
-            stats = _fetch_model_performance_stats(db, descriptor.model)
+            stats = await _fetch_model_performance_stats(db, descriptor.model)
             comparison_entries.append(
                 ModelComparisonEntry(
                     provider=descriptor.provider,
