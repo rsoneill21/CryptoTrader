@@ -57,6 +57,53 @@ class RiskService:
         return equity
 
     @classmethod
+    async def account_equity(cls, db: AsyncSession) -> float:
+        """Return the current account equity used for risk sizing decisions."""
+
+        return await cls._account_balance(db)
+
+    @classmethod
+    async def quantity_from_risk_percent(
+        cls,
+        db: AsyncSession,
+        *,
+        risk_percent: float,
+        reference_price: float,
+    ) -> float:
+        """Derive order quantity from account equity and a percent risk budget."""
+
+        percent = float(risk_percent)
+        price = float(reference_price)
+
+        if percent <= 0 or percent > 100:
+            raise RiskException(
+                "risk_percent must be between 1 and 100",
+                details={"risk_percent": percent},
+            )
+
+        if price <= 0:
+            raise RiskException(
+                "reference_price must be greater than zero",
+                details={"reference_price": price},
+            )
+
+        equity = await cls.account_equity(db)
+        risk_notional = equity * (percent / 100.0)
+        quantity = risk_notional / price
+
+        if quantity <= 0:
+            raise RiskException(
+                "Calculated order quantity must be greater than zero",
+                details={
+                    "account_equity": equity,
+                    "risk_percent": percent,
+                    "reference_price": price,
+                },
+            )
+
+        return quantity
+
+    @classmethod
     async def check_daily_halt(cls, db: AsyncSession) -> bool:
         """Pause trading when total daily P&L breaches the configured loss limit."""
 
@@ -224,6 +271,34 @@ class RiskService:
             quantity=quantity,
             side=side,
             settings=settings,
+        )
+
+    @classmethod
+    async def validate_close(
+        cls,
+        db: AsyncSession,
+        *,
+        symbol: str,
+        quantity: float,
+        price: float,
+        side: str,
+    ) -> None:
+        """Validate close intent through centralized risk controls."""
+
+        await cls.check_daily_halt(db)
+
+        if trading_control.is_paused():
+            pause_status = trading_control.status()
+            raise RiskException(
+                "Trading is currently paused",
+                details={"reason": pause_status.reason, "triggered_by": pause_status.triggered_by},
+            )
+
+        await cls.check_liquidity(
+            db=db,
+            symbol=symbol,
+            quantity=quantity,
+            side=side,
         )
 
     @classmethod

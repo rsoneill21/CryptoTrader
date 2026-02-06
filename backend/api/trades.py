@@ -29,6 +29,9 @@ from agents.market_analyst import market_analyst_agent
 from services.market_data import market_data_service
 from services.kraken import kraken_service, KrakenAPIError
 from core.exceptions import DatabaseException, ServiceUnavailableException
+from core.risk import RiskService
+from core.paper_trading import PaperTradeSignal, TradeIntent, TradeSide
+from services.paper_trading_service import paper_trading_engine
 
 logger = logging.getLogger("cryptotrader.trades")
 router = APIRouter()
@@ -101,18 +104,24 @@ class TradeListResponse(BaseModel):
 class CloseTradeRequest(BaseModel):
     """Payload used to mark a trade as closed."""
 
-    exit_price: float = Field(..., gt=0.0, description="Execution price for the exit leg")
-    reason: Optional[str] = Field(None, max_length=512)
+    quantity: Optional[float] = Field(None, gt=0.0, description="Quantity to close; defaults to full")
+    close_reason: Optional[str] = Field(None, max_length=512)
 
 
 class CloseTradeResponse(BaseModel):
     """Confirmation returned after closing a trade."""
 
     trade_id: int
-    exit_time: datetime
-    exit_price: float
+    status: str
+    reason_code: Optional[str]
+    reason_message: Optional[str]
+    requested_quantity: float
+    filled_quantity: float
+    remaining_quantity: float
+    executed_price: float
+    close_reason: Optional[str]
+    exit_time: Optional[datetime]
     pnl: Optional[float]
-    message: str
 
 
 class CreateTradeRequest(BaseModel):
@@ -136,6 +145,52 @@ class CreateSystemTradeRequest(BaseModel):
     ai_model_used: Optional[str] = None
     entry_reasoning: Optional[Dict[str, Any]] = None
     indicators: Optional[Dict[str, Any]] = None
+
+
+ORDER_STATUSES = {"pending", "partially_filled", "filled", "rejected", "canceled"}
+
+
+class ManualOrderSubmitRequest(BaseModel):
+    """Manual order entry contract for market and limit intents."""
+
+    symbol: str = Field(..., description="Trading pair (e.g., BTC/USD)")
+    side: str = Field(..., pattern="^(buy|sell)$", description="Order side")
+    order_type: str = Field(..., pattern="^(market|limit)$", description="Order type")
+    quantity: Optional[float] = Field(None, gt=0)
+    risk_percent: Optional[float] = Field(None, ge=1.0, le=100.0)
+    limit_price: Optional[float] = Field(None, gt=0)
+    is_paper: bool = True
+
+    @model_validator(mode="after")
+    def _validate_order_sizing(self) -> "ManualOrderSubmitRequest":
+        has_quantity = self.quantity is not None
+        has_risk_percent = self.risk_percent is not None
+        if has_quantity == has_risk_percent:
+            raise ValueError("Provide exactly one of quantity or risk_percent")
+
+        if self.order_type == "limit" and self.limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
+
+        if self.order_type == "market" and self.limit_price is not None:
+            raise ValueError("limit_price is only allowed for limit orders")
+
+        return self
+
+
+class ManualOrderSubmitResponse(BaseModel):
+    """Lifecycle-aware result returned by manual order submission."""
+
+    order_id: int
+    trade_id: Optional[int]
+    status: str
+    reason_code: Optional[str] = None
+    reason_message: Optional[str] = None
+    requested_quantity: float
+    filled_quantity: float
+    order_type: str
+    side: str
+    symbol: str
+    execution_price: Optional[float] = None
 
 
 class TradeCandle(BaseModel):
@@ -262,6 +317,133 @@ async def create_system_trade(
         trade.id, trade.symbol, trade.ai_model_used,
     )
     return _serialize_trade(trade)
+
+
+@router.post(
+    "/orders",
+    response_model=ManualOrderSubmitResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_manual_order(
+    request: ManualOrderSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> ManualOrderSubmitResponse:
+    """Submit a manual market/limit order with server-side risk gating."""
+
+    symbol = request.symbol.strip().upper()
+    order_type = request.order_type.lower()
+    side = request.side.lower()
+
+    try:
+        if order_type == "limit":
+            reference_price = float(request.limit_price or 0.0)
+        else:
+            ticker = await kraken_service.get_ticker(symbol)
+            reference_price = float(ticker.last)
+    except KrakenAPIError as exc:
+        logger.warning("Unable to fetch reference price for %s", symbol, exc_info=True)
+        raise ServiceUnavailableException(
+            service="kraken",
+            details={"symbol": symbol, "operation": "manual_order_submit"},
+        ) from exc
+
+    if request.risk_percent is not None:
+        quantity = await RiskService.quantity_from_risk_percent(
+            db,
+            risk_percent=request.risk_percent,
+            reference_price=reference_price,
+        )
+    else:
+        quantity = float(request.quantity or 0.0)
+
+    await RiskService.validate_trade(
+        db=db,
+        symbol=symbol,
+        quantity=quantity,
+        price=reference_price,
+        side=side,
+    )
+
+    now = datetime.utcnow()
+    trade = Trade(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        entry_price=reference_price if order_type == "market" else request.limit_price,
+        entry_time=now if order_type == "market" else None,
+        is_paper=request.is_paper,
+        is_manual=True,
+    )
+    db.add(trade)
+    await db.flush()
+
+    order_status = "filled" if order_type == "market" else "pending"
+    filled_quantity = quantity if order_type == "market" else 0.0
+
+    order = Order(
+        trade_id=trade.id,
+        status=order_status,
+        order_type=order_type,
+        side=side,
+        price=reference_price if order_type == "market" else request.limit_price,
+        quantity=quantity,
+        filled_quantity=filled_quantity,
+    )
+    db.add(order)
+
+    if order_type == "market":
+        signal_side = TradeSide.BUY if side == "buy" else TradeSide.SELL
+        try:
+            await paper_trading_engine.execute_signal(
+                PaperTradeSignal(
+                    symbol=symbol,
+                    intent=TradeIntent.ENTRY,
+                    side=signal_side,
+                    quantity=quantity,
+                    price=reference_price,
+                    timestamp=now,
+                    metadata={
+                        "source": "manual_order",
+                        "order_type": order_type,
+                        "created_by": current_user.email,
+                    },
+                )
+            )
+        except ValueError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "order_execution_failed",
+                    "message": str(exc),
+                },
+            ) from exc
+
+    try:
+        await db.commit()
+        await db.refresh(order)
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        logger.error("Failed to submit manual order", exc_info=True)
+        raise DatabaseException(
+            message="Failed to submit manual order",
+            details={"operation": "submit_manual_order", "symbol": symbol},
+        ) from exc
+
+    return ManualOrderSubmitResponse(
+        order_id=order.id,
+        trade_id=trade.id,
+        status=_normalize_order_status(order.status),
+        reason_code=None,
+        reason_message=None,
+        requested_quantity=quantity,
+        filled_quantity=float(order.filled_quantity or 0.0),
+        order_type=order.order_type,
+        side=order.side,
+        symbol=symbol,
+        execution_price=float(order.price) if order.price is not None else None,
+    )
 
 
 @router.get(
@@ -413,6 +595,19 @@ def _calculate_pnl(trade: Trade, exit_price: float) -> Optional[float]:
     return (exit_price - trade.entry_price) * trade.quantity * side_multiplier
 
 
+def _normalize_order_status(status_value: str) -> str:
+    normalized = (status_value or "").strip().lower().replace("-", "_")
+    alias_map = {
+        "open": "pending",
+        "new": "pending",
+        "closed": "filled",
+        "cancelled": "canceled",
+        "expired": "canceled",
+    }
+    mapped = alias_map.get(normalized, normalized)
+    return mapped if mapped in ORDER_STATUSES else "rejected"
+
+
 @router.get(
     "/active",
     response_model=List[ActiveTradeResponse],
@@ -427,7 +622,7 @@ async def list_active_trades(
         result = await db.execute(
             select(Trade)
             .options(selectinload(Trade.orders))
-            .where(Trade.exit_time.is_(None))
+            .where(Trade.exit_time.is_(None), Trade.entry_time.is_not(None))
             .order_by(Trade.entry_time.desc())
         )
         trades = result.scalars().all()
@@ -465,7 +660,7 @@ async def close_trade(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ) -> CloseTradeResponse:
-    """Mark a trade as closed and record exit pricing."""
+    """Close a trade at market price with optional partial quantity."""
     trade = await db.get(Trade, trade_id)
     if not trade:
         raise HTTPException(
@@ -479,25 +674,132 @@ async def close_trade(
             detail="Trade is already closed",
         )
 
-    now = datetime.utcnow()
-    trade.exit_price = request.exit_price
-    trade.exit_time = now
-    pnl = _calculate_pnl(trade, request.exit_price)
-    if pnl is not None:
-        trade.pnl = pnl
+    if trade.entry_price is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "position_not_open",
+                "message": "Trade has not been filled yet",
+                "details": {"trade_id": trade_id},
+            },
+        )
 
-    if request.reason:
-        exit_reason = trade.exit_reasoning_json or {}
-        if not isinstance(exit_reason, dict):
-            exit_reason = {}
-        exit_reason.update(
+    requested_quantity = float(request.quantity if request.quantity is not None else trade.quantity)
+    if requested_quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "invalid_close_quantity",
+                "message": "Close quantity must be greater than zero",
+            },
+        )
+
+    if requested_quantity > float(trade.quantity):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "insufficient_position_quantity",
+                "message": "Close quantity exceeds open position size",
+                "details": {
+                    "requested_quantity": requested_quantity,
+                    "open_quantity": float(trade.quantity),
+                },
+            },
+        )
+
+    try:
+        cached_price = await paper_trading_engine.get_cached_price(trade.symbol)
+        if cached_price is not None:
+            execution_price = float(cached_price)
+        else:
+            ticker = await kraken_service.get_ticker(trade.symbol)
+            execution_price = float(ticker.last)
+    except KrakenAPIError as exc:
+        logger.warning("Unable to fetch close price for trade %s", trade_id, exc_info=True)
+        raise ServiceUnavailableException(
+            service="kraken",
+            details={"operation": "close_trade", "trade_id": trade_id, "symbol": trade.symbol},
+        ) from exc
+
+    close_side = "sell" if trade.side.lower() == "buy" else "buy"
+    await RiskService.validate_close(
+        db=db,
+        symbol=trade.symbol,
+        quantity=requested_quantity,
+        price=execution_price,
+        side=close_side,
+    )
+
+    now = datetime.utcnow()
+
+    if requested_quantity < float(trade.quantity):
+        partial_pnl = None
+        if trade.entry_price is not None:
+            side_multiplier = 1 if trade.side.lower() == "buy" else -1
+            partial_pnl = (execution_price - trade.entry_price) * requested_quantity * side_multiplier
+
+        partial_close = Trade(
+            strategy_id=trade.strategy_id,
+            ai_model_used=trade.ai_model_used,
+            is_paper=trade.is_paper,
+            is_manual=trade.is_manual,
+            symbol=trade.symbol,
+            side=trade.side,
+            entry_price=trade.entry_price,
+            exit_price=execution_price,
+            quantity=requested_quantity,
+            pnl=partial_pnl,
+            fees=trade.fees,
+            entry_time=trade.entry_time,
+            exit_time=now,
+            entry_reasoning_json=trade.entry_reasoning_json,
+            exit_reasoning_json={
+                "close_reason": request.close_reason,
+                "requested_quantity": requested_quantity,
+                "executed_price": execution_price,
+                "close_type": "partial",
+                "updated_by": current_user.email,
+                "updated_at": now.isoformat(),
+            },
+            market_conditions_json=trade.market_conditions_json,
+            indicators_json=trade.indicators_json,
+            ai_managed=trade.ai_managed,
+        )
+        db.add(partial_close)
+
+        trade.quantity = float(trade.quantity) - requested_quantity
+
+        exit_reason = trade.exit_reasoning_json if isinstance(trade.exit_reasoning_json, dict) else {}
+        partial_events = exit_reason.get("partial_closes")
+        if not isinstance(partial_events, list):
+            partial_events = []
+        partial_events.append(
             {
-                "note": request.reason,
+                "requested_quantity": requested_quantity,
+                "executed_price": execution_price,
+                "close_reason": request.close_reason,
                 "updated_by": current_user.email,
                 "updated_at": now.isoformat(),
             }
         )
+        exit_reason["partial_closes"] = partial_events
         trade.exit_reasoning_json = exit_reason
+        pnl = partial_pnl
+    else:
+        trade.exit_price = execution_price
+        trade.exit_time = now
+        pnl = _calculate_pnl(trade, execution_price)
+        if pnl is not None:
+            trade.pnl = pnl
+
+        trade.exit_reasoning_json = {
+            "close_reason": request.close_reason,
+            "requested_quantity": requested_quantity,
+            "executed_price": execution_price,
+            "close_type": "full",
+            "updated_by": current_user.email,
+            "updated_at": now.isoformat(),
+        }
 
     try:
         await db.commit()
@@ -514,10 +816,16 @@ async def close_trade(
 
     return CloseTradeResponse(
         trade_id=trade.id,
-        exit_time=trade.exit_time,
-        exit_price=trade.exit_price,
-        pnl=trade.pnl,
-        message="Trade closed successfully",
+        status="filled",
+        reason_code=None,
+        reason_message=None,
+        requested_quantity=requested_quantity,
+        filled_quantity=requested_quantity,
+        remaining_quantity=float(trade.quantity) if trade.exit_time is None else 0.0,
+        executed_price=execution_price,
+        close_reason=request.close_reason,
+        exit_time=now,
+        pnl=pnl,
     )
 
 
