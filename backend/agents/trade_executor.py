@@ -14,8 +14,11 @@ from typing import Any, Dict, List, Optional, Set
 from pydantic import BaseModel, Field, ValidationError, validator
 
 from agents.base import AgentMessage, BaseAgent
+from core.exceptions import RiskException
 from core.message_queue import Channels, message_queue
+from core.risk import RiskService
 from core.tasks import log_system_event
+from db.database import AsyncSessionLocal
 from services.kraken import (
     KrakenAPIError,
     OrderSide,
@@ -261,6 +264,10 @@ class TradeExecutorAgent(BaseAgent):
             self._pending_orders.pop(signal.signal_id, None)
             return
 
+        if not await self._validate_signal_risk(signal):
+            self._pending_orders.pop(signal.signal_id, None)
+            return
+
         # Try primary order placement
         order_ids = await self._place_order_with_retries(signal, pending)
         if not order_ids:
@@ -283,6 +290,42 @@ class TradeExecutorAgent(BaseAgent):
                 return
 
         pending.order_ids = order_ids
+
+    async def _validate_signal_risk(self, signal: TradeSignal) -> bool:
+        price = signal.price
+        if price is None:
+            try:
+                ticker = await kraken_service.get_ticker(signal.symbol)
+                price = ticker.last
+            except Exception as exc:
+                self._log_system_event(
+                    "error",
+                    "Failed to resolve trade price for risk validation",
+                    {**self._signal_details(signal), "error": str(exc)},
+                )
+                return False
+
+        try:
+            async with AsyncSessionLocal() as session:
+                await RiskService.validate_trade(
+                    db=session,
+                    symbol=signal.symbol,
+                    quantity=float(signal.volume),
+                    price=float(price),
+                    side=signal.side.value,
+                )
+            return True
+        except RiskException as exc:
+            details = {**self._signal_details(signal), "error": exc.message, "risk": exc.detail}
+            self._log_system_event("warning", "Trade signal rejected by risk service", details)
+            return False
+        except Exception as exc:
+            self._log_system_event(
+                "error",
+                "Risk validation failed unexpectedly",
+                {**self._signal_details(signal), "error": str(exc)},
+            )
+            return False
 
     async def _place_order_with_retries(
         self, signal: TradeSignal, pending: PendingOrder
@@ -410,6 +453,9 @@ class TradeExecutorAgent(BaseAgent):
 
         # Create modified signal with reduced volume
         signal.volume = reduced_volume
+
+        if not await self._validate_signal_risk(signal):
+            return []
 
         # Retry with reduced volume
         return await self._place_order_with_retries(signal, pending)
