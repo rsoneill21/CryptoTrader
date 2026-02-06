@@ -261,10 +261,26 @@ class TradeExecutorAgent(BaseAgent):
             self._pending_orders.pop(signal.signal_id, None)
             return
 
+        # Try primary order placement
         order_ids = await self._place_order_with_retries(signal, pending)
         if not order_ids:
-            self._pending_orders.pop(signal.signal_id, None)
-            return
+            # Primary placement failed, apply fallback strategy
+            order_ids = await self._apply_fallback_strategy(signal, pending)
+            if not order_ids:
+                # Fallback exhausted, mark signal as failed
+                self._log_system_event(
+                    "error",
+                    "Signal failed after fallback exhausted",
+                    {
+                        **self._signal_details(signal),
+                        "primary_retries": pending.retries,
+                        "fallback_attempts": pending.fallback_attempts,
+                        "last_error": pending.last_error,
+                        "original_volume": str(pending.original_volume) if pending.original_volume else None,
+                    },
+                )
+                self._pending_orders.pop(signal.signal_id, None)
+                return
 
         pending.order_ids = order_ids
 
