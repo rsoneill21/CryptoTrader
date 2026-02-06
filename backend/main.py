@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 import logging as _logging
 
 from api.errors import register_exception_handlers
+from agents.manager import AgentManager
 from db.database import init_db, SessionLocal
 from db.models import Alert
 from services.kraken import kraken_service
@@ -73,9 +74,20 @@ async def lifespan(app: FastAPI):
     # Initialize paper trading engine
     await initialize_paper_trading_engine()
 
+    # Start Kraken WebSocket
     asyncio.create_task(start_kraken_ws())
+
+    # Initialize and start agent manager
+    agent_manager = AgentManager()
+    await agent_manager.start_all()
+    app.state.agent_manager = agent_manager
+
     yield
     # Shutdown
+    # Stop agent manager
+    if hasattr(app.state, 'agent_manager'):
+        await app.state.agent_manager.stop_all()
+
     await stop_kraken_ws()
     await shutdown_paper_trading_engine()
     print("Shutting down CryptoTrader Backend...")
