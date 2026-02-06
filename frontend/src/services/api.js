@@ -220,5 +220,21 @@ export const aiAPI = {
     api.get('/api/ai/chat/history', { params }),
 };
 
+// Agents API - agent observability and control
+export const agentsAPI = {
+  dashboard: (pipelineLimit = 20) =>
+    api.get('/api/agents/dashboard', { params: { pipeline_limit: pipelineLimit } }),
+  allStatus: () =>
+    api.get('/api/agents/status'),
+  agentStatus: (agentName) =>
+    api.get(`/api/agents/${agentName}/status`),
+  controlAgent: (agentName, action) =>
+    api.post(`/api/agents/${agentName}/control`, { action }),
+  flushQueue: (channel) =>
+    api.post('/api/agents/queue/flush', { channel }),
+  retrySignal: (signalId) =>
+    api.post(`/api/agents/signals/${signalId}/retry`),
+};
+
 // Export default instance for custom requests
 export default api;
