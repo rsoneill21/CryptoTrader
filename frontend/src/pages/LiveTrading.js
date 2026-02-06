@@ -7,6 +7,7 @@ import { marketAPI, systemAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
 const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
+const OUTCOME_FEED_LIMIT = 30;
 
 const parseNumber = (value) => {
   const parsed = Number(value);
@@ -82,16 +83,23 @@ const LiveTrading = () => {
     }
 
     setOrderOutcomes((previous) => {
-      const next = [
-        {
-          ...outcome,
-          id: outcome.id || `outcome-${Date.now()}`,
-          timestamp: outcome.timestamp || new Date().toISOString(),
-        },
-        ...previous,
-      ];
+      const normalized = {
+        ...outcome,
+        id: outcome.id || `outcome-${Date.now()}`,
+        timestamp: outcome.timestamp || new Date().toISOString(),
+      };
 
-      return next.slice(0, 30);
+      const dedupeKey = `${normalized.orderId || 'none'}:${normalized.tradeId || 'none'}:${normalized.status}:${normalized.reasonCode || 'none'}`;
+      const alreadyExists = previous.some((entry) => {
+        const entryKey = `${entry.orderId || 'none'}:${entry.tradeId || 'none'}:${entry.status}:${entry.reasonCode || 'none'}`;
+        return entryKey === dedupeKey;
+      });
+
+      if (alreadyExists) {
+        return previous;
+      }
+
+      return [normalized, ...previous].slice(0, OUTCOME_FEED_LIMIT);
     });
   }, []);
 

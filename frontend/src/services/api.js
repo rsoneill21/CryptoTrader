@@ -278,11 +278,31 @@ export const tradesAPI = {
   submitManualOrder: (data) =>
     api.post('/api/trades/orders', data),
 
+  submitManualOrderOutcome: async (data) => {
+    const response = await api.post('/api/trades/orders', data);
+    return {
+      response,
+      outcome: normalizeTradeOutcome(response?.data, {
+        source: 'ticket_submit',
+      }),
+    };
+  },
+
   listPendingOrders: () =>
     api.get('/api/trades/orders/pending'),
 
   closePosition: (tradeId, data) =>
     api.post(`/api/trades/${tradeId}/close`, data),
+
+  closePositionOutcome: async (tradeId, data) => {
+    const response = await api.post(`/api/trades/${tradeId}/close`, data);
+    return {
+      response,
+      outcome: normalizeTradeOutcome(response?.data, {
+        source: 'position_close',
+      }),
+    };
+  },
 
   closeTrade: (tradeId, exitPrice, reason = '') =>
     api.post(`/api/trades/${tradeId}/close`, { exit_price: exitPrice, reason }),
