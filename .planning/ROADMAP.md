@@ -102,9 +102,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Core Risk Infrastructure & Settings (DB models, RiskService, API)
-- [ ] 03-02-PLAN.md — Kraken Rate Limiting & Market Safety (Redis counter, Liquidity check)
-- [ ] 03-03-PLAN.md — Automated Protection & Halt Controls (Daily Loss, Engine SL)
+- [x] 03-01-PLAN.md — Core Risk Infrastructure & Settings (DB models, RiskService, API)
+- [x] 03-02-PLAN.md — Kraken Rate Limiting & Market Safety (Redis counter, Liquidity check)
+- [x] 03-03-PLAN.md — Automated Protection & Halt Controls (Daily Loss, Engine SL)
 
 ### Phase 4: Position & Order Management
 **Goal:** Users can open and close positions with market and limit orders
@@ -222,6 +222,6 @@ Plans:
 
 **Total phases:** 11
 **Total requirements:** 63
-**Completion:** 2/11 phases (18%)
-**Current phase:** Phase 3 (Core Risk Management) — ready to execute
+**Completion:** 3/11 phases (27%)
+**Current phase:** Phase 4 (Position & Order Management) — ready to execute
 **Updated:** 2026-02-06

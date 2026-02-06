@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 3 - Core Risk Management (3 of 11)
-**Plan:** 2 of 3 in current phase
-**Status:** In progress
-**Last activity:** 2026-02-06 - Completed 03-02-PLAN.md
-**Progress:** █████████░ 97% (29/30 plans complete; Phase 3: 2/3)
+**Plan:** 3 of 3 in current phase
+**Status:** Phase complete
+**Last activity:** 2026-02-06 - Completed 03-03-PLAN.md
+**Progress:** ██████████ 100% (30/30 plans complete; Phase 3: 3/3)
 
 - **What's happening:**
 - Completed 03-02: Kraken rate limiter + liquidity risk gate across KrakenService and TradeExecutor
@@ -187,6 +187,8 @@
 | RiskService as single trade-validation gate | 2026-02-06 | Phase 3 needed one fail-closed path for pause, sizing, frequency, and exposure checks | Trade execution can call one async service and get consistent RiskException payloads |
 | Kraken limiter uses tier-aware Redis decay counter | 2026-02-06 | Kraken-bound requests need pre-flight throttling to avoid exchange-side rejection and bans | Every KrakenService request acquires limiter budget before transport call |
 | Trade executor validates risk before every order path | 2026-02-06 | Live signals and fallback retries must not bypass liquidity or risk checks | `_handle_signal` and fallback path both gate on `RiskService.validate_trade` |
+| Daily halt includes unrealized P&L and enforces next-day lockout | 2026-02-06 | Daily loss protection must account for open-position losses and block same-day resume after breach | `RiskService.check_daily_halt` pauses via `trading_control.pause_trading(..., lock_until_next_day=True)` |
+| Paper engine derives and enforces stop-loss per position | 2026-02-06 | RISK-02 requires automatic stop-loss exits even when signals omit explicit stops | `PaperTradingEngine` computes defaults from `RiskSettings.default_stop_loss_pct` and closes on trigger |
 
 ### Active Todos
 
@@ -210,6 +212,12 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-06 (latest - 03-03):**
+- Completed 03-03: daily total P&L halt controls and paper-engine stop-loss enforcement
+- Added day-bound trading lockout (`halted_until_date`) so same-day resume is denied after daily-loss halts
+- Added stop-loss defaults/trigger exits in paper engine plus tests (`test_daily_halt`, `test_paper_stop_loss`, `test_risk_flow`)
+- Duration: 9 minutes (3 task commits + 1 integration stabilization fix)
 
 **2026-02-06 (latest - 03-02):**
 - Completed 03-02: Kraken-specific Redis rate limiter and liquidity-based risk gating
@@ -397,19 +405,19 @@ None currently.
 - ~~Sync DB in some endpoints (create_alert, get_alert, update_alert)~~ - FIXED in 01-07 (alerts/market/strategies/risk now async)
 - Partial fills not handled (POS-05)
 - Slippage/fees not modeled (SAFE-03)
-- Stop-loss not enforced (RISK-02)
+- ~~Stop-loss not enforced (RISK-02)~~ - FIXED in 03-03 (paper trading stop-loss defaults + trigger closes)
 - Local execution environment missing FastAPI dependency; install backend requirements before running uvicorn verification
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 15:59 UTC
-**Stopped at:** Completed 03-02-PLAN.md (Kraken rate limiting and liquidity gate)
+**Last session:** 2026-02-06 16:00 UTC
+**Stopped at:** Completed 03-03-PLAN.md (active loss protection)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 3 with 03-03.
-2. Build remaining core risk controls (daily halts/stop-loss orchestration) on top of the new pre-trade gate.
-3. Keep validating fail-closed behavior with targeted backend pytest coverage.
+1. Start Phase 4 with 04-01 (position and order management foundation).
+2. Ensure position APIs preserve stop metadata and remain risk-gated before opening trades.
+3. Continue targeted backend pytest coverage for order lifecycle and position safety flows.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
