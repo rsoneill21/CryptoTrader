@@ -1,6 +1,6 @@
 # Project State: CryptoTrader
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-02-06
 **Milestone:** Paper trading with functional autonomous agents
 
 ## Project Reference
@@ -11,21 +11,23 @@
 
 **Key Context:**
 - Brownfield project: ~300 files of scaffolding exist but nothing functional
-- All agents exist as classes but don't run autonomously
-- Paper trading engine exists but state not persisted
+- Agents now start automatically with FastAPI backend (02-01 complete)
+- Paper trading engine exists and state persists (01-03 complete)
 - UI pages render but show placeholder/static data
 - Kraken integration exists but not wired to agent decisions
-- Known tech debt: fail-open rate limiting, sync DB in async routes, no pagination
+- Known tech debt: sync DB in some routes, no pagination on some endpoints
 
 ## Current Position
 
-**Phase:** Phase 1 - Infrastructure Hardening (1 of 11)
-**Plan:** 01-18 ready (17 of 18 in phase; verification rerun pending)
-**Status:** In progress (awaiting final verification after system health fix)
-**Last activity:** 2026-02-05 - Completed 01-16-PLAN.md
-**Progress:** █████████░ 93% (28/30 plans complete; 17/18 in current phase)
+**Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
+**Plan:** 02-02 complete (2 of 9 in phase)
+**Status:** In progress
+**Last activity:** 2026-02-06 - Completed 02-02-PLAN.md
+**Progress:** ██████████ 95% (30/31 plans complete; 2/9 in current phase)
 
 **What's happening:**
+- Completed 02-02: Redis Streams for reliable trade signal delivery with priority queues
+- Completed 02-01: AgentManager with staggered startup, supervision, and crash recovery
 - Completed 01-01: Async database session factory
 - Completed 01-02: Structured exceptions & fail-closed rate limiting
 - Completed 01-03: Paper trading state persistence
@@ -50,11 +52,12 @@
 - Authentication (login, register, sessions, MFA)
 - Kraken API connection and WebSocket market data feed
 - Agent framework with base class and lifecycle methods
+- AgentManager starts all agents automatically with crash recovery (02-01)
 - Database schema with migrations
 - AI chat with multi-provider support (OpenAI, Claude, Ollama)
 
 **What doesn't work:**
-- Agents don't run autonomously on schedule
+- Agents don't process messages or run autonomous logic yet
 - ~~Rate limiter fails open when Redis down~~ - FIXED in 01-13 (login integration honors exceptions)
 - Dashboard shows placeholder data
 - AI chat doesn't reference trading state
@@ -155,6 +158,11 @@
 | Market analysis fails closed on collector outage | 2026-02-05 | Silent partial responses hid upstream outages and bypassed monitors | `/api/market/analysis` now raises 503 with dependency metadata when indicator, insight, or sentiment collectors fail |
 | System health endpoints fail closed on Kraken outages | 2026-02-05 | `/health` and `/connection-status` were swallowing exceptions and returning degraded payloads | Health endpoints now raise ServiceUnavailableException so monitors capture outages |
 | ServiceUnavailableException carries endpoint/dependency metadata | 2026-02-05 | Observability required structured payloads linking failures to specific dependencies | Centralized logging + clients now see which endpoint/dependency failed without parsing stack traces |
+| Staggered agent startup with health checks | 2026-02-06 | Agents have dependencies (Orchestrator needs Market Analyst data); starting in sequence prevents race conditions | Market Analyst → Orchestrator → Trade Executor ensures each layer is ready before next starts |
+| Immediate restart on agent crash | 2026-02-06 | User requirement - agents should recover automatically without manual intervention | Supervisor loop catches exceptions, logs, then restarts; operator dashboard shows state but doesn't block restart |
+| Crash-loop detection with backoff | 2026-02-06 | Research pattern - prevents tight loops from overwhelming logs while allowing fast recovery | 3+ restarts in 5 seconds triggers 10-second backoff; balances responsiveness and stability |
+| Sub-minute agent scheduling intervals | 2026-02-06 | Trading decisions need sub-minute responsiveness; agents can't wait 60+ seconds between runs | Configurable 1-59 second intervals; validators reject >=60 to avoid confusion with minute-based scheduling |
+| Market Analyst horizontal scaling | 2026-02-06 | Multiple symbols can be processed in parallel; Orchestrator/Executor have global state | Market Analyst supports N replicas via config; Orchestrator and Trade Executor remain singletons |
 
 ### Active Todos
 
@@ -179,7 +187,21 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-05 (latest - 01-17):**
+**2026-02-06 (latest - 02-02):**
+- Completed 02-02: Redis Streams for reliable message delivery with at-least-once semantics
+- Added publish_reliable(), consume_reliable(), get_queue_depth() methods to MessageQueue
+- Priority queue support (0=critical, 1=high, 2=normal) with separate streams per priority
+- Queue backlog management trims at MAX_QUEUE_DEPTH=100 with audit logging
+- Duration: ~2 minutes (2 tasks, 2 commits)
+
+**2026-02-06 (02-01):**
+- Completed 02-01: AgentManager with staggered startup, health checks, supervisor with immediate restart, crash-loop detection
+- All agents (Market Analyst, Orchestrator, Trade Executor) now start automatically with FastAPI backend
+- AgentManager accessible via app.state.agent_manager for API access
+- Configurable Market Analyst replicas and sub-minute scheduling intervals
+- Duration: 2 minutes 9 seconds (2 tasks, 2 commits)
+
+**2026-02-05 (01-17):**
 - Completed 01-17: Market analysis indicator, insight, and sentiment collectors now raise ServiceUnavailableException with logger.exception traces instead of returning degraded data silently
 - Added pytest coverage to lock the failure contract and pinned `aiosqlite` in backend requirements so async sqlite installs for dev/test
 - Duration: 7 minutes (2 tasks, 2 commits)
@@ -303,18 +325,19 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05 19:20-19:25 UTC
-**Stopped at:** Completed 01-16-PLAN.md (system health gap closure)
+**Last session:** 2026-02-06 00:53-00:55 UTC
+**Stopped at:** Completed 02-01-PLAN.md (agent lifecycle management)
 **Resume file:** None
 
 **For next session:**
-1. Execute 01-15-PLAN.md (replace bare except blocks) to finish Phase 1 gap closure
-2. Install backend requirements (FastAPI et al.) locally before attempting uvicorn + curl verification again
-3. Carry forward exc_info logging + exception-based rate limiting requirements for every backend endpoint
+1. Continue Phase 2 with 02-02 (message queue upgrade to Redis Streams)
+2. AgentManager is now wired to FastAPI lifespan and agents start automatically
+3. Agents will need message queue integration to process market insights and trade signals
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
 - **Dependencies:** pybreaker>=1.0.0 installed for circuit breaker support
+- **AgentManager:** Accessible via app.state.agent_manager; supports configurable Market Analyst replicas
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
