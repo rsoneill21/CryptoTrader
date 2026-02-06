@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import RiskException
 from core.trading_control import trading_control
-from db.models import PaperTradingState, RiskSettings, Trade
+from db.models import MarketData, PaperTradingState, RiskSettings, Trade
+from services.kraken import KrakenAPIError, kraken_service
 
 
 DEFAULT_ACCOUNT_BALANCE = 100_000.0
@@ -56,6 +57,72 @@ class RiskService:
         return equity
 
     @classmethod
+    async def check_daily_halt(cls, db: AsyncSession) -> bool:
+        """Pause trading when total daily P&L breaches the configured loss limit."""
+
+        settings = await cls.get_settings(db)
+        daily_loss_limit = float(settings.daily_loss_limit or 0.0)
+        if daily_loss_limit <= 0:
+            return False
+
+        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        next_day = day_start + timedelta(days=1)
+
+        realized_result = await db.execute(
+            select(func.coalesce(func.sum(Trade.pnl), 0.0)).where(
+                Trade.exit_time.is_not(None),
+                Trade.exit_time >= day_start,
+                Trade.exit_time < next_day,
+            )
+        )
+        realized_pnl = float(realized_result.scalar_one() or 0.0)
+
+        open_positions_result = await db.execute(
+            select(Trade.symbol, Trade.side, Trade.quantity, Trade.entry_price).where(
+                Trade.exit_time.is_(None)
+            )
+        )
+        open_positions = list(open_positions_result.all())
+
+        latest_prices: dict[str, float] = {}
+        for symbol, _, _, _ in open_positions:
+            normalized_symbol = (symbol or "").strip().upper()
+            if not normalized_symbol or normalized_symbol in latest_prices:
+                continue
+
+            market_result = await db.execute(
+                select(MarketData.close)
+                .where(MarketData.symbol == normalized_symbol)
+                .order_by(MarketData.timestamp.desc())
+                .limit(1)
+            )
+            latest_close = market_result.scalar_one_or_none()
+            if latest_close is not None:
+                latest_prices[normalized_symbol] = float(latest_close)
+
+        unrealized_pnl = 0.0
+        for symbol, side, quantity, entry_price in open_positions:
+            if entry_price is None or quantity is None:
+                continue
+
+            normalized_symbol = (symbol or "").strip().upper()
+            market_price = latest_prices.get(normalized_symbol, float(entry_price))
+            side_multiplier = 1.0 if str(side).lower() == "buy" else -1.0
+            unrealized_pnl += (market_price - float(entry_price)) * float(quantity) * side_multiplier
+
+        total_daily_pnl = realized_pnl + unrealized_pnl
+        if total_daily_pnl <= -daily_loss_limit:
+            reason = "Daily loss limit reached (including unrealized)"
+            trading_control.pause_trading(
+                reason=reason,
+                triggered_by="risk_service",
+                lock_until_next_day=True,
+            )
+            return True
+
+        return False
+
+    @classmethod
     async def validate_trade(
         cls,
         db: AsyncSession,
@@ -64,6 +131,8 @@ class RiskService:
         price: float,
         side: str,
     ) -> None:
+        await cls.check_daily_halt(db)
+
         if trading_control.is_paused():
             pause_status = trading_control.status()
             raise RiskException(
@@ -146,5 +215,97 @@ class RiskService:
                     "current_exposure": current_exposure,
                     "projected_exposure": projected_exposure,
                     "max_asset_exposure": max_asset_exposure,
+                },
+            )
+
+        await cls.check_liquidity(
+            db=db,
+            symbol=symbol,
+            quantity=quantity,
+            side=side,
+            settings=settings,
+        )
+
+    @classmethod
+    async def check_liquidity(
+        cls,
+        db: AsyncSession,
+        symbol: str,
+        quantity: float,
+        side: str,
+        settings: Optional[RiskSettings] = None,
+    ) -> None:
+        requested_quantity = abs(float(quantity))
+        if requested_quantity <= 0:
+            return
+
+        risk_settings = settings or await cls.get_settings(db)
+        max_slippage_pct = max(float(risk_settings.min_liquidity_threshold or 0.0), 0.0)
+
+        try:
+            orderbook = await kraken_service.get_orderbook(symbol, count=100)
+        except KrakenAPIError as exc:
+            raise RiskException(
+                "Unable to validate market liquidity",
+                details={"symbol": symbol, "side": side, "reason": str(exc)},
+            ) from exc
+
+        side_normalized = str(side).lower()
+        levels = orderbook.get("asks", []) if side_normalized == "buy" else orderbook.get("bids", [])
+        if not levels:
+            raise RiskException(
+                "No order book liquidity available",
+                details={"symbol": symbol, "side": side, "requested_quantity": requested_quantity},
+            )
+
+        remaining = requested_quantity
+        notional = 0.0
+        filled_quantity = 0.0
+
+        for level in levels:
+            level_volume = float(level.get("volume", 0.0) or 0.0)
+            level_price = float(level.get("price", 0.0) or 0.0)
+            if level_volume <= 0 or level_price <= 0:
+                continue
+
+            fill = min(level_volume, remaining)
+            remaining -= fill
+            filled_quantity += fill
+            notional += fill * level_price
+            if remaining <= 0:
+                break
+
+        if filled_quantity < requested_quantity:
+            raise RiskException(
+                "Insufficient order book depth",
+                details={
+                    "symbol": symbol,
+                    "side": side,
+                    "requested_quantity": requested_quantity,
+                    "available_quantity": filled_quantity,
+                },
+            )
+
+        best_price = float(levels[0].get("price", 0.0) or 0.0)
+        if best_price <= 0:
+            raise RiskException(
+                "Invalid top-of-book price",
+                details={"symbol": symbol, "side": side},
+            )
+
+        average_fill_price = notional / filled_quantity
+        slippage_pct = abs((average_fill_price - best_price) / best_price) * 100.0
+
+        if max_slippage_pct > 0 and slippage_pct > max_slippage_pct:
+            raise RiskException(
+                "Liquidity slippage exceeds threshold",
+                details={
+                    "symbol": symbol,
+                    "side": side,
+                    "requested_quantity": requested_quantity,
+                    "average_fill_price": average_fill_price,
+                    "best_price": best_price,
+                    "slippage_pct": slippage_pct,
+                    "max_slippage_pct": max_slippage_pct,
                 },
             )

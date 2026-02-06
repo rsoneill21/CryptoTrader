@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from threading import RLock
 from typing import Any, Dict, Optional
 
@@ -23,6 +23,7 @@ class TradingPauseStatus:
     reason: Optional[str]
     triggered_by: Optional[str]
     timestamp: Optional[datetime]
+    halted_until_date: Optional[date]
 
 
 class TradingControl:
@@ -35,27 +36,51 @@ class TradingControl:
             reason=None,
             triggered_by=None,
             timestamp=None,
+            halted_until_date=None,
         )
         self._listener_lock = asyncio.Lock()
         self._listener_started = False
 
-    def pause_trading(self, reason: Optional[str] = None, triggered_by: str = "manual") -> bool:
+    def pause_trading(
+        self,
+        reason: Optional[str] = None,
+        triggered_by: str = "manual",
+        lock_until_next_day: bool = False,
+    ) -> bool:
         """Pause trading if it is not already paused."""
 
         normalized_reason = (reason or "").strip() or f"{triggered_by} requested trading pause"
+        now = datetime.utcnow()
+        halted_until_date = (now + timedelta(days=1)).date() if lock_until_next_day else None
 
         with self._lock:
             if self._status.paused:
+                if lock_until_next_day:
+                    existing_halt_until = self._status.halted_until_date
+                    if existing_halt_until is None or existing_halt_until < halted_until_date:
+                        self._status = TradingPauseStatus(
+                            paused=True,
+                            reason=normalized_reason,
+                            triggered_by=triggered_by,
+                            timestamp=now,
+                            halted_until_date=halted_until_date,
+                        )
+                        self._log_system_event(
+                            "warning",
+                            f"Trading paused: {normalized_reason}",
+                            self._status,
+                        )
                 logger.debug("Trading already paused; ignoring request from %s", triggered_by)
                 return False
             self._status = TradingPauseStatus(
                 paused=True,
                 reason=normalized_reason,
                 triggered_by=triggered_by,
-                timestamp=datetime.utcnow(),
+                timestamp=now,
+                halted_until_date=halted_until_date,
             )
 
-        self._log_system_event("warning", "Trading paused", self._status)
+        self._log_system_event("warning", f"Trading paused: {normalized_reason}", self._status)
         return True
 
     def resume_trading(self, reason: Optional[str] = None, triggered_by: str = "manual") -> bool:
@@ -67,11 +92,22 @@ class TradingControl:
             if not self._status.paused:
                 logger.debug("Trading already active; ignoring resume request from %s", triggered_by)
                 return False
+
+            halted_until_date = self._status.halted_until_date
+            if halted_until_date is not None and datetime.utcnow().date() < halted_until_date:
+                logger.info(
+                    "Trading resume blocked until %s (triggered_by=%s)",
+                    halted_until_date,
+                    self._status.triggered_by,
+                )
+                return False
+
             self._status = TradingPauseStatus(
                 paused=False,
                 reason=resume_reason,
                 triggered_by=triggered_by,
                 timestamp=datetime.utcnow(),
+                halted_until_date=None,
             )
 
         self._log_system_event("info", "Trading resumed", self._status)
@@ -186,6 +222,16 @@ class TradingControl:
 def _serialize_value(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, TradingPauseStatus):
+        return {
+            "paused": value.paused,
+            "reason": value.reason,
+            "triggered_by": value.triggered_by,
+            "timestamp": _serialize_value(value.timestamp),
+            "halted_until_date": _serialize_value(value.halted_until_date),
+        }
     if isinstance(value, dict):
         return {k: _serialize_value(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -206,4 +252,3 @@ def _schedule_start() -> None:
 
 
 _schedule_start()
-

@@ -10,8 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents.base import AgentMessage, BaseAgent
 from core.message_queue import Channels, message_queue
+from core.risk import RiskService
 from core.tasks import log_system_event
-from db.database import SessionLocal
+from db.database import AsyncSessionLocal, SessionLocal
 from db.models import MarketData, RiskSettings, Trade
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class RiskMonitorAgent(BaseAgent):
             description="Continuously evaluates portfolio risk and raises alerts when thresholds are breached",
         )
         self._db_factory = SessionLocal
+        self._async_db_factory = AsyncSessionLocal
         self._next_check = 0.0
         self._last_alert_time: Optional[datetime] = None
         self._current_score = 0.0
@@ -135,6 +137,7 @@ class RiskMonitorAgent(BaseAgent):
         self._next_check = now + self.CHECK_INTERVAL
         try:
             snapshot = await asyncio.to_thread(self._build_snapshot)
+            await self._check_daily_halt()
             score, breakdown = self._score_snapshot(snapshot)
             self._current_score = score
             await asyncio.to_thread(self._persist_score, snapshot.settings_id, score)
@@ -148,6 +151,10 @@ class RiskMonitorAgent(BaseAgent):
             )
         finally:
             await asyncio.sleep(0.01)
+
+    async def _check_daily_halt(self) -> None:
+        async with self._async_db_factory() as session:
+            await RiskService.check_daily_halt(session)
 
     async def process_message(self, message: AgentMessage) -> None:
         self._log_system_event(
