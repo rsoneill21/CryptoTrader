@@ -19,11 +19,11 @@
 
 ## Current Position
 
-**Phase:** Phase 3 - Core Risk Management (3 of 11)
-**Plan:** 3 of 3 in current phase
-**Status:** Phase complete
-**Last activity:** 2026-02-06 - Completed 03-03-PLAN.md
-**Progress:** ██████████ 100% (30/30 plans complete; Phase 3: 3/3)
+**Phase:** Phase 4 - Position & Order Management (4 of 11)
+**Plan:** 1 of 3 in current phase
+**Status:** In progress
+**Last activity:** 2026-02-06 - Completed 04-01-PLAN.md
+**Progress:** █████████░ 91% (31/34 plans complete; Phase 4: 1/3)
 
 - **What's happening:**
 - Completed 03-02: Kraken rate limiter + liquidity risk gate across KrakenService and TradeExecutor
@@ -189,6 +189,8 @@
 | Trade executor validates risk before every order path | 2026-02-06 | Live signals and fallback retries must not bypass liquidity or risk checks | `_handle_signal` and fallback path both gate on `RiskService.validate_trade` |
 | Daily halt includes unrealized P&L and enforces next-day lockout | 2026-02-06 | Daily loss protection must account for open-position losses and block same-day resume after breach | `RiskService.check_daily_halt` pauses via `trading_control.pause_trading(..., lock_until_next_day=True)` |
 | Paper engine derives and enforces stop-loss per position | 2026-02-06 | RISK-02 requires automatic stop-loss exits even when signals omit explicit stops | `PaperTradingEngine` computes defaults from `RiskSettings.default_stop_loss_pct` and closes on trigger |
+| Manual order entry supports quantity xor risk_percent | 2026-02-06 | UI requests can specify fixed size or risk budget, but server must own sizing logic | `POST /api/trades/orders` derives quantity via `RiskService.quantity_from_risk_percent` when needed |
+| Close endpoint executes at market price with partial support | 2026-02-06 | Position management requires deterministic close semantics for both trim and full exit flows | `/api/trades/{trade_id}/close` resolves latest price and persists requested/fill metadata |
 
 ### Active Todos
 
@@ -212,6 +214,13 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-06 (latest - 04-01):**
+- Completed 04-01: risk-gated manual market/limit order entry and partial/full close backend contracts
+- Added `POST /api/trades/orders` with lifecycle response fields and server-side risk-percent sizing
+- Upgraded close route to support partial quantity, market-priced execution, and structured failure reason codes
+- Added targeted regression suite `backend/tests/api/test_trades_order_entry.py`
+- Duration: 13 minutes (3 task commits)
 
 **2026-02-06 (latest - 03-03):**
 - Completed 03-03: daily total P&L halt controls and paper-engine stop-loss enforcement
@@ -410,14 +419,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 16:00 UTC
-**Stopped at:** Completed 03-03-PLAN.md (active loss protection)
+**Last session:** 2026-02-06 17:17 UTC
+**Stopped at:** Completed 04-01-PLAN.md (manual order entry and close contracts)
 **Resume file:** None
 
 **For next session:**
-1. Start Phase 4 with 04-01 (position and order management foundation).
-2. Ensure position APIs preserve stop metadata and remain risk-gated before opening trades.
-3. Continue targeted backend pytest coverage for order lifecycle and position safety flows.
+1. Execute 04-02 to reconcile pending/partial/fill/reject lifecycle transitions.
+2. Wire pending-order reconciliation to update terminal states without mixing into active positions.
+3. Prepare API outputs consumed by 04-03 Live Trading UI ticket and pending section.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
