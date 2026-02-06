@@ -19,13 +19,14 @@
 
 ## Current Position
 
-**Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
-**Plan:** 02-08 complete (8 of 9 in phase)
-**Status:** In progress
-**Last activity:** 2026-02-06 - Completed 02-08-PLAN.md
-**Progress:** ████████████ 100% (36/31 plans complete; 8/9 in current phase)
+**Phase:** Phase 3 - Core Risk Management (3 of 11)
+**Plan:** Not started (0 of 3 in current phase)
+**Status:** Ready to execute
+**Last activity:** 2026-02-06 - Completed 02-09-PLAN.md
+**Progress:** █████████░ 90% (27/30 plans complete; Phase 3: 0/3)
 
-**What's happening:**
+- **What's happening:**
+- Completed 02-09: Operator dashboard frontend with status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
 - Completed 02-08: Order execution fallback strategy (volume reduction retry before marking signals failed)
 - Completed 02-07: Trade Executor consumes signals via Redis Streams with analysis context
 - Completed 02-06: Dashboard API endpoints (unified dashboard, queue flush, signal retry)
@@ -206,6 +207,10 @@ None currently.
 
 ### Recent Changes
 
+**2026-02-06 (latest - 02-09):**
+- Completed 02-09: Operator dashboard frontend with agent status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
+- Duration: 17 minutes 43 seconds (3 tasks, 3 commits)
+
 **2026-02-06 (latest - 02-08):**
 - Completed 02-08: Order execution fallback strategy
 - Trade Executor automatically reduces volume by 50% when primary order fails
@@ -380,15 +385,15 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 01:16-01:18 UTC
-**Stopped at:** Completed 02-08-PLAN.md (order execution fallback strategy)
+**Last session:** 2026-02-06 14:34 UTC
+**Stopped at:** Completed 02-09-PLAN.md (operator dashboard frontend)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 2 with 02-09 (final plan in phase)
-2. Trade Executor has fallback strategy: reduces volume by 50% when primary order fails
-3. Up to 2 fallback attempts before marking signal as failed
-4. Full audit trail preserves original volume and tracks all fallback attempts
+1. Begin Phase 3 with 03-01 (Core Risk Infrastructure & Settings)
+2. Leverage the agent dashboard's unified endpoint and operator actions while building and verifying the new risk guardrails.
+3. Keep queue flush and retry controls in mind for backlog recovery flows and ensure the UI re-fetches data after those actions.
+4. Continue testing in the local dev environment (uvicorn + agents) so dashboards and risk endpoints stay in sync.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -396,6 +401,8 @@ None currently.
 - **AgentManager:** Accessible via app.state.agent_manager; supports configurable Market Analyst replicas
 - **AgentManager observability:** get_queue_metrics(), get_recent_pipeline_events(), record_pipeline_event() available
 - **Operator actions:** flush_queue(channel), retry_signal(signal_id) for queue management
+- Agent dashboard polls `/api/agents/dashboard` every 5 seconds to surface heartbeats, queue metrics, pipeline events, and pause/resume state; risk flows can reuse that endpoint.
+- Operator actions (pause/resume, flush queue, retry signal) re-fetch the dashboard immediately so the UI reflects the latest agent state and queue metrics; tests should mirror that flow.
 - **Trade Executor fallback:** Automatic 50% volume reduction on order failure; 2 max attempts; 0.001 min volume; original volume preserved
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited

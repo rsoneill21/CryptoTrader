@@ -9,6 +9,16 @@
 
 Transform existing scaffolding into a functional autonomous trading system. This roadmap delivers paper trading with agents that run continuously, analyze markets, make decisions, execute trades, and manage risk — all without manual intervention. The infrastructure (FastAPI, React, agent framework, Kraken integration) exists but agents don't actually run or make real decisions. This roadmap bridges the gap from "skeleton" to "autonomous system."
 
+## GSD Test Execution Policy
+
+- Automated validation is executed by the AI model against the live dev stack after startup (`./init.sh`).
+- Authenticated smoke tests must use credentials from `.env` (`AI_USERNAME`, `AI_PASSWORD`) instead of hardcoded test credentials.
+- Baseline post-start checks for each implementation cycle:
+  1. `POST /api/auth/login` with `.env` credentials returns HTTP 200.
+  2. `GET /api/auth/session` with the returned cookie or bearer token returns HTTP 200.
+  3. Targeted endpoint checks for the feature under development complete without timeout.
+- If DNS/tunnel/proxy issues block public-domain checks, AI must still run local API checks and record the external blocker in the phase summary.
+
 ## Phase Structure
 
 ### Phase 1: Infrastructure Hardening
@@ -64,15 +74,15 @@ Plans:
 **Plans:** 9 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — AgentManager with staggered startup and FastAPI lifespan wiring
-- [ ] 02-02-PLAN.md — Redis Streams for reliable message delivery with priority queues
-- [ ] 02-03-PLAN.md — Agent control API (pause/resume/status endpoints)
-- [ ] 02-04-PLAN.md — Heartbeat monitoring for stuck agent detection
-- [ ] 02-05-PLAN.md — Queue metrics, pipeline events, and operator actions
-- [ ] 02-06-PLAN.md — Dashboard API endpoints for observability
-- [ ] 02-07-PLAN.md — Wire agents to use Redis Streams with full audit bundles
-- [ ] 02-08-PLAN.md — Trade Executor fallback strategy for order failures
-- [ ] 02-09-PLAN.md — Operator dashboard frontend (status grid, pipeline timeline, queue metrics, controls)
+- [x] 02-01-PLAN.md — AgentManager with staggered startup and FastAPI lifespan wiring
+- [x] 02-02-PLAN.md — Redis Streams for reliable message delivery with priority queues
+- [x] 02-03-PLAN.md — Agent control API (pause/resume/status endpoints)
+- [x] 02-04-PLAN.md — Heartbeat monitoring for stuck agent detection
+- [x] 02-05-PLAN.md — Queue metrics, pipeline events, and operator actions
+- [x] 02-06-PLAN.md — Dashboard API endpoints for observability
+- [x] 02-07-PLAN.md — Wire agents to use Redis Streams with full audit bundles
+- [x] 02-08-PLAN.md — Trade Executor fallback strategy for order failures
+- [x] 02-09-PLAN.md — Operator dashboard frontend (status grid, pipeline timeline, queue metrics, controls)
 
 ### Phase 3: Core Risk Management
 **Goal:** Configurable risk limits prevent excessive losses and over-trading
@@ -212,6 +222,6 @@ Plans:
 
 **Total phases:** 11
 **Total requirements:** 63
-**Completion:** 1/11 phases (9%)
-**Current phase:** Phase 2 (Autonomous Agent Loop) — in progress
+**Completion:** 2/11 phases (18%)
+**Current phase:** Phase 3 (Core Risk Management) — ready to execute
 **Updated:** 2026-02-06
