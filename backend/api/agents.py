@@ -66,6 +66,27 @@ class DashboardResponse(BaseModel):
     pipeline_events: List[PipelineEventResponse]
 
 
+class FlushQueueRequest(BaseModel):
+    """Request to flush a message queue."""
+    channel: str
+
+
+class FlushQueueResponse(BaseModel):
+    """Response from queue flush operation."""
+    channel: str
+    flushed: int
+    success: bool
+    error: Optional[str] = None
+
+
+class RetrySignalResponse(BaseModel):
+    """Response from signal retry operation."""
+    signal_id: str
+    success: bool
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(request: Request, pipeline_limit: int = 20):
     """Get complete dashboard data for operator UI."""
@@ -83,6 +104,34 @@ async def get_dashboard(request: Request, pipeline_limit: int = 20):
         queue_metrics=QueueMetricsResponse(**queue_metrics),
         pipeline_events=[PipelineEventResponse(**event) for event in pipeline_events],
     )
+
+
+@router.post("/queue/flush", response_model=FlushQueueResponse)
+async def flush_queue(request: Request, body: FlushQueueRequest):
+    """Flush all messages from a queue channel."""
+    manager = getattr(request.app.state, 'agent_manager', None)
+    if not manager:
+        raise HTTPException(503, detail="Agent manager not initialized")
+
+    result = await manager.flush_queue(body.channel)
+    if not result.get("success", False):
+        logger.warning(f"Queue flush failed: {result.get('error')}")
+    return FlushQueueResponse(**result)
+
+
+@router.post("/signals/{signal_id}/retry", response_model=RetrySignalResponse)
+async def retry_signal(signal_id: str, request: Request):
+    """Retry a failed trade signal."""
+    manager = getattr(request.app.state, 'agent_manager', None)
+    if not manager:
+        raise HTTPException(503, detail="Agent manager not initialized")
+
+    result = await manager.retry_signal(signal_id)
+    if not result.get("success", False):
+        if "not found" in result.get("error", "").lower():
+            raise HTTPException(404, detail=result.get("error"))
+        raise HTTPException(500, detail=result.get("error"))
+    return RetrySignalResponse(**result)
 
 
 @router.post("/{agent_name}/control", response_model=AgentControlResponse)
