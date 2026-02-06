@@ -74,6 +74,91 @@ const normalizeAPIError = (errorResponseData) => {
   };
 };
 
+const normalizeLifecycleStatus = (statusValue) => {
+  const normalized = String(statusValue || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_');
+
+  if (normalized === 'open' || normalized === 'new') {
+    return 'pending';
+  }
+
+  if (normalized === 'closed') {
+    return 'filled';
+  }
+
+  if (normalized === 'cancelled' || normalized === 'expired') {
+    return 'canceled';
+  }
+
+  if (['pending', 'partially_filled', 'filled', 'rejected', 'canceled'].includes(normalized)) {
+    return normalized;
+  }
+
+  return 'rejected';
+};
+
+const parseReasonFromErrorMessage = (errorMessage) => {
+  if (!errorMessage || typeof errorMessage !== 'string') {
+    return { reasonCode: null, reasonMessage: null };
+  }
+
+  const text = errorMessage.trim();
+  if (!text) {
+    return { reasonCode: null, reasonMessage: null };
+  }
+
+  if (text.startsWith('[') && text.includes(']')) {
+    const closeIndex = text.indexOf(']');
+    const reasonCode = text.slice(1, closeIndex).trim().toLowerCase() || null;
+    const reasonMessage = text.slice(closeIndex + 1).trim() || null;
+    return { reasonCode, reasonMessage };
+  }
+
+  return { reasonCode: null, reasonMessage: text };
+};
+
+export const normalizeTradeOutcome = (payload = {}, fallback = {}) => {
+  const parsedReason = parseReasonFromErrorMessage(payload.error_message);
+  const reasonCode = payload.reason_code || fallback.reasonCode || parsedReason.reasonCode;
+  const reasonMessage = payload.reason_message || fallback.reasonMessage || parsedReason.reasonMessage;
+
+  return {
+    id: payload.order_id || payload.id || payload.trade_id || `outcome-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    orderId: payload.order_id || payload.id || null,
+    tradeId: payload.trade_id || null,
+    symbol: payload.symbol || payload.trade_symbol || fallback.symbol || 'Unknown',
+    side: payload.side || payload.trade_side || fallback.side || null,
+    status: normalizeLifecycleStatus(payload.status || fallback.status),
+    reasonCode,
+    reasonMessage,
+    orderType: payload.order_type || fallback.orderType || null,
+    source: fallback.source || 'trade',
+  };
+};
+
+export const normalizeTradeErrorOutcome = (error, fallback = {}) => {
+  const detail = error?.response?.data?.detail;
+  const isObjectDetail = detail && typeof detail === 'object';
+  return normalizeTradeOutcome(
+    {
+      status: 'rejected',
+      reason_code: isObjectDetail ? detail.code : error?.apiCode || 'request_failed',
+      reason_message: isObjectDetail
+        ? detail.message || error.message
+        : error?.message || 'Request failed',
+      symbol: fallback.symbol,
+      side: fallback.side,
+      order_type: fallback.orderType,
+      trade_id: fallback.tradeId || null,
+      order_id: fallback.orderId || null,
+    },
+    { ...fallback, status: 'rejected' }
+  );
+};
+
 // Request interceptor - auth token no longer needed in header as we use HttpOnly cookies
 api.interceptors.request.use(
   (config) => {
@@ -189,6 +274,15 @@ export const tradesAPI = {
 
   createTrade: (data) =>
     api.post('/api/trades/', data),
+
+  submitManualOrder: (data) =>
+    api.post('/api/trades/orders', data),
+
+  listPendingOrders: () =>
+    api.get('/api/trades/orders/pending'),
+
+  closePosition: (tradeId, data) =>
+    api.post(`/api/trades/${tradeId}/close`, data),
 
   closeTrade: (tradeId, exitPrice, reason = '') =>
     api.post(`/api/trades/${tradeId}/close`, { exit_price: exitPrice, reason }),

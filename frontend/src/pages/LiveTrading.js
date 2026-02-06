@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Chart from '../components/Chart';
 import PositionManager from '../components/PositionManager';
-import { marketAPI, tradesAPI, systemAPI } from '../services/api';
+import OrderTicket from '../components/OrderTicket';
+import OrderOutcomeFeed from '../components/OrderOutcomeFeed';
+import { marketAPI, systemAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
 const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
@@ -36,10 +38,7 @@ const LiveTrading = () => {
   const [currentSymbol, setCurrentSymbol] = useState(TARGET_SYMBOL);
   const [connectionStatus, setConnectionStatus] = useState(null);
 
-  // Manual trade form state
-  const [tradeSide, setTradeSide] = useState('buy');
-  const [tradeQuantity, setTradeQuantity] = useState('');
-  const [tradeLoading, setTradeLoading] = useState(false);
+  const [orderOutcomes, setOrderOutcomes] = useState([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -77,27 +76,24 @@ const LiveTrading = () => {
 
   const currentTicker = priceMap.get(currentSymbol);
 
-  const handleCreateTrade = async (e) => {
-    e.preventDefault();
-    if (!tradeQuantity || parseNumber(tradeQuantity) <= 0) return;
-
-    setTradeLoading(true);
-    try {
-      await tradesAPI.createTrade({
-        symbol: currentSymbol,
-        side: tradeSide,
-        quantity: parseNumber(tradeQuantity),
-        is_paper: true,
-      });
-      setTradeQuantity('');
-      fetchData();
-    } catch (error) {
-      console.error('Failed to execute trade', error);
-      alert('Trade execution failed: ' + (error.message || 'Unknown error'));
-    } finally {
-      setTradeLoading(false);
+  const appendOutcome = useCallback((outcome) => {
+    if (!outcome) {
+      return;
     }
-  };
+
+    setOrderOutcomes((previous) => {
+      const next = [
+        {
+          ...outcome,
+          id: outcome.id || `outcome-${Date.now()}`,
+          timestamp: outcome.timestamp || new Date().toISOString(),
+        },
+        ...previous,
+      ];
+
+      return next.slice(0, 30);
+    });
+  }, []);
 
   const livePositions = useMemo(() => {
     if (!portfolio?.holdings?.length) return [];
@@ -200,80 +196,20 @@ const LiveTrading = () => {
           </div>
 
           {/* Active Trades — managed by PositionManager */}
-          <PositionManager />
+          <PositionManager onOutcome={appendOutcome} />
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Manual Trade Form */}
-          <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
-            <h2 className="text-xl font-bold text-white mb-6">Trade</h2>
-            <form onSubmit={handleCreateTrade} className="space-y-4">
-              <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-2xl border border-gray-800">
-                <button
-                  type="button"
-                  onClick={() => setTradeSide('buy')}
-                  className={`py-2 rounded-xl text-xs font-bold uppercase transition ${tradeSide === 'buy' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-900/40' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  Buy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTradeSide('sell')}
-                  className={`py-2 rounded-xl text-xs font-bold uppercase transition ${tradeSide === 'sell' ? 'bg-rose-500 text-white shadow-lg shadow-rose-900/40' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  Sell
-                </button>
-              </div>
+          <OrderTicket
+            symbol={currentSymbol}
+            symbols={PRICE_SYMBOLS}
+            marketPrice={parseNumber(currentTicker?.last)}
+            onSymbolChange={setCurrentSymbol}
+            onOutcome={appendOutcome}
+          />
 
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-widest text-gray-500 ml-1">Asset</label>
-                <div className="relative">
-                  <select
-                    value={currentSymbol}
-                    onChange={(e) => setCurrentSymbol(e.target.value)}
-                    className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500 appearance-none"
-                  >
-                    {PRICE_SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
-                    ↓
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-widest text-gray-500 ml-1">Quantity</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="any"
-                    value={tradeQuantity}
-                    onChange={(e) => setTradeQuantity(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
-                  />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 uppercase">
-                    {currentSymbol.split('/')[0]}
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-widest mb-2 px-1">
-                  <span>Est. Cost</span>
-                  <span>{formatCurrency(parseNumber(tradeQuantity) * (currentTicker?.last || 0))}</span>
-                </div>
-                <button
-                  type="submit"
-                  disabled={tradeLoading || !tradeQuantity}
-                  className={`w-full py-4 rounded-[20px] font-bold uppercase tracking-widest text-sm transition ${tradeSide === 'buy' ? 'bg-emerald-500 hover:bg-emerald-400 text-white' : 'bg-rose-500 hover:bg-rose-400 text-white'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  {tradeLoading ? 'Processing...' : `${tradeSide === 'buy' ? 'Execute Buy' : 'Execute Sell'}`}
-                </button>
-              </div>
-            </form>
-          </div>
+          <OrderOutcomeFeed entries={orderOutcomes} />
 
           {/* Portfolio Breakdown */}
           <div className="rounded-[32px] border border-gray-800 bg-gray-900/40 p-6">
