@@ -205,3 +205,15 @@ class DatabaseException(BaseAppException):
             message=message,
             details=details,
         )
+
+
+class RiskException(BaseAppException):
+    """Risk validation failed for a requested trade."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="risk_limit_exceeded",
+            message=message,
+            details=details,
+        )
