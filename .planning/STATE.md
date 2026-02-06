@@ -20,12 +20,14 @@
 ## Current Position
 
 **Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
-**Plan:** 02-02 complete (2 of 9 in phase)
+**Plan:** 02-04 complete (4 of 9 in phase)
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 02-02-PLAN.md
-**Progress:** ██████████ 95% (30/31 plans complete; 2/9 in current phase)
+**Last activity:** 2026-02-06 - Completed 02-04-PLAN.md
+**Progress:** ████████████ 100% (32/31 plans complete; 4/9 in current phase)
 
 **What's happening:**
+- Completed 02-04: Heartbeat monitoring for stuck agent detection and auto-restart
+- Completed 02-03: Agent control API endpoints (status, pause, resume)
 - Completed 02-02: Redis Streams for reliable trade signal delivery with priority queues
 - Completed 02-01: AgentManager with staggered startup, supervision, and crash recovery
 - Completed 01-01: Async database session factory
@@ -166,6 +168,8 @@
 | Redis Streams for trade signals | 2026-02-06 | User requirement: at-least-once delivery for trade signals; pub/sub has no persistence | Redis Streams with consumer groups provide acknowledgment and redelivery; separate from pub/sub for market insights |
 | Priority queue separation | 2026-02-06 | Trade signals have different urgency levels; critical signals need processing before routine insights | Separate streams per priority (p0/p1/p2) enable priority-based consumption without complex sorting |
 | Queue backlog trimming at MAX_QUEUE_DEPTH=100 | 2026-02-06 | Prevent unbounded memory growth when consumers lag; old signals become stale | Trim oldest messages when queue exceeds 100 with audit logging; prefer fresh signals over backlog |
+| Heartbeat monitoring for stuck agents | 2026-02-06 | Agents can hang without crashing (infinite loops, deadlocks); need detection beyond crash recovery | BaseAgent updates heartbeat timestamp every loop; AgentManager monitors and force-restarts stale agents (>30s) |
+| 30-second stale threshold | 2026-02-06 | Balance between quick detection and tolerance for legitimate processing delays | 6 missed heartbeats (5s interval × 6) provides safety margin while catching truly stuck agents |
 
 ### Active Todos
 
@@ -190,7 +194,21 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-06 (latest - 02-02):**
+**2026-02-06 (latest - 02-04):**
+- Completed 02-04: Heartbeat monitoring for stuck agent detection
+- BaseAgent tracks heartbeat timestamp updated every run loop iteration
+- AgentManager monitors heartbeats every 10 seconds, force-restarts agents with >30s stale heartbeat
+- Agent get_status() includes last_heartbeat and heartbeat_age_seconds for operator visibility
+- Duration: 2 minutes (2 tasks, 2 commits)
+
+**2026-02-06 (02-03):**
+- Completed 02-03: Agent control API endpoints
+- GET /api/agents/status returns all agent status (running, paused, heartbeat age)
+- POST /api/agents/{name}/pause and /api/agents/{name}/resume control individual agents
+- Endpoints accessible to operators and dashboard UI
+- Duration: ~2 minutes (2 tasks, 2 commits)
+
+**2026-02-06 (02-02):**
 - Completed 02-02: Redis Streams for reliable message delivery with at-least-once semantics
 - Added publish_reliable(), consume_reliable(), get_queue_depth() methods to MessageQueue
 - Priority queue support (0=critical, 1=high, 2=normal) with separate streams per priority
@@ -328,14 +346,15 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 00:53-00:55 UTC
-**Stopped at:** Completed 02-01-PLAN.md (agent lifecycle management)
+**Last session:** 2026-02-06 01:02-01:04 UTC
+**Stopped at:** Completed 02-04-PLAN.md (heartbeat monitoring)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 2 with 02-02 (message queue upgrade to Redis Streams)
-2. AgentManager is now wired to FastAPI lifespan and agents start automatically
-3. Agents will need message queue integration to process market insights and trade signals
+1. Continue Phase 2 with next plan (02-05 or later)
+2. Agents now have heartbeat monitoring for stuck detection
+3. Agent control API endpoints available for operator dashboard
+4. Message queue with Redis Streams ready for agent-to-agent communication
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
