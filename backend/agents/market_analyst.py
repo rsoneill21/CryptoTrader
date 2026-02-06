@@ -280,21 +280,76 @@ class MarketAnalystAgent(BaseAgent):
         sanitized = _normalize_value(insight.details)
         insight_dict = insight.dict()
         insight_dict["details"] = sanitized
-        published = False
+
+        # Extract raw indicator values from details for analysis bundle
+        raw_indicators = {
+            "short_sma": insight_dict["details"].get("short_sma"),
+            "long_sma": insight_dict["details"].get("long_sma"),
+            "momentum": insight_dict["details"].get("momentum"),
+            "volatility": insight_dict["details"].get("volatility"),
+        }
+
+        price_data = {
+            "price": insight_dict["details"].get("price"),
+            "timestamp": insight_dict["details"].get("timestamp"),
+        }
+
+        # Build full analysis bundle for downstream audit
+        insight_payload = {
+            # Core insight fields
+            "symbol": insight.symbol,
+            "insight_type": insight.insight_type,
+            "level": insight.level.value,
+            "summary": insight.summary,
+            "score": insight.score,
+            "timestamp": insight.timestamp.isoformat(),
+            "details": sanitized,
+
+            # Full analysis bundle (user decision: include raw data for audit)
+            "analysis_bundle": {
+                "raw_indicators": raw_indicators,
+                "price_data": price_data,
+                "pattern_detected": insight.insight_type,
+                "source": "market_analyst",
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+            },
+        }
+
+        # Map insight level to priority (per user decision)
+        priority_map = {
+            MarketInsightLevel.BULLISH: 1,   # High priority for actionable signals
+            MarketInsightLevel.BEARISH: 1,   # High priority for actionable signals
+            MarketInsightLevel.NEUTRAL: 2,   # Normal priority for informational
+        }
+        priority = priority_map.get(insight.level, 2)
+
+        # Publish via Redis Streams for reliable delivery
+        published_reliable = False
         try:
-            published = await message_queue.publish(self._insight_channel, insight_dict)
+            published_reliable = await message_queue.publish_reliable(
+                Channels.STREAM_TRADE_SIGNALS,
+                insight_payload,
+                priority=priority,
+            )
         except Exception as exc:  # pragma: no cover - best effort publish
-            logger.warning("Failed to publish market insight: %s", exc)
+            logger.warning("Failed to publish market insight via streams: %s", exc)
             self._log_system_event(
                 "warning",
-                "Insight publish failed",
+                "Insight stream publish failed",
                 {"symbol": insight.symbol, "error": str(exc)},
             )
-            return
 
-        if not published:
+        # Keep backward compatibility for pub/sub (AI chat, etc.)
+        published_pubsub = False
+        try:
+            published_pubsub = await message_queue.publish(self._insight_channel, insight_dict)
+        except Exception as exc:  # pragma: no cover - best effort publish
+            logger.warning("Failed to publish market insight via pub/sub: %s", exc)
+
+        if not published_reliable and not published_pubsub:
             logger.debug("Insight publish returned false: %s", insight_dict)
             return
+
         self._log_system_event(
             "info",
             "Market insight published",
@@ -303,6 +358,9 @@ class MarketAnalystAgent(BaseAgent):
                 "type": insight.insight_type,
                 "level": insight.level.value,
                 "score": insight.score,
+                "priority": priority,
+                "stream_published": published_reliable,
+                "pubsub_published": published_pubsub,
             },
         )
         await self._archive_insight(insight.symbol, insight_dict)
