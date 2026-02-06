@@ -720,6 +720,12 @@ async def close_trade(
             service="kraken",
             details={"operation": "close_trade", "trade_id": trade_id, "symbol": trade.symbol},
         ) from exc
+    except Exception as exc:
+        logger.error("Unexpected error fetching close price for trade %s", trade_id, exc_info=True)
+        raise ServiceUnavailableException(
+            service="pricing",
+            details={"operation": "close_trade", "trade_id": trade_id, "symbol": trade.symbol},
+        ) from exc
 
     close_side = "sell" if trade.side.lower() == "buy" else "buy"
     await RiskService.validate_close(
@@ -729,6 +735,32 @@ async def close_trade(
         price=execution_price,
         side=close_side,
     )
+
+    try:
+        await paper_trading_engine.execute_signal(
+            PaperTradeSignal(
+                symbol=trade.symbol,
+                intent=TradeIntent.EXIT,
+                quantity=requested_quantity,
+                price=execution_price,
+                timestamp=datetime.utcnow(),
+                metadata={
+                    "source": "manual_close",
+                    "trade_id": trade.id,
+                    "close_reason": request.close_reason,
+                    "closed_by": current_user.email,
+                },
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "close_execution_failed",
+                "message": str(exc),
+                "details": {"trade_id": trade.id, "symbol": trade.symbol},
+            },
+        ) from exc
 
     now = datetime.utcnow()
 

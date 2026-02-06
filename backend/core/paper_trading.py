@@ -282,6 +282,13 @@ class PaperTradingEngine:
                 price_book=dict(self._price_book),
             )
 
+    async def get_cached_price(self, symbol: str) -> Optional[float]:
+        """Return the latest cached market price for a symbol if available."""
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        async with self._lock:
+            return self._price_book.get(normalized_symbol)
+
     def _open_position(self, signal: PaperTradeSignal, price: float) -> None:
         stop_loss_price = self._resolve_stop_loss_price(signal, price)
         entry = _MutablePosition(
