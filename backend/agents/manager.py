@@ -7,13 +7,16 @@ for all autonomous agents.
 
 import asyncio
 import logging
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from agents.base import BaseAgent
 from agents.market_analyst import MarketAnalystAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.trade_executor import TradeExecutorAgent
+from core.message_queue import message_queue, Channels
 from core.settings import get_app_settings
 from core.tasks import log_system_event
 
@@ -22,6 +25,19 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_CHECK_INTERVAL = 10.0  # Check every 10 seconds
 STALE_THRESHOLD = 30.0  # 30 seconds (allows 6 missed beats)
 
+
+
+@dataclass
+class PipelineEvent:
+    """Represents a message flowing through the agent pipeline."""
+    timestamp: datetime
+    source_agent: str
+    target_agent: str
+    event_type: str  # e.g., "insight", "signal", "order"
+    channel: str
+    priority: int
+    summary: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class AgentManager:
     """
@@ -33,6 +49,7 @@ class AgentManager:
     - Crash-loop detection and backoff
     - Graceful shutdown
     - Status reporting
+    - Queue metrics and pipeline event tracking
     """
 
     HEALTH_CHECK_TIMEOUT = 5.0
@@ -47,6 +64,11 @@ class AgentManager:
         self._running = False
         self._restart_counts: Dict[str, List[float]] = {}
         self._heartbeat_task: Optional[asyncio.Task] = None
+
+        # Pipeline event tracking
+        self._pipeline_events: Deque[PipelineEvent] = deque(maxlen=100)
+        self._message_counts: Dict[str, int] = {}  # channel -> count for throughput
+        self._last_throughput_reset: float = 0.0
 
         # Load configuration
         settings = get_app_settings()
@@ -265,6 +287,96 @@ class AgentManager:
     def _is_crash_looping(self, agent_name: str) -> bool:
         """Check if agent is crash-looping (3+ restarts in 5 seconds)."""
         return len(self._restart_counts[agent_name]) >= self.CRASH_LOOP_THRESHOLD
+
+    async def get_queue_metrics(self) -> Dict[str, Any]:
+        """
+        Get queue metrics for dashboard display.
+
+        Returns depth, throughput, and latency estimates.
+        """
+        metrics = {
+            "channels": {},
+            "total_depth": 0,
+            "throughput_per_minute": {},
+        }
+
+        # Get depth for each stream channel
+        for channel_name in [Channels.STREAM_TRADE_SIGNALS, Channels.STREAM_RISK_ALERTS]:
+            try:
+                depths = await message_queue.get_queue_depth(channel_name)
+                metrics["channels"][channel_name] = depths
+                metrics["total_depth"] += depths.get("total", 0)
+            except Exception as e:
+                logger.warning(f"Failed to get queue depth for {channel_name}: {e}")
+                metrics["channels"][channel_name] = {"error": str(e)}
+
+        # Calculate throughput (messages per minute since last reset)
+        try:
+            loop_time = asyncio.get_running_loop().time()
+            elapsed = loop_time - self._last_throughput_reset
+            if elapsed > 0:
+                for channel, count in self._message_counts.items():
+                    metrics["throughput_per_minute"][channel] = round(count * 60 / elapsed, 2)
+        except RuntimeError:
+            pass
+
+        return metrics
+
+    def get_recent_pipeline_events(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get recent pipeline events for timeline display.
+
+        Per user decision: "pipeline timeline illustrating recent messages
+        flowing through the loop."
+        """
+        events = list(self._pipeline_events)[-limit:]
+        return [
+            {
+                "timestamp": event.timestamp.isoformat(),
+                "source_agent": event.source_agent,
+                "target_agent": event.target_agent,
+                "event_type": event.event_type,
+                "channel": event.channel,
+                "priority": event.priority,
+                "summary": event.summary,
+                "metadata": event.metadata,
+            }
+            for event in reversed(events)  # Most recent first
+        ]
+
+    def record_pipeline_event(
+        self,
+        source_agent: str,
+        target_agent: str,
+        event_type: str,
+        channel: str,
+        priority: int = 2,
+        summary: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a pipeline event for timeline tracking."""
+        event = PipelineEvent(
+            timestamp=datetime.utcnow(),
+            source_agent=source_agent,
+            target_agent=target_agent,
+            event_type=event_type,
+            channel=channel,
+            priority=priority,
+            summary=summary,
+            metadata=metadata or {},
+        )
+        self._pipeline_events.append(event)
+
+        # Update throughput counter
+        self._message_counts[channel] = self._message_counts.get(channel, 0) + 1
+
+    def reset_throughput_counters(self) -> None:
+        """Reset throughput counters (call periodically, e.g., every minute)."""
+        self._message_counts.clear()
+        try:
+            self._last_throughput_reset = asyncio.get_running_loop().time()
+        except RuntimeError:
+            self._last_throughput_reset = 0.0
 
     async def stop_all(self) -> None:
         """Stop all agents gracefully."""
