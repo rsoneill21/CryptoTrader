@@ -378,6 +378,74 @@ class AgentManager:
         except RuntimeError:
             self._last_throughput_reset = 0.0
 
+    async def flush_queue(self, channel: str) -> Dict[str, Any]:
+        """
+        Flush all messages from a queue channel.
+
+        Per user decision: "limited safe actions (flush queue, retry a failed signal)"
+
+        Returns count of messages flushed.
+        """
+        if not message_queue._redis:
+            return {"error": "Redis not connected", "flushed": 0}
+
+        flushed_count = 0
+        try:
+            # Flush all priority levels for the channel
+            for priority in range(message_queue.PRIORITY_LEVELS):
+                stream_key = f"stream:{channel}:p{priority}"
+                length = await message_queue._redis.xlen(stream_key)
+                if length > 0:
+                    await message_queue._redis.delete(stream_key)
+                    flushed_count += length
+                    logger.info(f"Flushed {length} messages from {stream_key}")
+
+            return {"channel": channel, "flushed": flushed_count, "success": True}
+        except Exception as e:
+            logger.error(f"Failed to flush queue {channel}: {e}")
+            return {"error": str(e), "flushed": 0, "success": False}
+
+    async def retry_signal(self, signal_id: str, channel: str = Channels.STREAM_TRADE_SIGNALS) -> Dict[str, Any]:
+        """
+        Retry a failed signal by re-publishing it.
+
+        Per user decision: "limited safe actions (flush queue, retry a failed signal)"
+        """
+        # Look for the signal in trade executor's failed signals
+        trade_executor = self.get_agent("trade_executor")
+        if not trade_executor:
+            return {"error": "Trade executor not found", "success": False}
+
+        # Check if signal exists in pending orders (with error state)
+        pending = getattr(trade_executor, '_pending_orders', {})
+        pending_order = pending.get(signal_id)
+
+        if not pending_order:
+            return {
+                "error": f"Signal {signal_id} not found in pending orders",
+                "success": False
+            }
+
+        if not pending_order.last_error:
+            return {
+                "error": f"Signal {signal_id} has no recorded error to retry",
+                "success": False
+            }
+
+        # Re-publish the signal
+        try:
+            signal_dict = pending_order.signal.dict()
+            await message_queue.publish_reliable(
+                channel,
+                signal_dict,
+                priority=0,  # Retry with high priority
+            )
+
+            return {"signal_id": signal_id, "success": True, "message": "Signal re-queued"}
+        except Exception as e:
+            logger.error(f"Failed to retry signal {signal_id}: {e}")
+            return {"error": str(e), "success": False}
+
     async def stop_all(self) -> None:
         """Stop all agents gracefully."""
         if not self._running:
