@@ -99,6 +99,7 @@ class OrchestratorAgent(BaseAgent):
         self._decision_lock = asyncio.Lock()
         self._subscriptions: List[str] = []
         self._last_risk_alert: Optional[Dict[str, Any]] = None
+        self._insight_consumer_task: Optional[asyncio.Task] = None
 
     async def on_start(self) -> None:
         connected = await message_queue.connect()
@@ -106,12 +107,25 @@ class OrchestratorAgent(BaseAgent):
             self._log_event("warning", "Orchestrator could not connect to message queue", {})
             return
 
+        # Start consuming insights from Market Analyst via Redis Streams
+        self._insight_consumer_task = asyncio.create_task(self._consume_insights())
+        self._log_event("info", "Orchestrator insight consumer started", {})
+
         await self._subscribe_channel(Channels.AI_DECISIONS, self._handle_agent_decision)
         await self._subscribe_channel(Channels.ORCHESTRATOR, self._handle_chat_channel)
         await self._subscribe_channel(Channels.RISK_ALERTS, self._handle_risk_alert)
         self._log_event("info", "Orchestrator started", {"channels": self._subscriptions})
 
     async def on_stop(self) -> None:
+        # Cancel and await insight consumer task
+        if self._insight_consumer_task:
+            self._insight_consumer_task.cancel()
+            try:
+                await self._insight_consumer_task
+            except asyncio.CancelledError:
+                pass
+            self._log_event("info", "Insight consumer stopped", {})
+
         for channel in list(self._subscriptions):
             try:
                 await message_queue.unsubscribe(channel)
@@ -133,6 +147,60 @@ class OrchestratorAgent(BaseAgent):
             "Orchestrator received internal message",
             {"sender": message.sender, "type": message.message_type, "payload": _serialize_value(message.payload)},
         )
+
+    async def _consume_insights(self) -> None:
+        """Consume Market Analyst insights from Redis Streams."""
+        try:
+            await message_queue.consume_reliable(
+                channel=Channels.STREAM_TRADE_SIGNALS,
+                group="orchestrator_group",
+                consumer=f"orchestrator_{id(self)}",
+                callback=self._on_insight_message,
+            )
+        except asyncio.CancelledError:
+            self._log_event("info", "Insight consumer cancelled", {})
+        except Exception as exc:
+            self._log_event("error", "Insight consumer error", {"error": str(exc)})
+
+    async def _on_insight_message(self, payload: Dict[str, Any]) -> None:
+        """Handle insight message from stream."""
+        try:
+            # Extract analysis bundle
+            analysis_bundle = payload.get("analysis_bundle", {})
+
+            # Parse insight payload
+            insight = MarketInsightPayload(**payload)
+
+            # Store insight with analysis bundle
+            self._insights[insight.symbol] = insight
+
+            # Record context entry with full bundle for audit
+            context_entry = insight.dict()
+            context_entry["analysis_bundle"] = analysis_bundle
+            self._record_context_entry("market_insight", context_entry)
+
+            # Log analysis context received for audit trail
+            self._log_event(
+                "info",
+                "Insight received with analysis bundle",
+                {
+                    "symbol": insight.symbol,
+                    "type": insight.insight_type,
+                    "level": insight.level,
+                    "score": insight.score,
+                    "raw_indicators": analysis_bundle.get("raw_indicators", {}),
+                    "pattern": analysis_bundle.get("pattern_detected"),
+                    "source": analysis_bundle.get("source"),
+                },
+            )
+
+            # Evaluate for trade signal
+            await self._maybe_create_trade_signal(insight.symbol)
+
+        except ValidationError as exc:
+            self._log_event("warning", "Invalid insight payload from stream", {"error": str(exc), "payload": payload})
+        except Exception as exc:
+            self._log_event("error", "Error handling insight message", {"error": str(exc)})
 
     async def _subscribe_channel(self, channel: str, handler: Any) -> None:
         try:
@@ -251,17 +319,47 @@ class OrchestratorAgent(BaseAgent):
             if volume <= 0:
                 return
             payload = self._build_trade_signal(symbol, side, volume, insight, strategy)
+
+            # Determine priority based on signal type (per user decision)
+            # 0 = critical (halt signals), 1 = high (buy/sell), 2 = normal (research)
+            priority = 1  # High priority for buy/sell signals
+
+            # Publish via Redis Streams for reliable delivery
+            published_reliable = False
             try:
-                published = await message_queue.publish(Channels.TRADE_SIGNALS, payload)
+                published_reliable = await message_queue.publish_reliable(
+                    Channels.STREAM_TRADE_SIGNALS,
+                    payload,
+                    priority=priority,
+                )
             except Exception as exc:
-                self._log_event("warning", "Trade signal publish failed", {"symbol": symbol, "error": str(exc)})
+                self._log_event("warning", "Trade signal stream publish failed", {"symbol": symbol, "error": str(exc)})
+
+            # Keep backward compatibility for pub/sub
+            published_pubsub = False
+            try:
+                published_pubsub = await message_queue.publish(Channels.TRADE_SIGNALS, payload)
+            except Exception as exc:
+                self._log_event("warning", "Trade signal pub/sub publish failed", {"symbol": symbol, "error": str(exc)})
+
+            if not published_reliable and not published_pubsub:
+                self._log_event("warning", "Trade signal rejected by both channels", {"symbol": symbol})
                 return
-            if not published:
-                self._log_event("warning", "Trade signal rejected by queue", {"symbol": symbol})
-                return
+
             self._decision_timestamps[symbol] = now
             self._record_context_entry("trade_decision", payload)
-            self._log_event("info", "Trading decision dispatched", {"symbol": symbol, "side": side.value, "volume": str(volume)})
+            self._log_event(
+                "info",
+                "Trading decision dispatched",
+                {
+                    "symbol": symbol,
+                    "side": side.value,
+                    "volume": str(volume),
+                    "priority": priority,
+                    "stream_published": published_reliable,
+                    "pubsub_published": published_pubsub,
+                },
+            )
 
     def _side_from_insight(self, insight: MarketInsightPayload) -> Optional[OrderSide]:
         level = (insight.level or "").strip().lower()
@@ -306,11 +404,33 @@ class OrchestratorAgent(BaseAgent):
         insight: MarketInsightPayload,
         strategy: StrategyOptimizationPayload,
     ) -> Dict[str, Any]:
+        # Build full analysis context for audit (user decision)
+        analysis_context = {
+            "triggering_insights": [
+                {
+                    "insight_type": insight.insight_type,
+                    "level": insight.level,
+                    "score": insight.score,
+                    "summary": insight.summary,
+                }
+            ],
+            "strategy_id": strategy.strategy_id,
+            "strategy_name": strategy.strategy_name,
+            "decision_rationale": f"{insight.level} signal from {insight.insight_type} pattern",
+            "market_conditions": {
+                "sentiment": insight.level,
+                "score": insight.score,
+            },
+            "source": "orchestrator",
+            "decision_timestamp": datetime.utcnow().isoformat(),
+        }
+
         metadata = {
             "insight": _serialize_value(insight.dict()),
             "strategy": _serialize_value(strategy.dict()),
             "trading_status": _serialize_value(trading_control.status().__dict__),
         }
+
         return {
             "signal_id": f"orchestrator-{uuid.uuid4().hex[:8]}",
             "symbol": symbol,
@@ -319,6 +439,7 @@ class OrchestratorAgent(BaseAgent):
             "volume": str(volume),
             "time_in_force": "GTC",
             "client_order_id": f"orch-{uuid.uuid4().hex[:6]}",
+            "analysis_context": analysis_context,
             "metadata": metadata,
         }
 
