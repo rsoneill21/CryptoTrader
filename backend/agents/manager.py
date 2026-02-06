@@ -19,6 +19,9 @@ from core.tasks import log_system_event
 
 logger = logging.getLogger(__name__)
 
+HEARTBEAT_CHECK_INTERVAL = 10.0  # Check every 10 seconds
+STALE_THRESHOLD = 30.0  # 30 seconds (allows 6 missed beats)
+
 
 class AgentManager:
     """
@@ -43,6 +46,7 @@ class AgentManager:
         self._supervisor_tasks: Dict[str, asyncio.Task] = {}
         self._running = False
         self._restart_counts: Dict[str, List[float]] = {}
+        self._heartbeat_task: Optional[asyncio.Task] = None
 
         # Load configuration
         settings = get_app_settings()
@@ -104,6 +108,10 @@ class AgentManager:
             # Start Trade Executor
             executor = self._agents["trade_executor"]
             await self._start_agent_with_health_check(executor)
+
+            # Start heartbeat monitor
+            self._heartbeat_task = asyncio.create_task(self._check_heartbeats())
+            logger.info("Heartbeat monitor started")
 
             logger.info("All agents started successfully")
             self._log_system_event(
@@ -216,6 +224,33 @@ class AgentManager:
                     # Brief delay before restart
                     await asyncio.sleep(1.0)
 
+    async def _check_heartbeats(self) -> None:
+        """Monitor loop that checks agent heartbeats and restarts stale agents."""
+        while self._running:
+            for name, agent in self._agents.items():
+                if not agent._running or agent._paused:
+                    continue
+
+                try:
+                    loop_time = asyncio.get_running_loop().time()
+                    age = loop_time - agent._last_heartbeat
+                except RuntimeError:
+                    continue
+
+                if agent._last_heartbeat > 0 and age > STALE_THRESHOLD:
+                    logger.error(
+                        f"Agent {name} heartbeat stale ({age:.1f}s > {STALE_THRESHOLD}s), forcing restart"
+                    )
+
+                    # Cancel the supervisor task to trigger restart
+                    supervisor_task = self._supervisor_tasks.get(name)
+                    if supervisor_task and not supervisor_task.done():
+                        # Stop the agent first to reset state
+                        await agent.stop()
+                        # Supervisor will catch the stop and restart
+
+            await asyncio.sleep(HEARTBEAT_CHECK_INTERVAL)
+
     def _record_restart(self, agent_name: str) -> None:
         """Record a restart timestamp for crash-loop detection."""
         now = asyncio.get_running_loop().time()
@@ -239,6 +274,14 @@ class AgentManager:
 
         logger.info("Stopping all agents")
         self._running = False
+
+        # Stop heartbeat monitor
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop all agents
         for agent in self._agents.values():
