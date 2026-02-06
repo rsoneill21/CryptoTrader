@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 4 - Position & Order Management (4 of 11)
-**Plan:** 1 of 3 in current phase
+**Plan:** 2 of 3 in current phase
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 04-01-PLAN.md
-**Progress:** █████████░ 91% (31/34 plans complete; Phase 4: 1/3)
+**Last activity:** 2026-02-06 - Completed 04-02-PLAN.md
+**Progress:** █████████░ 94% (32/34 plans complete; Phase 4: 2/3)
 
 - **What's happening:**
 - Completed 03-02: Kraken rate limiter + liquidity risk gate across KrakenService and TradeExecutor
@@ -191,6 +191,8 @@
 | Paper engine derives and enforces stop-loss per position | 2026-02-06 | RISK-02 requires automatic stop-loss exits even when signals omit explicit stops | `PaperTradingEngine` computes defaults from `RiskSettings.default_stop_loss_pct` and closes on trigger |
 | Manual order entry supports quantity xor risk_percent | 2026-02-06 | UI requests can specify fixed size or risk budget, but server must own sizing logic | `POST /api/trades/orders` derives quantity via `RiskService.quantity_from_risk_percent` when needed |
 | Close endpoint executes at market price with partial support | 2026-02-06 | Position management requires deterministic close semantics for both trim and full exit flows | `/api/trades/{trade_id}/close` resolves latest price and persists requested/fill metadata |
+| Lifecycle reconciliation persists reason code/message in error payload | 2026-02-06 | Needed machine-readable rejection/cancel metadata without adding schema columns mid-phase | `Order.error_message` now stores `[code] message` and APIs expose `reason_code` + `reason_message` |
+| Order refresh keeps filled quantity monotonic | 2026-02-06 | Exchange snapshots can lag and report lower interim fill volumes | Reconciliation applies `max(existing, exchange)` so status refreshes cannot regress exposure |
 
 ### Active Todos
 
@@ -214,6 +216,13 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-06 (latest - 04-02):**
+- Completed 04-02: pending/partial/fill/reject lifecycle reconciliation across service + trade APIs
+- Added `OrderLifecycleSyncService` and wired pending/status endpoints to reconcile before response payloads
+- Added rejection/cancel `reason_code` and `reason_message` metadata for ticket/global activity consumers
+- Added regression suites `backend/tests/services/test_order_lifecycle_sync.py` and `backend/tests/api/test_trades_order_lifecycle.py`
+- Duration: 2 minutes (3 task commits)
 
 **2026-02-06 (latest - 04-01):**
 - Completed 04-01: risk-gated manual market/limit order entry and partial/full close backend contracts
@@ -419,14 +428,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 17:17 UTC
-**Stopped at:** Completed 04-01-PLAN.md (manual order entry and close contracts)
+**Last session:** 2026-02-06 17:27 UTC
+**Stopped at:** Completed 04-02-PLAN.md (order lifecycle reconciliation for pending/partial/failure states)
 **Resume file:** None
 
 **For next session:**
-1. Execute 04-02 to reconcile pending/partial/fill/reject lifecycle transitions.
-2. Wire pending-order reconciliation to update terminal states without mixing into active positions.
-3. Prepare API outputs consumed by 04-03 Live Trading UI ticket and pending section.
+1. Execute 04-03 to wire lifecycle-aware pending and outcome messaging into the Live Trading UI.
+2. Consume `/api/trades/orders/pending` in the separate pending section (do not mix with open positions).
+3. Surface `reason_code` and `reason_message` in ticket-local and global activity views.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
