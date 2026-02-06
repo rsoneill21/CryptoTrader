@@ -89,6 +89,13 @@ Plans:
 5. Trade rejected when hourly or daily trade frequency limit reached
 6. Kraken API rate limits respected (no 429 errors or bans)
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Core Risk Infrastructure & Settings (DB models, RiskService, API)
+- [ ] 03-02-PLAN.md — Kraken Rate Limiting & Market Safety (Redis counter, Liquidity check)
+- [ ] 03-03-PLAN.md — Automated Protection & Halt Controls (Daily Loss, Engine SL)
+
 ### Phase 4: Position & Order Management
 **Goal:** Users can open and close positions with market and limit orders
 
