@@ -163,6 +163,9 @@
 | Crash-loop detection with backoff | 2026-02-06 | Research pattern - prevents tight loops from overwhelming logs while allowing fast recovery | 3+ restarts in 5 seconds triggers 10-second backoff; balances responsiveness and stability |
 | Sub-minute agent scheduling intervals | 2026-02-06 | Trading decisions need sub-minute responsiveness; agents can't wait 60+ seconds between runs | Configurable 1-59 second intervals; validators reject >=60 to avoid confusion with minute-based scheduling |
 | Market Analyst horizontal scaling | 2026-02-06 | Multiple symbols can be processed in parallel; Orchestrator/Executor have global state | Market Analyst supports N replicas via config; Orchestrator and Trade Executor remain singletons |
+| Redis Streams for trade signals | 2026-02-06 | User requirement: at-least-once delivery for trade signals; pub/sub has no persistence | Redis Streams with consumer groups provide acknowledgment and redelivery; separate from pub/sub for market insights |
+| Priority queue separation | 2026-02-06 | Trade signals have different urgency levels; critical signals need processing before routine insights | Separate streams per priority (p0/p1/p2) enable priority-based consumption without complex sorting |
+| Queue backlog trimming at MAX_QUEUE_DEPTH=100 | 2026-02-06 | Prevent unbounded memory growth when consumers lag; old signals become stale | Trim oldest messages when queue exceeds 100 with audit logging; prefer fresh signals over backlog |
 
 ### Active Todos
 
