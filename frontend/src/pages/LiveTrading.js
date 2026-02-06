@@ -3,7 +3,7 @@ import Chart from '../components/Chart';
 import PositionManager from '../components/PositionManager';
 import OrderTicket from '../components/OrderTicket';
 import OrderOutcomeFeed from '../components/OrderOutcomeFeed';
-import { marketAPI, systemAPI } from '../services/api';
+import { isKrakenThrottleError, marketAPI, systemAPI } from '../services/api';
 
 const TARGET_SYMBOL = 'BTC/USD';
 const PRICE_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'LTC/USD', 'XRP/USD', 'ADA/USD'];
@@ -38,25 +38,52 @@ const LiveTrading = () => {
   const [priceTickers, setPriceTickers] = useState([]);
   const [currentSymbol, setCurrentSymbol] = useState(TARGET_SYMBOL);
   const [connectionStatus, setConnectionStatus] = useState(null);
+  const [exchangeNotice, setExchangeNotice] = useState('');
 
   const [orderOutcomes, setOrderOutcomes] = useState([]);
 
   const fetchData = useCallback(async () => {
-    try {
-      const [portfolioRes, pricesRes, connRes] = await Promise.all([
-        marketAPI.getPortfolio(),
-        marketAPI.getPrices(PRICE_SYMBOLS),
-        systemAPI.connectionStatus().catch(() => null),
-      ]);
+    const [portfolioResult, pricesResult, connectionResult] = await Promise.allSettled([
+      marketAPI.getPortfolio(),
+      marketAPI.getPrices(PRICE_SYMBOLS),
+      systemAPI.connectionStatus(),
+    ]);
 
-      setPortfolio(portfolioRes.data);
-      setPriceTickers(pricesRes.data?.prices || []);
-      if (connRes?.data) setConnectionStatus(connRes.data);
-    } catch (error) {
-      console.error('Failed to fetch live trading data', error);
-    } finally {
-      setPortfolioLoading(false);
+    let throttleDetected = false;
+
+    if (portfolioResult.status === 'fulfilled') {
+      setPortfolio(portfolioResult.value.data);
+    } else if (isKrakenThrottleError(portfolioResult.reason)) {
+      throttleDetected = true;
+    } else {
+      console.error('Failed to fetch portfolio', portfolioResult.reason);
     }
+
+    if (pricesResult.status === 'fulfilled') {
+      setPriceTickers(pricesResult.value.data?.prices || []);
+    } else if (isKrakenThrottleError(pricesResult.reason)) {
+      throttleDetected = true;
+    } else {
+      console.error('Failed to fetch market prices', pricesResult.reason);
+    }
+
+    if (connectionResult.status === 'fulfilled' && connectionResult.value?.data) {
+      setConnectionStatus(connectionResult.value.data);
+    } else if (connectionResult.status === 'rejected' && isKrakenThrottleError(connectionResult.reason)) {
+      throttleDetected = true;
+      setConnectionStatus((previous) => ({
+        ...(previous || {}),
+        reachable: false,
+        error: 'Kraken rate-limited. Showing last synced market data.',
+      }));
+    }
+
+    setExchangeNotice(
+      throttleDetected
+        ? 'Kraken is currently rate-limited. Trading stays available; market balances and prices refresh when budget recovers.'
+        : ''
+    );
+    setPortfolioLoading(false);
   }, []);
 
   useEffect(() => {
@@ -155,6 +182,12 @@ const LiveTrading = () => {
           </div>
         </div>
       </header>
+
+      {exchangeNotice && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          {exchangeNotice}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_350px]">
         {/* Main Content Area */}

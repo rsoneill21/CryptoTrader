@@ -159,6 +159,27 @@ export const normalizeTradeErrorOutcome = (error, fallback = {}) => {
   );
 };
 
+export const isKrakenThrottleError = (error) => {
+  const messageParts = [
+    error?.message,
+    error?.response?.data?.detail?.message,
+    typeof error?.response?.data?.detail === 'string' ? error.response.data.detail : null,
+    error?.apiDetails?.error,
+    error?.apiDetails?.reason,
+  ].filter((part) => typeof part === 'string' && part.trim().length > 0);
+
+  const message = messageParts.join(' ').toLowerCase();
+  const details = error?.apiDetails || error?.response?.data?.detail?.details || {};
+  const dependency = String(details?.dependency || details?.service || '').toLowerCase();
+  const code = String(error?.apiCode || error?.response?.data?.detail?.code || '').toLowerCase();
+
+  if (message.includes('unable to acquire kraken rate-limit budget')) {
+    return true;
+  }
+
+  return code === 'service_unavailable' && dependency === 'kraken';
+};
+
 // Request interceptor - auth token no longer needed in header as we use HttpOnly cookies
 api.interceptors.request.use(
   (config) => {

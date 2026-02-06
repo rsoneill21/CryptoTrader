@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { normalizeTradeErrorOutcome, normalizeTradeOutcome, tradesAPI } from '../services/api';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isKrakenThrottleError, normalizeTradeErrorOutcome, normalizeTradeOutcome, tradesAPI } from '../services/api';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -51,21 +51,68 @@ const PositionManager = ({ onOutcome }) => {
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [retryPayload, setRetryPayload] = useState(null);
+  const [pendingSyncNotice, setPendingSyncNotice] = useState('');
+  const previousPendingSnapshotRef = useRef([]);
+
+  const emitPendingLifecycleOutcomes = useCallback((nextPending) => {
+    if (typeof onOutcome !== 'function') {
+      previousPendingSnapshotRef.current = nextPending;
+      return;
+    }
+
+    const previous = previousPendingSnapshotRef.current;
+    if (!previous.length) {
+      previousPendingSnapshotRef.current = nextPending;
+      return;
+    }
+
+    const previousById = new Map(previous.map((item) => [item.id, item]));
+    nextPending.forEach((order) => {
+      const prior = previousById.get(order.id);
+      if (!prior) {
+        return;
+      }
+
+      const statusChanged = String(prior.status || '').toLowerCase() !== String(order.status || '').toLowerCase();
+      const fillChanged = parseNumber(prior.filled_quantity) !== parseNumber(order.filled_quantity);
+      if (!statusChanged && !fillChanged) {
+        return;
+      }
+
+      onOutcome(
+        normalizeTradeOutcome(
+          {
+            id: order.id,
+            order_id: order.id,
+            trade_id: order.trade_id,
+            symbol: order.trade_symbol,
+            side: order.side,
+            status: order.status,
+            reason_code: order.reason_code,
+            reason_message: order.reason_message,
+            updated_at: order.updated_at,
+          },
+          {
+            source: 'pending_refresh',
+            symbol: order.trade_symbol,
+            side: order.side,
+          }
+        )
+      );
+    });
+
+    previousPendingSnapshotRef.current = nextPending;
+  }, [onOutcome]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [activeResponse, pendingResponse] = await Promise.all([
-        tradesAPI.getActiveTrades(),
-        tradesAPI.listPendingOrders(),
-      ]);
-
+      const activeResponse = await tradesAPI.getActiveTrades();
       const nextPositions = activeResponse?.data || [];
-      const nextPending = pendingResponse?.data || [];
 
       setPositions((previous) => {
         const previousIds = new Set(previous.map((item) => item.id));
         const nextIds = new Set(nextPositions.map((item) => item.id));
-        const merged = { ...highlightRows };
+        const merged = {};
 
         nextPositions.forEach((item) => {
           if (!previousIds.has(item.id)) {
@@ -89,14 +136,28 @@ const PositionManager = ({ onOutcome }) => {
         return nextPositions;
       });
 
-      setPendingOrders(nextPending);
       setError('');
     } catch (requestError) {
       setError(requestError.message || 'Unable to load positions.');
+    }
+
+    try {
+      const pendingResponse = await tradesAPI.listPendingOrders();
+      const nextPending = pendingResponse?.data || [];
+      emitPendingLifecycleOutcomes(nextPending);
+
+      setPendingOrders(nextPending);
+      setPendingSyncNotice('');
+    } catch (requestError) {
+      if (isKrakenThrottleError(requestError)) {
+        setPendingSyncNotice('Kraken is rate-limited. Showing last synced pending orders until exchange budget recovers.');
+      } else {
+        setError(requestError.message || 'Unable to load positions.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [highlightRows]);
+  }, [emitPendingLifecycleOutcomes]);
 
   useEffect(() => {
     fetchData();
@@ -327,6 +388,11 @@ const PositionManager = ({ onOutcome }) => {
 
       <div className="rounded-3xl border border-gray-800 bg-gray-900/60 p-5">
         <h3 className="text-lg font-semibold text-white">Pending Orders</h3>
+        {pendingSyncNotice && (
+          <p className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+            {pendingSyncNotice}
+          </p>
+        )}
         {pendingOrders.length === 0 ? (
           <p className="mt-4 text-sm text-gray-400">No pending orders.</p>
         ) : (
