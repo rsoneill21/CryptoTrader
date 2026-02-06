@@ -1,1 +1,431 @@
-"\"\"\"\n+Trade Executor agent.\n+\n+Listens for validated trade signals, submits orders through the Kraken service, and tracks\n+execution status while logging every action.\n+"\"\"\n+\n+import asyncio\n+import logging\n+from dataclasses import dataclass, field\n+from decimal import Decimal\n+from typing import Any, Dict, List, Optional, Set\n+\n+from pydantic import BaseModel, Field, ValidationError, validator\n+\n+from agents.base import AgentMessage, BaseAgent\n+from core.message_queue import Channels, message_queue\n+from core.tasks import log_system_event\n+from services.kraken import (\n+    KrakenAPIError,\n+    OrderSide,\n+    OrderStatus,\n+    OrderType,\n+    kraken_service,\n+)\n+\n+logger = logging.getLogger(__name__)\n+\n+\n+def _serialize_value(value: Any) -> Any:\n+    if isinstance(value, Decimal):\n+        return str(value)\n+    if isinstance(value, dict):\n+        return {k: _serialize_value(v) for k, v in value.items()}\n+    if isinstance(value, list):\n+        return [_serialize_value(v) for v in value]\n+    if isinstance(value, set):\n+        return [_serialize_value(v) for v in value]\n+    if isinstance(value, tuple):\n+        return tuple(_serialize_value(v) for v in value)\n+    return value\n+\n+\n+class TradeSignal(BaseModel):\n+    signal_id: str\n+    symbol: str\n+    side: OrderSide\n+    order_type: OrderType\n+    volume: Decimal\n+    price: Optional[Decimal] = None\n+    stop_price: Optional[Decimal] = None\n+    client_order_id: Optional[str] = None\n+    time_in_force: str = \"GTC\"\n+    leverage: Optional[str] = None\n+    reduce_only: bool = False\n+    validate_only: bool = False\n+    metadata: Dict[str, Any] = Field(default_factory=dict)\n+\n+    @validator(\"volume\", \"price\", \"stop_price\", pre=True)\n+    def _to_decimal(cls, value: Any) -> Any:\n+        if value is None or isinstance(value, Decimal):\n+            return value\n+        return Decimal(str(value))\n+\n+    @validator(\"volume\")\n+    def _validate_volume(cls, value: Decimal) -> Decimal:\n+        if value <= 0:\n+            raise ValueError(\"volume must be greater than zero\")\n+        return value\n+\n+\n+@dataclass\n+class PendingOrder:\n+    signal: TradeSignal\n+    retries: int = 0\n+    order_ids: List[str] = field(default_factory=list)\n+    last_error: Optional[str] = None\n+    last_status: Optional[str] = None\n+\n+\n+class TradeExecutorAgent(BaseAgent):\n+    \"\"\"Agent that executes trade signals via Kraken.\"\"\"\n+\n+    MAX_RETRIES = 3\n+    RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)\n+    STATUS_POLL_INTERVAL = 5.0\n+\n+    def __init__(self) -> None:\n+        super().__init__(\n+            name=\"trade_executor\",\n+            description=\"Executes Kraken orders for validated trade signals\",\n+        )\n+        self._pending_orders: Dict[str, PendingOrder] = {}\n+        self._signal_tasks: Set[asyncio.Task[Any]] = set()\n+        self._next_status_poll: float = 0.0\n+        self._signal_channel = Channels.TRADE_SIGNALS\n+\n+    async def on_start(self) -> None:\n+        try:\n+            await message_queue.connect()\n+        except Exception as exc:  # pragma: no cover - best effort setup\n+            self._log_system_event(\n+                \"warning\",\n+                \"Message queue connection failed\",\n+                {\"error\": str(exc)},\n+            )\n+\n+        try:\n+            subscribed = await message_queue.subscribe(\n+                self._signal_channel,\n+                self._on_trade_signal,\n+            )\n+            if subscribed:\n+                self._log_system_event(\n+                    \"info\",\n+                    \"Subscribed to trade signals\",\n+                    {\"channel\": self._signal_channel},\n+                )\n+            else:\n+                self._log_system_event(\n+                    \"error\",\n+                    \"Subscription to trade signals failed\",\n+                    {\"channel\": self._signal_channel},\n+                )\n+        except Exception as exc:  # pragma: no cover - wrap unexpected failures\n+            self._log_system_event(\n+                \"error\",\n+                \"Subscription exception\",\n+                {\"error\": str(exc)},\n+            )\n+\n+    async def on_stop(self) -> None:\n+        try:\n+            await message_queue.unsubscribe(self._signal_channel)\n+        except Exception as exc:  # pragma: no cover - best effort cleanup\n+            self._log_system_event(\"warning\", \"Failed to unsubscribe\", {\"error\": str(exc)})\n+\n+        for task in list(self._signal_tasks):\n+            task.cancel()\n+\n+        if self._signal_tasks:\n+            await asyncio.gather(*self._signal_tasks, return_exceptions=True)\n+            self._signal_tasks.clear()\n+\n+        self._log_system_event(\"info\", \"Trade executor agent stopped\")\n+\n+    async def run(self) -> None:\n+        await self._poll_pending_orders()\n+        await asyncio.sleep(0.1)\n+\n+    async def process_message(self, message: AgentMessage) -> None:\n+        self._log_system_event(\n+            \"debug\",\n+            \"Agent message received\",\n+            {\n+                \"sender\": message.sender,\n+                \"type\": message.message_type,\n+                \"payload\": _serialize_value(message.payload),\n+            },\n+        )\n+\n+    def _track_signal_task(self, task: asyncio.Task[Any]) -> None:\n+        self._signal_tasks.add(task)\n+        task.add_done_callback(self._signal_task_done)\n+\n+    def _signal_task_done(self, task: asyncio.Task[Any]) -> None:\n+        self._signal_tasks.discard(task)\n+        if task.cancelled():\n+            logger.debug(\"Trade signal task cancelled\")\n+            return\n+        exception = task.exception()\n+        if exception:\n+            self._log_system_event(\n+                \"error\",\n+                \"Trade signal handler failed\",\n+                {\"error\": str(exception)},\n+            )\n+\n+    async def _on_trade_signal(self, payload: Dict[str, Any]) -> None:\n+        try:\n+            signal = TradeSignal(**payload)\n+        except ValidationError as exc:\n+            self._log_system_event(\n+                \"warning\",\n+                \"Invalid trade signal payload\",\n+                {\"error\": str(exc), \"payload\": _serialize_value(payload)},\n+            )\n+            return\n+\n+        self._log_system_event(\"info\", \"Trade signal received\", self._signal_details(signal))\n+\n+        task = asyncio.create_task(self._handle_signal(signal))\n+        self._track_signal_task(task)\n+\n+    async def _handle_signal(self, signal: TradeSignal) -> None:\n+        pending = PendingOrder(signal=signal)\n+        self._pending_orders[signal.signal_id] = pending\n+\n+        if signal.validate_only:\n+            self._log_system_event(\n+                \"info\",\n+                \"Dry-run trade signal acknowledged\",\n+                self._signal_details(signal),\n+            )\n+            self._pending_orders.pop(signal.signal_id, None)\n+            return\n+\n+        order_ids = await self._place_order_with_retries(signal, pending)\n+        if not order_ids:\n+            self._pending_orders.pop(signal.signal_id, None)\n+            return\n+\n+        pending.order_ids = order_ids\n+\n+    async def _place_order_with_retries(\n+        self, signal: TradeSignal, pending: PendingOrder\n+    ) -> List[str]:\n+        if not kraken_service.is_authenticated:\n+            self._log_system_event(\n+                \"error\",\n+                \"Kraken credentials missing\",\n+                self._signal_details(signal),\n+            )\n+            return []\n+\n+        base_details = self._signal_details(signal)\n+\n+        for attempt in range(1, self.MAX_RETRIES + 1):\n+            try:\n+                result = await kraken_service.place_order(\n+                    symbol=signal.symbol,\n+                    side=signal.side,\n+                    order_type=signal.order_type,\n+                    volume=signal.volume,\n+                    price=signal.price,\n+                    stop_price=signal.stop_price,\n+                    leverage=signal.leverage,\n+                    reduce_only=signal.reduce_only,\n+                    time_in_force=signal.time_in_force,\n+                    client_order_id=signal.client_order_id or signal.signal_id,\n+                )\n+\n+                order_ids = [str(order_id) for order_id in result.get(\"order_ids\", [])]\n+                details = {**base_details, \"attempt\": attempt, \"order_ids\": order_ids}\n+                self._log_system_event(\"info\", \"Order placed via Kraken\", details)\n+                pending.order_ids = order_ids\n+                return order_ids\n+            except KrakenAPIError as exc:\n+                pending.last_error = str(exc)\n+                pending.retries = attempt\n+                details = {\n+                    **base_details,\n+                    \"attempt\": attempt,\n+                    \"error\": str(exc),\n+                }\n+                self._log_system_event(\n+                    \"warning\",\n+                    \"Kraken API error while placing order\",\n+                    details,\n+                )\n+            except Exception as exc:  # pragma: no cover - guard unexpected failures\n+                pending.last_error = str(exc)\n+                pending.retries = attempt\n+                details = {\n+                    **base_details,\n+                    \"attempt\": attempt,\n+                    \"error\": str(exc),\n+                }\n+                self._log_system_event(\n+                    \"error\",\n+                    \"Unexpected error while placing order\",\n+                    details,\n+                )\n+\n+            if attempt < self.MAX_RETRIES:\n+                backoff = self.RETRY_BACKOFF_SECONDS[min(attempt - 1, len(self.RETRY_BACKOFF_SECONDS) - 1)]\n+                await asyncio.sleep(backoff)\n+\n+        self._log_system_event(\n+            \"error\",\n+            \"Exceeded retry limit while placing Kraken order\",\n+            {**base_details, \"retries\": self.MAX_RETRIES},\n+        )\n+        return []\n+\n+    async def _poll_pending_orders(self) -> None:\n+        if not self._pending_orders:\n+            return\n+\n+        now = asyncio.get_running_loop().time()\n+        if now < self._next_status_poll:\n+            return\n+\n+        self._next_status_poll = now + self.STATUS_POLL_INTERVAL\n+\n+        for signal_id, pending in list(self._pending_orders.items()):\n+            if not pending.order_ids:\n+                continue\n+\n+            order_id = pending.order_ids[0]\n+\n+            try:\n+                status = await kraken_service.get_order_status(order_id)\n+            except KrakenAPIError as exc:\n+                self._log_system_event(\n+                    \"warning\",\n+                    \"Failed to fetch order status\",\n+                    {\"order_id\": order_id, \"signal_id\": signal_id, \"error\": str(exc)},\n+                )\n+                continue\n+            except Exception as exc:  # pragma: no cover - keep polling resilient\n+                self._log_system_event(\n+                    \"error\",\n+                    \"Unexpected error polling order status\",\n+                    {\"order_id\": order_id, \"signal_id\": signal_id, \"error\": str(exc)},\n+                )\n+                continue\n+\n+            pending.last_status = status.status.value\n+\n+            if status.status in (OrderStatus.CLOSED, OrderStatus.CANCELED, OrderStatus.EXPIRED):\n+                self._log_system_event(\n+                    \"info\",\n+                    \"Order reached terminal status\",\n+                    {\n+                        \"signal_id\": signal_id,\n+                        \"order_id\": order_id,\n+                        \"status\": status.status.value,\n+                        \"filled_volume\": str(status.filled_volume),\n+                        \"cost\": str(status.cost),\n+                        \"fee\": str(status.fee),\n+                    },\n+                )\n+                self._pending_orders.pop(signal_id, None)\n+            else:\n+                logger.debug(\n+                    \"Order %s for signal %s still %s\",\n+                    order_id,\n+                    signal_id,\n+                    status.status.value,\n+                )\n+\n+    def _signal_details(\n+        self, signal: TradeSignal, extra: Optional[Dict[str, Any]] = None\n+    ) -> Dict[str, Any]:\n+        details = {\n+            \"signal_id\": signal.signal_id,\n+            \"symbol\": signal.symbol,\n+            \"side\": signal.side.value,\n+            \"order_type\": signal.order_type.value,\n+            \"volume\": str(signal.volume),\n+            \"price\": str(signal.price) if signal.price is not None else None,\n+            \"stop_price\": str(signal.stop_price) if signal.stop_price is not None else None,\n+            \"client_order_id\": signal.client_order_id,\n+            \"time_in_force\": signal.time_in_force,\n+            \"leverage\": signal.leverage,\n+            \"reduce_only\": signal.reduce_only,\n+            \"validate_only\": signal.validate_only,\n+            \"metadata\": _serialize_value(signal.metadata),\n+        }\n+\n+        if extra:\n+            details.update(extra)\n+\n+        return details\n+\n+    def _log_system_event(\n+        self, level: str, message: str, details: Optional[Dict[str, Any]] = None\n+    ) -> None:\n+        sanitized = _serialize_value(details or {})\n+        logger_method = getattr(logger, level, logger.info)\n+        logger_method(\"%s | %s\", message, sanitized)\n+\n+        try:\n+            log_system_event.delay(level, \"trade_executor\", message, sanitized)\n+        except Exception as exc:  # pragma: no cover - ensure best effort logging\n+            logger.warning(\"Unable to enqueue system log: %s\", exc)\n+\n+\n+trade_executor_agent = TradeExecutorAgent()\n*** End Patch***"
+"""
+Trade Executor agent.
+
+Listens for validated trade signals, submits orders through the Kraken service, and tracks
+execution status while logging every action.
+"""
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Any, Dict, List, Optional, Set
+
+from pydantic import BaseModel, Field, ValidationError, validator
+
+from agents.base import AgentMessage, BaseAgent
+from core.message_queue import Channels, message_queue
+from core.tasks import log_system_event
+from services.kraken import (
+    KrakenAPIError,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    kraken_service,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _serialize_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _serialize_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize_value(v) for v in value]
+    if isinstance(value, set):
+        return [_serialize_value(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_serialize_value(v) for v in value)
+    return value
+
+
+class TradeSignal(BaseModel):
+    signal_id: str
+    symbol: str
+    side: OrderSide
+    order_type: OrderType
+    volume: Decimal
+    price: Optional[Decimal] = None
+    stop_price: Optional[Decimal] = None
+    client_order_id: Optional[str] = None
+    time_in_force: str = "GTC"
+    leverage: Optional[str] = None
+    reduce_only: bool = False
+    validate_only: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @validator("volume", "price", "stop_price", pre=True)
+    def _to_decimal(cls, value: Any) -> Any:
+        if value is None or isinstance(value, Decimal):
+            return value
+        return Decimal(str(value))
+
+    @validator("volume")
+    def _validate_volume(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("volume must be greater than zero")
+        return value
+
+
+@dataclass
+class PendingOrder:
+    signal: TradeSignal
+    retries: int = 0
+    order_ids: List[str] = field(default_factory=list)
+    last_error: Optional[str] = None
+    last_status: Optional[str] = None
+
+
+class TradeExecutorAgent(BaseAgent):
+    """Agent that executes trade signals via Kraken."""
+
+    MAX_RETRIES = 3
+    RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+    STATUS_POLL_INTERVAL = 5.0
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="trade_executor",
+            description="Executes Kraken orders for validated trade signals",
+        )
+        self._pending_orders: Dict[str, PendingOrder] = {}
+        self._signal_tasks: Set[asyncio.Task[Any]] = set()
+        self._next_status_poll: float = 0.0
+        self._signal_channel = Channels.TRADE_SIGNALS
+        self._consumer_task: Optional[asyncio.Task] = None
+
+    async def on_start(self) -> None:
+        try:
+            await message_queue.connect()
+        except Exception as exc:  # pragma: no cover - best effort setup
+            self._log_system_event(
+                "warning",
+                "Message queue connection failed",
+                {"error": str(exc)},
+            )
+
+        # Start consuming from Redis Streams with consumer group
+        self._consumer_task = asyncio.create_task(self._consume_trade_signals())
+        self._log_system_event(
+            "info",
+            "Trade Executor stream consumer started",
+            {},
+        )
+
+        # Keep pub/sub subscription for backward compatibility
+        try:
+            subscribed = await message_queue.subscribe(
+                self._signal_channel,
+                self._on_trade_signal,
+            )
+            if subscribed:
+                self._log_system_event(
+                    "info",
+                    "Subscribed to trade signals pub/sub",
+                    {"channel": self._signal_channel},
+                )
+        except Exception as exc:  # pragma: no cover - wrap unexpected failures
+            self._log_system_event(
+                "error",
+                "Pub/sub subscription exception",
+                {"error": str(exc)},
+            )
+
+    async def on_stop(self) -> None:
+        # Cancel stream consumer
+        if self._consumer_task:
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                pass
+            self._log_system_event("info", "Stream consumer stopped", {})
+
+        try:
+            await message_queue.unsubscribe(self._signal_channel)
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            self._log_system_event("warning", "Failed to unsubscribe", {"error": str(exc)})
+
+        for task in list(self._signal_tasks):
+            task.cancel()
+
+        if self._signal_tasks:
+            await asyncio.gather(*self._signal_tasks, return_exceptions=True)
+            self._signal_tasks.clear()
+
+        self._log_system_event("info", "Trade executor agent stopped")
+
+    async def run(self) -> None:
+        await self._poll_pending_orders()
+        await asyncio.sleep(0.1)
+
+    async def process_message(self, message: AgentMessage) -> None:
+        self._log_system_event(
+            "debug",
+            "Agent message received",
+            {
+                "sender": message.sender,
+                "type": message.message_type,
+                "payload": _serialize_value(message.payload),
+            },
+        )
+
+    async def _consume_trade_signals(self) -> None:
+        """Consume trade signals from Redis Streams with at-least-once delivery."""
+        try:
+            await message_queue.consume_reliable(
+                channel=Channels.STREAM_TRADE_SIGNALS,
+                group="trade_executor_group",
+                consumer=f"executor_{id(self)}",
+                callback=self._on_stream_trade_signal,
+            )
+        except asyncio.CancelledError:
+            logger.info("Trade signal consumer cancelled")
+        except Exception as exc:
+            logger.error(f"Trade signal consumer error: {exc}", exc_info=True)
+            self._log_system_event(
+                "error",
+                "Trade signal consumer failed",
+                {"error": str(exc)},
+            )
+
+    async def _on_stream_trade_signal(self, payload: Dict[str, Any]) -> None:
+        """Handle trade signal from Redis Stream."""
+        # Log analysis context received for audit trail
+        analysis_context = payload.get("analysis_context", {})
+        if analysis_context:
+            self._log_system_event(
+                "info",
+                "Signal received with analysis context",
+                {
+                    "signal_id": payload.get("signal_id"),
+                    "triggering_insights_count": len(analysis_context.get("triggering_insights", [])),
+                    "strategy_name": analysis_context.get("strategy_name"),
+                    "decision_rationale": analysis_context.get("decision_rationale"),
+                },
+            )
+
+        # Process signal same as pub/sub
+        await self._on_trade_signal(payload)
+
+    def _track_signal_task(self, task: asyncio.Task[Any]) -> None:
+        self._signal_tasks.add(task)
+        task.add_done_callback(self._signal_task_done)
+
+    def _signal_task_done(self, task: asyncio.Task[Any]) -> None:
+        self._signal_tasks.discard(task)
+        if task.cancelled():
+            logger.debug("Trade signal task cancelled")
+            return
+        exception = task.exception()
+        if exception:
+            self._log_system_event(
+                "error",
+                "Trade signal handler failed",
+                {"error": str(exception)},
+            )
+
+    async def _on_trade_signal(self, payload: Dict[str, Any]) -> None:
+        try:
+            signal = TradeSignal(**payload)
+        except ValidationError as exc:
+            self._log_system_event(
+                "warning",
+                "Invalid trade signal payload",
+                {"error": str(exc), "payload": _serialize_value(payload)},
+            )
+            return
+
+        self._log_system_event("info", "Trade signal received", self._signal_details(signal))
+
+        task = asyncio.create_task(self._handle_signal(signal))
+        self._track_signal_task(task)
+
+    async def _handle_signal(self, signal: TradeSignal) -> None:
+        pending = PendingOrder(signal=signal)
+        self._pending_orders[signal.signal_id] = pending
+
+        if signal.validate_only:
+            self._log_system_event(
+                "info",
+                "Dry-run trade signal acknowledged",
+                self._signal_details(signal),
+            )
+            self._pending_orders.pop(signal.signal_id, None)
+            return
+
+        order_ids = await self._place_order_with_retries(signal, pending)
+        if not order_ids:
+            self._pending_orders.pop(signal.signal_id, None)
+            return
+
+        pending.order_ids = order_ids
+
+    async def _place_order_with_retries(
+        self, signal: TradeSignal, pending: PendingOrder
+    ) -> List[str]:
+        if not kraken_service.is_authenticated:
+            self._log_system_event(
+                "error",
+                "Kraken credentials missing",
+                self._signal_details(signal),
+            )
+            return []
+
+        base_details = self._signal_details(signal)
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                result = await kraken_service.place_order(
+                    symbol=signal.symbol,
+                    side=signal.side,
+                    order_type=signal.order_type,
+                    volume=signal.volume,
+                    price=signal.price,
+                    stop_price=signal.stop_price,
+                    leverage=signal.leverage,
+                    reduce_only=signal.reduce_only,
+                    time_in_force=signal.time_in_force,
+                    client_order_id=signal.client_order_id or signal.signal_id,
+                )
+
+                order_ids = [str(order_id) for order_id in result.get("order_ids", [])]
+                details = {**base_details, "attempt": attempt, "order_ids": order_ids}
+                self._log_system_event("info", "Order placed via Kraken", details)
+                pending.order_ids = order_ids
+                return order_ids
+            except KrakenAPIError as exc:
+                pending.last_error = str(exc)
+                pending.retries = attempt
+                details = {
+                    **base_details,
+                    "attempt": attempt,
+                    "error": str(exc),
+                }
+                self._log_system_event(
+                    "warning",
+                    "Kraken API error while placing order",
+                    details,
+                )
+            except Exception as exc:  # pragma: no cover - guard unexpected failures
+                pending.last_error = str(exc)
+                pending.retries = attempt
+                details = {
+                    **base_details,
+                    "attempt": attempt,
+                    "error": str(exc),
+                }
+                self._log_system_event(
+                    "error",
+                    "Unexpected error while placing order",
+                    details,
+                )
+
+            if attempt < self.MAX_RETRIES:
+                backoff = self.RETRY_BACKOFF_SECONDS[min(attempt - 1, len(self.RETRY_BACKOFF_SECONDS) - 1)]
+                await asyncio.sleep(backoff)
+
+        self._log_system_event(
+            "error",
+            "Exceeded retry limit while placing Kraken order",
+            {**base_details, "retries": self.MAX_RETRIES},
+        )
+        return []
+
+    async def _poll_pending_orders(self) -> None:
+        if not self._pending_orders:
+            return
+
+        now = asyncio.get_running_loop().time()
+        if now < self._next_status_poll:
+            return
+
+        self._next_status_poll = now + self.STATUS_POLL_INTERVAL
+
+        for signal_id, pending in list(self._pending_orders.items()):
+            if not pending.order_ids:
+                continue
+
+            order_id = pending.order_ids[0]
+
+            try:
+                status = await kraken_service.get_order_status(order_id)
+            except KrakenAPIError as exc:
+                self._log_system_event(
+                    "warning",
+                    "Failed to fetch order status",
+                    {"order_id": order_id, "signal_id": signal_id, "error": str(exc)},
+                )
+                continue
+            except Exception as exc:  # pragma: no cover - keep polling resilient
+                self._log_system_event(
+                    "error",
+                    "Unexpected error polling order status",
+                    {"order_id": order_id, "signal_id": signal_id, "error": str(exc)},
+                )
+                continue
+
+            pending.last_status = status.status.value
+
+            if status.status in (OrderStatus.CLOSED, OrderStatus.CANCELED, OrderStatus.EXPIRED):
+                self._log_system_event(
+                    "info",
+                    "Order reached terminal status",
+                    {
+                        "signal_id": signal_id,
+                        "order_id": order_id,
+                        "status": status.status.value,
+                        "filled_volume": str(status.filled_volume),
+                        "cost": str(status.cost),
+                        "fee": str(status.fee),
+                    },
+                )
+                self._pending_orders.pop(signal_id, None)
+            else:
+                logger.debug(
+                    "Order %s for signal %s still %s",
+                    order_id,
+                    signal_id,
+                    status.status.value,
+                )
+
+    def _signal_details(
+        self, signal: TradeSignal, extra: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        details = {
+            "signal_id": signal.signal_id,
+            "symbol": signal.symbol,
+            "side": signal.side.value,
+            "order_type": signal.order_type.value,
+            "volume": str(signal.volume),
+            "price": str(signal.price) if signal.price is not None else None,
+            "stop_price": str(signal.stop_price) if signal.stop_price is not None else None,
+            "client_order_id": signal.client_order_id,
+            "time_in_force": signal.time_in_force,
+            "leverage": signal.leverage,
+            "reduce_only": signal.reduce_only,
+            "validate_only": signal.validate_only,
+            "metadata": _serialize_value(signal.metadata),
+        }
+
+        if extra:
+            details.update(extra)
+
+        return details
+
+    def _log_system_event(
+        self, level: str, message: str, details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        sanitized = _serialize_value(details or {})
+        logger_method = getattr(logger, level, logger.info)
+        logger_method("%s | %s", message, sanitized)
+
+        try:
+            log_system_event.delay(level, "trade_executor", message, sanitized)
+        except Exception as exc:  # pragma: no cover - ensure best effort logging
+            logger.warning("Unable to enqueue system log: %s", exc)
+
+
+trade_executor_agent = TradeExecutorAgent()
