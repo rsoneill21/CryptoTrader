@@ -20,12 +20,13 @@
 ## Current Position
 
 **Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
-**Plan:** 02-04 complete (4 of 9 in phase)
+**Plan:** 02-05 complete (5 of 9 in phase)
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 02-04-PLAN.md
-**Progress:** ████████████ 100% (32/31 plans complete; 4/9 in current phase)
+**Last activity:** 2026-02-06 - Completed 02-05-PLAN.md
+**Progress:** ████████████ 100% (33/31 plans complete; 5/9 in current phase)
 
 **What's happening:**
+- Completed 02-05: Dashboard observability hooks (queue metrics, pipeline events, operator actions)
 - Completed 02-04: Heartbeat monitoring for stuck agent detection and auto-restart
 - Completed 02-03: Agent control API endpoints (status, pause, resume)
 - Completed 02-02: Redis Streams for reliable trade signal delivery with priority queues
@@ -170,6 +171,9 @@
 | Queue backlog trimming at MAX_QUEUE_DEPTH=100 | 2026-02-06 | Prevent unbounded memory growth when consumers lag; old signals become stale | Trim oldest messages when queue exceeds 100 with audit logging; prefer fresh signals over backlog |
 | Heartbeat monitoring for stuck agents | 2026-02-06 | Agents can hang without crashing (infinite loops, deadlocks); need detection beyond crash recovery | BaseAgent updates heartbeat timestamp every loop; AgentManager monitors and force-restarts stale agents (>30s) |
 | 30-second stale threshold | 2026-02-06 | Balance between quick detection and tolerance for legitimate processing delays | 6 missed heartbeats (5s interval × 6) provides safety margin while catching truly stuck agents |
+| Pipeline event deque with maxlen=100 | 2026-02-06 | Dashboard needs recent message timeline without unbounded memory growth | deque automatically evicts oldest events; 100 events × ~200 bytes = ~20KB (negligible) |
+| Throughput as messages per minute | 2026-02-06 | Dashboard displays queue throughput; per-minute granularity aligns with agent scheduling intervals | Calculate (count × 60 / elapsed_seconds); requires periodic reset_throughput_counters() calls |
+| Retry failed signals with priority 0 | 2026-02-06 | Failed signals need reprocessing ahead of routine signals | Re-queuing with priority 0 (critical) ensures retries process before normal priority messages |
 
 ### Active Todos
 
@@ -194,7 +198,14 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-06 (latest - 02-04):**
+**2026-02-06 (latest - 02-05):**
+- Completed 02-05: Dashboard observability hooks (queue metrics, pipeline timeline, operator actions)
+- AgentManager exposes get_queue_metrics() for dashboard queue depth/throughput display
+- Pipeline event tracking via PipelineEvent dataclass (capped at 100 events)
+- Operator actions: flush_queue() clears all priority levels, retry_signal() re-queues with priority 0
+- Duration: 3 minutes 34 seconds (2 tasks, 2 commits)
+
+**2026-02-06 (02-04):**
 - Completed 02-04: Heartbeat monitoring for stuck agent detection
 - BaseAgent tracks heartbeat timestamp updated every run loop iteration
 - AgentManager monitors heartbeats every 10 seconds, force-restarts agents with >30s stale heartbeat
@@ -346,20 +357,22 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 01:02-01:04 UTC
-**Stopped at:** Completed 02-04-PLAN.md (heartbeat monitoring)
+**Last session:** 2026-02-06 01:02-01:06 UTC
+**Stopped at:** Completed 02-05-PLAN.md (dashboard observability hooks)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 2 with next plan (02-05 or later)
-2. Agents now have heartbeat monitoring for stuck detection
-3. Agent control API endpoints available for operator dashboard
-4. Message queue with Redis Streams ready for agent-to-agent communication
+1. Continue Phase 2 with 02-06 (agent decision loop implementation)
+2. AgentManager now provides queue metrics, pipeline events, and operator actions
+3. Dashboard can poll get_queue_metrics(), stream get_recent_pipeline_events()
+4. Operators can flush queues and retry failed signals via manager methods
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
 - **Dependencies:** pybreaker>=1.0.0 installed for circuit breaker support
 - **AgentManager:** Accessible via app.state.agent_manager; supports configurable Market Analyst replicas
+- **AgentManager observability:** get_queue_metrics(), get_recent_pipeline_events(), record_pipeline_event() available
+- **Operator actions:** flush_queue(channel), retry_signal(signal_id) for queue management
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
