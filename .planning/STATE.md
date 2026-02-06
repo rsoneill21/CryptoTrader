@@ -20,12 +20,13 @@
 ## Current Position
 
 **Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
-**Plan:** 02-05 complete (5 of 9 in phase)
+**Plan:** 02-06 complete (6 of 9 in phase)
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 02-05-PLAN.md
-**Progress:** ████████████ 100% (33/31 plans complete; 5/9 in current phase)
+**Last activity:** 2026-02-06 - Completed 02-06-PLAN.md
+**Progress:** ████████████ 100% (34/31 plans complete; 6/9 in current phase)
 
 **What's happening:**
+- Completed 02-06: Dashboard API endpoints (unified dashboard, queue flush, signal retry)
 - Completed 02-05: Dashboard observability hooks (queue metrics, pipeline events, operator actions)
 - Completed 02-04: Heartbeat monitoring for stuck agent detection and auto-restart
 - Completed 02-03: Agent control API endpoints (status, pause, resume)
@@ -174,6 +175,8 @@
 | Pipeline event deque with maxlen=100 | 2026-02-06 | Dashboard needs recent message timeline without unbounded memory growth | deque automatically evicts oldest events; 100 events × ~200 bytes = ~20KB (negligible) |
 | Throughput as messages per minute | 2026-02-06 | Dashboard displays queue throughput; per-minute granularity aligns with agent scheduling intervals | Calculate (count × 60 / elapsed_seconds); requires periodic reset_throughput_counters() calls |
 | Retry failed signals with priority 0 | 2026-02-06 | Failed signals need reprocessing ahead of routine signals | Re-queuing with priority 0 (critical) ensures retries process before normal priority messages |
+| Unified dashboard endpoint | 2026-02-06 | Single GET /dashboard returns agents, queue metrics, and pipeline events in one call | Reduces frontend roundtrips from 3+ calls to 1; simpler client code |
+| Specific routes before parameterized routes | 2026-02-06 | FastAPI matches routes in definition order; /dashboard must precede /{agent_name} | Prevents "dashboard" from matching agent_name parameter |
 
 ### Active Todos
 
@@ -357,14 +360,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 01:02-01:06 UTC
-**Stopped at:** Completed 02-05-PLAN.md (dashboard observability hooks)
+**Last session:** 2026-02-06 01:10-01:11 UTC
+**Stopped at:** Completed 02-06-PLAN.md (dashboard API endpoints)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 2 with 02-06 (agent decision loop implementation)
-2. AgentManager now provides queue metrics, pipeline events, and operator actions
-3. Dashboard can poll get_queue_metrics(), stream get_recent_pipeline_events()
+1. Continue Phase 2 with 02-07 (agent decision loop implementation)
+2. Dashboard API complete: GET /dashboard, POST /queue/flush, POST /signals/{id}/retry
+3. Frontend can consume unified dashboard endpoint in single roundtrip
 4. Operators can flush queues and retry failed signals via manager methods
 
 **Context to carry forward:**
