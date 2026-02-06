@@ -39,6 +39,20 @@ const parseNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatOrderSide = (value) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return 'UNKNOWN';
+  }
+  return value.toUpperCase();
+};
+
+const formatOrderSymbol = (value) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return 'Unknown Symbol';
+  }
+  return value;
+};
+
 const PositionManager = ({ onOutcome }) => {
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
@@ -393,14 +407,16 @@ const PositionManager = ({ onOutcome }) => {
             {pendingSyncNotice}
           </p>
         )}
-        {pendingOrders.length === 0 ? (
+        {loading && pendingOrders.length === 0 ? (
+          <p className="mt-4 text-sm text-gray-400">Loading pending orders…</p>
+        ) : pendingOrders.length === 0 ? (
           <p className="mt-4 text-sm text-gray-400">No pending orders.</p>
         ) : (
           <div className="mt-4 space-y-3">
             {pendingOrders.map((order) => (
               <div key={order.id} className="rounded-2xl border border-gray-800 bg-black/20 px-4 py-3 text-sm">
                 <div className="flex items-center justify-between">
-                  <p className="text-white font-semibold">{order.trade_symbol || 'Unknown'} · {order.side.toUpperCase()}</p>
+                  <p className="text-white font-semibold">{formatOrderSymbol(order.trade_symbol)} · {formatOrderSide(order.side)}</p>
                   <p className="text-amber-300 uppercase text-xs tracking-widest">{order.status}</p>
                 </div>
                 <p className="mt-1 text-gray-400">

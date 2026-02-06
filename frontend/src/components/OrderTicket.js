@@ -40,6 +40,10 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
   const [submitting, setSubmitting] = useState(false);
   const [ticketOutcome, setTicketOutcome] = useState(null);
 
+  const clearTicketOutcome = () => {
+    setTicketOutcome(null);
+  };
+
   useEffect(() => {
     const savedSide = localStorage.getItem(SIDE_STORAGE_KEY);
     if (savedSide === 'buy' || savedSide === 'sell') {
@@ -59,6 +63,18 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
       setLimitPrice(String(marketPrice.toFixed(2)));
     }
   }, [orderType, marketPrice, limitTouched]);
+
+  useEffect(() => {
+    if (!ticketOutcome || ticketOutcome.status !== 'filled') {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      setTicketOutcome((current) => (current?.id === ticketOutcome.id ? null : current));
+    }, 9000);
+
+    return () => clearTimeout(timer);
+  }, [ticketOutcome]);
 
   const estimatedCost = useMemo(() => {
     const basePrice = orderType === 'limit' ? parseNumber(limitPrice) : parseNumber(marketPrice);
@@ -104,6 +120,7 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
 
   const handleOpenReview = (event) => {
     event.preventDefault();
+    clearTicketOutcome();
     const validationError = validateDraft();
     if (validationError) {
       setTicketOutcome({
@@ -161,14 +178,20 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
         <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-2xl border border-gray-800">
           <button
             type="button"
-            onClick={() => setSide('buy')}
+            onClick={() => {
+              clearTicketOutcome();
+              setSide('buy');
+            }}
             className={`py-2 rounded-xl text-xs font-bold uppercase transition ${side === 'buy' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-900/40' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Buy
           </button>
           <button
             type="button"
-            onClick={() => setSide('sell')}
+            onClick={() => {
+              clearTicketOutcome();
+              setSide('sell');
+            }}
             className={`py-2 rounded-xl text-xs font-bold uppercase transition ${side === 'sell' ? 'bg-rose-500 text-white shadow-lg shadow-rose-900/40' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Sell
@@ -178,7 +201,10 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
         <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-2xl border border-gray-800">
           <button
             type="button"
-            onClick={() => setOrderType('market')}
+            onClick={() => {
+              clearTicketOutcome();
+              setOrderType('market');
+            }}
             className={`py-2 rounded-xl text-xs font-bold uppercase transition ${orderType === 'market' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Market
@@ -186,6 +212,7 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
           <button
             type="button"
             onClick={() => {
+              clearTicketOutcome();
               setOrderType('limit');
               setLimitTouched(false);
             }}
@@ -199,7 +226,10 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
           <label className="text-[10px] uppercase tracking-widest text-gray-500 ml-1">Asset</label>
           <select
             value={symbol}
-            onChange={(event) => onSymbolChange(event.target.value)}
+            onChange={(event) => {
+              clearTicketOutcome();
+              onSymbolChange(event.target.value);
+            }}
             className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
           >
             {symbols.map((item) => (
@@ -218,6 +248,7 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
               value={limitPrice}
               onChange={(event) => {
                 setLimitTouched(true);
+                clearTicketOutcome();
                 setLimitPrice(event.target.value);
               }}
               className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
@@ -228,14 +259,20 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
         <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-2xl border border-gray-800">
           <button
             type="button"
-            onClick={() => setSizeMode('quantity')}
+            onClick={() => {
+              clearTicketOutcome();
+              setSizeMode('quantity');
+            }}
             className={`py-2 rounded-xl text-xs font-bold uppercase transition ${sizeMode === 'quantity' ? 'bg-gray-200 text-black' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Quantity
           </button>
           <button
             type="button"
-            onClick={() => setSizeMode('risk_percent')}
+            onClick={() => {
+              clearTicketOutcome();
+              setSizeMode('risk_percent');
+            }}
             className={`py-2 rounded-xl text-xs font-bold uppercase transition ${sizeMode === 'risk_percent' ? 'bg-gray-200 text-black' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Risk %
@@ -250,7 +287,10 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
               step="any"
               min="0"
               value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
+              onChange={(event) => {
+                clearTicketOutcome();
+                setQuantity(event.target.value);
+              }}
               placeholder="0.00"
               className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
             />
@@ -264,7 +304,10 @@ const OrderTicket = ({ symbol, symbols, marketPrice, onSymbolChange, onOutcome }
               min="1"
               max="100"
               value={riskPercent}
-              onChange={(event) => setRiskPercent(event.target.value)}
+              onChange={(event) => {
+                clearTicketOutcome();
+                setRiskPercent(event.target.value);
+              }}
               placeholder="2"
               className="w-full bg-black/40 border border-gray-800 rounded-2xl py-3 px-4 text-white text-sm focus:outline-none focus:border-blue-500"
             />

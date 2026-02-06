@@ -119,18 +119,65 @@ const parseReasonFromErrorMessage = (errorMessage) => {
   return { reasonCode: null, reasonMessage: text };
 };
 
+const normalizeText = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeSymbol = (value, fallbackValue) => {
+  const symbol = normalizeText(value) || normalizeText(fallbackValue);
+  return symbol || 'Unknown Symbol';
+};
+
+const normalizeSide = (value, fallbackValue) => {
+  const candidate = normalizeText(value) || normalizeText(fallbackValue);
+  if (!candidate) {
+    return 'unknown';
+  }
+
+  const normalized = candidate.toLowerCase();
+  if (normalized === 'long') {
+    return 'buy';
+  }
+  if (normalized === 'short') {
+    return 'sell';
+  }
+  if (normalized === 'buy' || normalized === 'sell') {
+    return normalized;
+  }
+
+  return 'unknown';
+};
+
+const normalizeTimestamp = (payload = {}, fallback = {}) => {
+  const candidates = [payload.updated_at, payload.created_at, payload.timestamp, fallback.timestamp, new Date().toISOString()];
+  for (const value of candidates) {
+    if (!value) {
+      continue;
+    }
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return new Date().toISOString();
+};
+
 export const normalizeTradeOutcome = (payload = {}, fallback = {}) => {
   const parsedReason = parseReasonFromErrorMessage(payload.error_message);
-  const reasonCode = payload.reason_code || fallback.reasonCode || parsedReason.reasonCode;
-  const reasonMessage = payload.reason_message || fallback.reasonMessage || parsedReason.reasonMessage;
+  const reasonCode = normalizeText(payload.reason_code) || normalizeText(fallback.reasonCode) || parsedReason.reasonCode;
+  const reasonMessage = normalizeText(payload.reason_message) || normalizeText(fallback.reasonMessage) || parsedReason.reasonMessage;
 
   return {
     id: payload.order_id || payload.id || payload.trade_id || `outcome-${Date.now()}`,
-    timestamp: new Date().toISOString(),
+    timestamp: normalizeTimestamp(payload, fallback),
     orderId: payload.order_id || payload.id || null,
     tradeId: payload.trade_id || null,
-    symbol: payload.symbol || payload.trade_symbol || fallback.symbol || 'Unknown',
-    side: payload.side || payload.trade_side || fallback.side || null,
+    symbol: normalizeSymbol(payload.symbol || payload.trade_symbol, fallback.symbol),
+    side: normalizeSide(payload.side || payload.trade_side, fallback.side),
     status: normalizeLifecycleStatus(payload.status || fallback.status),
     reasonCode,
     reasonMessage,

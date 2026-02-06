@@ -14,6 +14,14 @@ const parseNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeOutcomeTimestamp = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
+};
+
 const formatCurrency = (value) => {
   if (typeof value !== 'number' && typeof value !== 'string') {
     return '—';
@@ -110,10 +118,17 @@ const LiveTrading = () => {
     }
 
     setOrderOutcomes((previous) => {
+      const normalizedStatus = String(outcome.status || '').toLowerCase();
+      const status = ['pending', 'partially_filled', 'filled', 'rejected', 'canceled'].includes(normalizedStatus)
+        ? normalizedStatus
+        : 'rejected';
       const normalized = {
         ...outcome,
-        id: outcome.id || `outcome-${Date.now()}`,
-        timestamp: outcome.timestamp || new Date().toISOString(),
+        id: outcome.id || `outcome-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: normalizeOutcomeTimestamp(outcome.timestamp),
+        status,
+        symbol: typeof outcome.symbol === 'string' && outcome.symbol.trim().length > 0 ? outcome.symbol : 'Unknown Symbol',
+        side: typeof outcome.side === 'string' && outcome.side.trim().length > 0 ? outcome.side : 'unknown',
       };
 
       const dedupeKey = `${normalized.orderId || 'none'}:${normalized.tradeId || 'none'}:${normalized.status}:${normalized.reasonCode || 'none'}`;

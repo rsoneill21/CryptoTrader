@@ -10,13 +10,31 @@ const statusClass = {
 
 const formatTime = (value) => {
   if (!value) {
-    return '—';
+    return 'Time unavailable';
   }
-  return new Date(value).toLocaleTimeString('en-US', {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Time unavailable';
+  }
+  return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   });
+};
+
+const formatSide = (value) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return 'UNKNOWN';
+  }
+  return value.toUpperCase();
+};
+
+const formatSymbol = (value) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return 'Unknown Symbol';
+  }
+  return value;
 };
 
 const OrderOutcomeFeed = ({ entries }) => {
@@ -38,7 +56,7 @@ const OrderOutcomeFeed = ({ entries }) => {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-white">
-                    {entry.symbol} {entry.side ? `· ${entry.side.toUpperCase()}` : ''}
+                    {formatSymbol(entry.symbol)} · {formatSide(entry.side)}
                   </p>
                   <p className="text-[11px] uppercase tracking-widest mt-1">{entry.status}</p>
                 </div>
