@@ -31,6 +31,7 @@ from services.paper_trading_service import (
 _logger = _logging.getLogger("cryptotrader.kraken_alerts")
 from core.settings import get_app_settings
 from api import auth_router, market_router, system_router
+from api.agents import router as agents_router
 from api.alerts import router as alerts_router
 from api.ai import router as ai_router
 from api.export import router as export_router
@@ -729,6 +730,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(system_router, prefix="/api/system", tags=["System"])
 app.include_router(market_router, prefix="/api/market", tags=["Market"])
 app.include_router(alerts_router, prefix="/api/alerts", tags=["Alerts"])
+app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
 app.include_router(ai_router, prefix="/api/ai", tags=["AI"])
 app.include_router(strategies_router, prefix="/api/strategies", tags=["Strategies"])
 app.include_router(trades_router, prefix="/api/trades", tags=["Trades"])
