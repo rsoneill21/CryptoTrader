@@ -40,6 +40,51 @@ class AllAgentsStatusResponse(BaseModel):
     agents: List[AgentStatusResponse]
 
 
+class QueueMetricsResponse(BaseModel):
+    """Queue metrics for dashboard."""
+    channels: Dict[str, Any]
+    total_depth: int
+    throughput_per_minute: Dict[str, float]
+
+
+class PipelineEventResponse(BaseModel):
+    """Pipeline event for timeline display."""
+    timestamp: str
+    source_agent: str
+    target_agent: str
+    event_type: str
+    channel: str
+    priority: int
+    summary: str
+    metadata: Dict[str, Any]
+
+
+class DashboardResponse(BaseModel):
+    """Complete dashboard response."""
+    agents: List[AgentStatusResponse]
+    queue_metrics: QueueMetricsResponse
+    pipeline_events: List[PipelineEventResponse]
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(request: Request, pipeline_limit: int = 20):
+    """Get complete dashboard data for operator UI."""
+    manager = getattr(request.app.state, 'agent_manager', None)
+    if not manager:
+        raise HTTPException(503, detail="Agent manager not initialized")
+
+    all_status = manager.get_all_status()
+    agents = [AgentStatusResponse(**status) for status in all_status.values()]
+    queue_metrics = await manager.get_queue_metrics()
+    pipeline_events = manager.get_recent_pipeline_events(limit=pipeline_limit)
+
+    return DashboardResponse(
+        agents=agents,
+        queue_metrics=QueueMetricsResponse(**queue_metrics),
+        pipeline_events=[PipelineEventResponse(**event) for event in pipeline_events],
+    )
+
+
 @router.post("/{agent_name}/control", response_model=AgentControlResponse)
 async def control_agent(agent_name: str, request: Request, body: AgentControlRequest):
     """
