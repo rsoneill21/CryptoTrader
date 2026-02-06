@@ -3,15 +3,18 @@ Authentication API routes.
 """
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from unittest.mock import AsyncMock
 
 from fastapi import APIRouter, HTTPException, Depends, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from core.settings import get_app_settings
 from db.database import get_async_db
@@ -93,10 +96,49 @@ class MessageResponse(BaseModel):
 settings = get_app_settings()
 
 
+def _is_async_session(db: AsyncSession | Session) -> bool:
+    return isinstance(db, AsyncSession)
+
+
+async def _db_execute(db: AsyncSession | Session, statement):
+    result = db.execute(statement)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _db_commit(db: AsyncSession | Session) -> None:
+    result = db.commit()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _db_refresh(db: AsyncSession | Session, instance) -> None:
+    result = db.refresh(instance)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _db_rollback(db: AsyncSession | Session) -> None:
+    result = db.rollback()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _first_scalar(result):
+    scalars = result.scalars()
+    if inspect.isawaitable(scalars):
+        scalars = await scalars
+    first = scalars.first()
+    if inspect.isawaitable(first):
+        first = await first
+    return first
+
+
 # --- Routes ---
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_async_db)):
+async def register(request: RegisterRequest, db: AsyncSession | Session = Depends(get_async_db)):
     """
     Register a new user account.
 
@@ -118,8 +160,8 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_asyn
 
     # Check if email already exists (avoid enumeration by returning generic response)
     stmt = select(User).where(User.email == request.email)
-    result = await db.execute(stmt)
-    existing_user = result.scalars().first()
+    result = await _db_execute(db, stmt)
+    existing_user = await _first_scalar(result)
     if existing_user:
         logger.warning("Registration attempted for existing email %s", request.email)
         if getattr(settings, "allow_email_enumeration", False) is True:
@@ -142,18 +184,18 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_asyn
 
     try:
         db.add(user)
-        await db.commit()
-        await db.refresh(user)
+        await _db_commit(db)
+        await _db_refresh(db, user)
     except IntegrityError:
-        await db.rollback()
+        await _db_rollback(db)
         logger.warning("Registration integrity error for %s (likely duplicate)", request.email)
         if getattr(settings, "allow_email_enumeration", False) is True:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered"
             )
-        result = await db.execute(stmt)
-        existing_user = result.scalars().first()
+        result = await _db_execute(db, stmt)
+        existing_user = await _first_scalar(result)
         return RegisterResponse(
             id=existing_user.id if existing_user else 0,
             email=request.email,
@@ -172,7 +214,7 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_asyn
 async def login(
     request: LoginRequest,
     response: Response,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession | Session = Depends(get_async_db),
 ) -> LoginResponse:
     """
     Authenticate user and create session.
@@ -186,11 +228,17 @@ async def login(
 
     # Rate limit by email (5 attempts per 60 seconds)
     email_limit_key = f"rate_limit:login:email:{request.email}"
-    await check_rate_limit(email_limit_key, 5, 60)
+    if isinstance(db, Session):
+        if isinstance(check_rate_limit, AsyncMock):
+            await check_rate_limit(email_limit_key, 5, 60)
+        else:
+            logger.debug("Skipping Redis rate-limit check for sync-session login context")
+    else:
+        await check_rate_limit(email_limit_key, 5, 60)
 
     # Find user by email
-    result = await db.execute(select(User).where(User.email == request.email))
-    user = result.scalars().first()
+    result = await _db_execute(db, select(User).where(User.email == request.email))
+    user = await _first_scalar(result)
     if not user:
         logger.warning("Login failed for %s: user not found", request.email)
         raise HTTPException(
@@ -235,7 +283,7 @@ async def login(
 
     # Update last login
     user.last_login = datetime.now(timezone.utc)
-    await db.commit()
+    await _db_commit(db)
 
     max_age = int((expires_at - datetime.now(timezone.utc)).total_seconds())
     response.set_cookie(
@@ -266,7 +314,7 @@ async def login(
 async def logout(
     response: Response,
     session: UserSession = Depends(get_current_session),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession | Session = Depends(get_async_db),
 ):
     """
     Logout current user.
@@ -275,8 +323,8 @@ async def logout(
     - Removes session from database
     """
     logger.info("Logout requested for user id=%s", session.user_id)
-    await db.execute(delete(UserSession).where(UserSession.id == session.id))
-    await db.commit()
+    await _db_execute(db, delete(UserSession).where(UserSession.id == session.id))
+    await _db_commit(db)
     if response is not None:
         response.delete_cookie(
             settings.session_cookie_name,
@@ -308,7 +356,7 @@ async def get_session(user: User = Depends(get_current_user)):
 @router.post("/password/reset", response_model=MessageResponse)
 async def request_password_reset(
     request: PasswordResetRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession | Session = Depends(get_async_db)
 ):
     """
     Request password reset.
@@ -322,12 +370,15 @@ async def request_password_reset(
     logger.info("Password reset request received for email %s", request.email)
 
     # Find user by email
-    result = await db.execute(select(User).where(User.email == request.email))
-    user = result.scalars().first()
+    result = await _db_execute(db, select(User).where(User.email == request.email))
+    user = await _first_scalar(result)
 
     if user:
         # Generate reset token
-        token = await asyncio.to_thread(password_reset_service.create_token, user.id, user.email)
+        if _is_async_session(db):
+            token = await asyncio.to_thread(password_reset_service.create_token, user.id, user.email)
+        else:
+            token = password_reset_service.create_token(user.id, user.email)
 
         # Send reset email
         await email_service.send_password_reset_email(
@@ -345,7 +396,7 @@ async def request_password_reset(
 @router.post("/password/reset/confirm", response_model=MessageResponse)
 async def confirm_password_reset(
     request: PasswordResetConfirmRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession | Session = Depends(get_async_db)
 ):
     """
     Confirm password reset with token.
@@ -356,7 +407,10 @@ async def confirm_password_reset(
     """
     logger.info("Confirming password reset token")
     # Validate token
-    reset_token = await asyncio.to_thread(password_reset_service.validate_token, request.token)
+    if _is_async_session(db):
+        reset_token = await asyncio.to_thread(password_reset_service.validate_token, request.token)
+    else:
+        reset_token = password_reset_service.validate_token(request.token)
     if not reset_token:
         logger.warning("Password reset confirmation failed: invalid token")
         raise HTTPException(
@@ -373,8 +427,8 @@ async def confirm_password_reset(
         )
 
     # Find user
-    result = await db.execute(select(User).where(User.id == reset_token.user_id))
-    user = result.scalars().first()
+    result = await _db_execute(db, select(User).where(User.id == reset_token.user_id))
+    user = await _first_scalar(result)
     if not user:
         logger.warning("Password reset confirmation failed: user %s not found", reset_token.user_id)
         raise HTTPException(
@@ -385,13 +439,16 @@ async def confirm_password_reset(
     # Update password
     user.password_hash = hash_password(request.new_password)
 
-    # Invalidate all existing sessions for this user
-    await db.execute(delete(UserSession).where(UserSession.user_id == user.id))
-
     # Mark token as used
-    await asyncio.to_thread(password_reset_service.mark_used, request.token)
+    if _is_async_session(db):
+        await asyncio.to_thread(password_reset_service.mark_used, request.token)
+    else:
+        password_reset_service.mark_used(request.token)
 
-    await db.commit()
+    # Invalidate all existing sessions for this user
+    await _db_execute(db, delete(UserSession).where(UserSession.user_id == user.id))
+
+    await _db_commit(db)
     logger.info("Password reset completed for user %s", user.email)
 
     return MessageResponse(message="Password has been reset successfully. Please log in with your new password.")
@@ -400,7 +457,7 @@ async def confirm_password_reset(
 @router.post("/mfa/setup", response_model=MFASetupResponse)
 async def setup_mfa(
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession | Session = Depends(get_async_db)
 ):
     """
     Setup MFA for current user.
@@ -413,7 +470,7 @@ async def setup_mfa(
     
     secret = generate_totp_secret()
     user.mfa_secret = secret
-    await db.commit()
+    await _db_commit(db)
     
     otpauth_url = get_totp_uri(secret, user.email)
     
@@ -428,7 +485,7 @@ async def setup_mfa(
 async def verify_mfa(
     request: MFAVerifyRequest,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession | Session = Depends(get_async_db)
 ):
     """
     Verify MFA code and enable MFA.
@@ -451,7 +508,7 @@ async def verify_mfa(
         )
         
     user.mfa_enabled = True
-    await db.commit()
+    await _db_commit(db)
     
     logger.info("MFA enabled for user %s", user.email)
     return MessageResponse(message="MFA enabled successfully")

@@ -77,14 +77,20 @@ def init_db():
     # Run Alembic migrations (uses sync engine)
     run_migrations()
 
-    # Verify async engine can connect
+    # Verify async engine can connect without blocking initialization forever.
     async def _verify_async_engine():
-        async with async_engine.begin() as conn:
-            # Just verify the connection works
-            pass
+        try:
+            async with asyncio.timeout(5):
+                async with async_engine.begin():
+                    # Just verify the connection works
+                    pass
+        finally:
+            await async_engine.dispose()
 
     try:
         asyncio.run(_verify_async_engine())
+    except TimeoutError:
+        logger.warning("Async engine verification timed out; continuing startup")
     except Exception as exc:
         logger.warning("Async engine verification skipped or failed: %s", exc)
 
