@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import api from '../services/api';
-import { tradesAPI } from '../services/api';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { normalizeTradeErrorOutcome, normalizeTradeOutcome, tradesAPI } from '../services/api';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -9,640 +8,412 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
+const percentFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 const formatCurrency = (value) => {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+  if (!Number.isFinite(Number(value))) {
     return '—';
   }
-  return currencyFormatter.format(value);
+  return currencyFormatter.format(Number(value));
 };
 
-const formatDateTime = (value) => {
-  if (!value) {
+const formatPercent = (value) => {
+  if (!Number.isFinite(Number(value))) {
     return '—';
   }
-  try {
-    return new Date(value).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch (_error) {
-    return '—';
-  }
+  return `${percentFormatter.format(Number(value))}%`;
 };
 
 const formatQuantity = (value) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+  if (!Number.isFinite(Number(value))) {
     return '—';
   }
   return Number(value).toFixed(4);
 };
 
-const createInitialCloseState = () => ({
-  tradeId: null,
-  exitPrice: '',
-  reason: '',
-  submitting: false,
-  error: '',
-});
+const parseNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-const createInitialAdjustState = () => ({
-  tradeId: null,
-  stopLoss: '',
-  takeProfit: '',
-  note: '',
-  submitting: false,
-  error: '',
-});
-
-const createInitialAddState = () => ({
-  tradeId: null,
-  quantity: '',
-  submitting: false,
-  error: '',
-});
-
-const PositionManager = () => {
+const PositionManager = ({ onOutcome }) => {
   const [positions, setPositions] = useState([]);
+  const [pendingOrders, setPendingOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState('');
-  const [statusMessage, setStatusMessage] = useState('');
-  const [closeState, setCloseState] = useState(createInitialCloseState);
-  const [adjustState, setAdjustState] = useState(createInitialAdjustState);
-  const [addState, setAddState] = useState(createInitialAddState);
-  const [aiToggling, setAiToggling] = useState(null);
-  const [cancellingOrder, setCancellingOrder] = useState(null);
-  const [refreshingOrder, setRefreshingOrder] = useState(null);
+  const [error, setError] = useState('');
+  const [expandedRows, setExpandedRows] = useState({});
+  const [highlightRows, setHighlightRows] = useState({});
+  const [toast, setToast] = useState(null);
+  const [closeDraft, setCloseDraft] = useState({ tradeId: null, quantity: '', closeReason: '' });
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [closeSubmitting, setCloseSubmitting] = useState(false);
+  const [retryPayload, setRetryPayload] = useState(null);
 
-  const fetchPositions = async () => {
-    setLoading(true);
-    setFetchError('');
-
+  const fetchData = useCallback(async () => {
     try {
-      const response = await api.get('/api/trades/active');
-      setPositions(response.data ?? []);
-    } catch (error) {
-      setFetchError(error.message || 'Unable to load active positions.');
+      const [activeResponse, pendingResponse] = await Promise.all([
+        tradesAPI.getActiveTrades(),
+        tradesAPI.listPendingOrders(),
+      ]);
+
+      const nextPositions = activeResponse?.data || [];
+      const nextPending = pendingResponse?.data || [];
+
+      setPositions((previous) => {
+        const previousIds = new Set(previous.map((item) => item.id));
+        const nextIds = new Set(nextPositions.map((item) => item.id));
+        const merged = { ...highlightRows };
+
+        nextPositions.forEach((item) => {
+          if (!previousIds.has(item.id)) {
+            merged[item.id] = 'new';
+          }
+        });
+
+        previous.forEach((item) => {
+          if (!nextIds.has(item.id)) {
+            merged[item.id] = 'closed';
+          }
+        });
+
+        if (Object.keys(merged).length > 0) {
+          setHighlightRows(merged);
+          setTimeout(() => {
+            setHighlightRows({});
+          }, 2800);
+        }
+
+        return nextPositions;
+      });
+
+      setPendingOrders(nextPending);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to load positions.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [highlightRows]);
 
   useEffect(() => {
-    fetchPositions();
-  }, []);
+    fetchData();
+    const interval = setInterval(fetchData, 12000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (!toast) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const totalPnl = useMemo(() => {
-    return positions.reduce((sum, trade) => {
-      const pnl = Number(trade.pnl);
-      if (Number.isFinite(pnl)) {
-        return sum + pnl;
-      }
-      return sum;
+    return positions.reduce((sum, position) => {
+      const pnl = parseNumber(position.pnl);
+      return sum + pnl;
     }, 0);
   }, [positions]);
 
-  const openCloseForm = (tradeId) => {
-    setCloseState({ ...createInitialCloseState(), tradeId });
-    setAdjustState(createInitialAdjustState());
-    setAddState(createInitialAddState());
+  const openCloseDialog = (position) => {
+    setRetryPayload(null);
+    setCloseDraft({
+      tradeId: position.id,
+      quantity: String(position.quantity),
+      closeReason: '',
+    });
+    setConfirmCloseOpen(true);
   };
 
-  const openAdjustForm = (tradeId) => {
-    setAdjustState({ ...createInitialAdjustState(), tradeId });
-    setCloseState(createInitialCloseState());
-    setAddState(createInitialAddState());
-  };
-
-  const openAddForm = (tradeId) => {
-    setAddState({ ...createInitialAddState(), tradeId });
-    setCloseState(createInitialCloseState());
-    setAdjustState(createInitialAdjustState());
-  };
-
-  const handleCloseSubmit = async (event) => {
-    event.preventDefault();
-    if (!closeState.tradeId) {
-      return;
-    }
-
-    const exitPrice = parseFloat(closeState.exitPrice);
-    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
-      setCloseState((prev) => ({
-        ...prev,
-        error: 'Enter a valid exit price above zero.',
-      }));
-      return;
-    }
-
-    setCloseState((prev) => ({ ...prev, submitting: true, error: '' }));
-
+  const submitClose = async (payload) => {
+    setCloseSubmitting(true);
     try {
-      const payload = {
-        exit_price: exitPrice,
-      };
-      if (closeState.reason.trim()) {
-        payload.reason = closeState.reason.trim();
+      const response = await tradesAPI.closePosition(payload.tradeId, {
+        quantity: parseNumber(payload.quantity),
+        close_reason: payload.closeReason?.trim() || undefined,
+      });
+
+      const outcome = normalizeTradeOutcome(response?.data, {
+        source: 'position_close',
+        status: 'filled',
+      });
+
+      if (typeof onOutcome === 'function') {
+        onOutcome(outcome);
       }
 
-      const response = await api.post(
-        `/api/trades/${closeState.tradeId}/close`,
-        payload
-      );
-
-      setStatusMessage(response?.data?.message || 'Position closed.');
-      setCloseState(createInitialCloseState());
-      await fetchPositions();
-    } catch (error) {
-      setCloseState((prev) => ({
-        ...prev,
-        error: error.message || 'Unable to close the position.',
-      }));
-    } finally {
-      setCloseState((prev) => ({ ...prev, submitting: false }));
-    }
-  };
-
-  const handleAdjustSubmit = async (event) => {
-    event.preventDefault();
-    if (!adjustState.tradeId) {
-      return;
-    }
-
-    const stopLossValue = adjustState.stopLoss.trim();
-    const takeProfitValue = adjustState.takeProfit.trim();
-
-    if (!stopLossValue && !takeProfitValue) {
-      setAdjustState((prev) => ({
-        ...prev,
-        error: 'Provide a stop loss or take profit level.',
-      }));
-      return;
-    }
-
-    const payload = {};
-    if (stopLossValue) {
-      const parsed = parseFloat(stopLossValue);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        setAdjustState((prev) => ({
-          ...prev,
-          error: 'Stop loss must be a positive number.',
-        }));
-        return;
+      setConfirmCloseOpen(false);
+      setCloseDraft({ tradeId: null, quantity: '', closeReason: '' });
+      setHighlightRows((previous) => ({ ...previous, [payload.tradeId]: 'new' }));
+      setToast({ type: 'success', message: 'Position closed successfully.' });
+      await fetchData();
+    } catch (requestError) {
+      const outcome = normalizeTradeErrorOutcome(requestError, {
+        source: 'position_close',
+        tradeId: payload.tradeId,
+      });
+      if (typeof onOutcome === 'function') {
+        onOutcome(outcome);
       }
-      payload.stop_loss = parsed;
-    }
 
-    if (takeProfitValue) {
-      const parsed = parseFloat(takeProfitValue);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        setAdjustState((prev) => ({
-          ...prev,
-          error: 'Take profit must be a positive number.',
-        }));
-        return;
-      }
-      payload.take_profit = parsed;
-    }
-
-    if (adjustState.note.trim()) {
-      payload.note = adjustState.note.trim();
-    }
-
-    setAdjustState((prev) => ({ ...prev, submitting: true, error: '' }));
-
-    try {
-      const response = await api.put(
-        `/api/trades/${adjustState.tradeId}/adjust`,
-        payload
-      );
-
-      setStatusMessage(response?.data?.message || 'Adjustment saved.');
-      setAdjustState(createInitialAdjustState);
-      await fetchPositions();
-    } catch (error) {
-      setAdjustState((prev) => ({
-        ...prev,
-        error: error.message || 'Unable to save adjustments.',
-      }));
+      setRetryPayload(payload);
+      setToast({
+        type: 'error',
+        message: outcome.reasonMessage || 'Close failed. Try again.',
+      });
+      setConfirmCloseOpen(false);
     } finally {
-      setAdjustState((prev) => ({ ...prev, submitting: false }));
+      setCloseSubmitting(false);
     }
   };
 
-  const handleAddSubmit = async (event) => {
-    event.preventDefault();
-    if (!addState.tradeId) return;
-
-    const quantity = parseFloat(addState.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setAddState((prev) => ({ ...prev, error: 'Enter a valid quantity above zero.' }));
+  const confirmClose = async () => {
+    if (!closeDraft.tradeId) {
+      return;
+    }
+    if (parseNumber(closeDraft.quantity) <= 0) {
+      setToast({ type: 'error', message: 'Quantity must be greater than zero.' });
       return;
     }
 
-    setAddState((prev) => ({ ...prev, submitting: true, error: '' }));
-    try {
-      const response = await tradesAPI.addToPosition(addState.tradeId, quantity);
-      setStatusMessage(response?.data?.message || 'Position increased.');
-      setAddState(createInitialAddState());
-      await fetchPositions();
-    } catch (error) {
-      setAddState((prev) => ({
-        ...prev,
-        error: error.message || 'Unable to add to position.',
-      }));
-    } finally {
-      setAddState((prev) => ({ ...prev, submitting: false }));
-    }
+    await submitClose(closeDraft);
   };
 
-  const handleToggleAI = async (tradeId) => {
-    setAiToggling(tradeId);
-    try {
-      const response = await tradesAPI.toggleAI(tradeId);
-      setStatusMessage(response?.data?.message || 'AI management updated.');
-      await fetchPositions();
-    } catch (error) {
-      setStatusMessage('Failed to toggle AI: ' + (error.message || 'Unknown error'));
-    } finally {
-      setAiToggling(null);
+  const retryClose = async () => {
+    if (!retryPayload) {
+      return;
     }
-  };
-
-  const handleCancelOrder = async (orderId) => {
-    setCancellingOrder(orderId);
-    try {
-      const response = await tradesAPI.cancelOrder(orderId);
-      setStatusMessage(response?.data?.message || 'Order canceled.');
-      await fetchPositions();
-    } catch (error) {
-      setStatusMessage('Failed to cancel order: ' + (error.message || 'Unknown error'));
-    } finally {
-      setCancellingOrder(null);
-    }
-  };
-
-  const handleRefreshOrder = async (orderId) => {
-    setRefreshingOrder(orderId);
-    try {
-      await tradesAPI.getOrderStatus(orderId);
-      await fetchPositions();
-    } catch (_error) {
-      // Silently ignore — the badge will stay unchanged
-    } finally {
-      setRefreshingOrder(null);
-    }
-  };
-
-  const renderOrders = (orders) => {
-    if (!orders?.length) {
-      return null;
-    }
-
-    const cancellableStatuses = ['pending', 'open'];
-
-    return (
-      <div className="flex flex-wrap gap-2">
-        {orders.map((order) => {
-          const canCancel = cancellableStatuses.includes(order.status?.toLowerCase());
-          return (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-gray-700 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-300"
-              key={order.id}
-            >
-              <button
-                type="button"
-                title="Refresh order status"
-                disabled={refreshingOrder === order.id}
-                onClick={() => handleRefreshOrder(order.id)}
-                className="hover:text-sky-400 transition disabled:opacity-50"
-              >
-                {order.side} {order.order_type} · {order.status}
-              </button>
-              {canCancel && (
-                <button
-                  type="button"
-                  title="Cancel order"
-                  disabled={cancellingOrder === order.id}
-                  onClick={() => handleCancelOrder(order.id)}
-                  className="ml-1 text-rose-400 hover:text-rose-300 transition disabled:opacity-50"
-                >
-                  {cancellingOrder === order.id ? '…' : '✕'}
-                </button>
-              )}
-            </span>
-          );
-        })}
-      </div>
-    );
+    await submitClose(retryPayload);
   };
 
   return (
     <section className="space-y-6">
-      <header className="flex flex-col gap-3 rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-sm shadow-black/30">
-        <div className="flex flex-col gap-2 md:flex-row md:items-baseline md:justify-between">
+      <header className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-sm shadow-black/30">
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-emerald-400">
-              Active Positions
-            </p>
-            <p className="text-2xl font-bold text-white">
-              {positions.length} open {positions.length === 1 ? 'position' : 'positions'}
-            </p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-emerald-400">Active Positions</p>
+            <p className="text-2xl font-bold text-white">{positions.length} open</p>
           </div>
           <div className="text-right">
-            <p className="text-xs uppercase tracking-wide text-gray-400">
-              Total P&L
-            </p>
-            <p
-              className={`text-3xl font-semibold ${
-                totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-              }`}
-            >
+            <p className="text-xs uppercase tracking-wide text-gray-400">Total P&L</p>
+            <p className={`text-3xl font-semibold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {formatCurrency(totalPnl)}
-            </p>
-            <p className="text-xs text-gray-500">
-              Calculated from reported trade delta
             </p>
           </div>
         </div>
-        {statusMessage && (
-          <p className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
-            {statusMessage}
-          </p>
-        )}
       </header>
 
-      {fetchError && (
+      {error && (
         <div className="rounded-lg border border-rose-500/60 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-          {fetchError}
+          {error}
         </div>
       )}
 
       <div className="rounded-3xl border border-gray-800 bg-gray-900/60 p-5">
+        <h3 className="text-lg font-semibold text-white">Open Positions</h3>
         {loading ? (
-          <div className="flex items-center justify-center py-10 text-sm text-gray-400">
-            Fetching positions…
-          </div>
+          <div className="py-8 text-sm text-gray-400">Loading positions…</div>
         ) : positions.length === 0 ? (
-          <div className="flex flex-col gap-2 text-sm text-gray-400">
-            <p>No active positions right now.</p>
-            <p>When strategies run, you&apos;ll see their live state here.</p>
-          </div>
+          <div className="py-8 text-sm text-gray-400">No active positions.</div>
         ) : (
-          <div className="space-y-5">
-            {positions.map((trade) => (
-              <article
-                key={trade.id}
-                className="rounded-2xl border border-gray-800 bg-gradient-to-br from-gray-950/80 to-gray-900 p-5 shadow-[0_0_30px_rgba(0,0,0,0.4)]"
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
-                      {trade.trade_source === 'manual' ? 'Manual Entry' : trade.trade_source?.startsWith('ai:') ? `AI · ${trade.trade_source.slice(3)}` : trade.strategy_id ? `Strategy #${trade.strategy_id}` : trade.is_manual ? 'Manual Entry' : 'AI Trade'}
-                    </p>
-                    <p className="text-2xl font-semibold text-white">{trade.symbol}</p>
-                    <p className="text-sm text-gray-400">
-                      {trade.side} · {formatQuantity(trade.quantity)} @{' '}
-                      {formatCurrency(trade.entry_price)}
-                    </p>
-                    <p className="text-xs text-gray-500">Entered {formatDateTime(trade.entry_time)}</p>
-                  </div>
-                  <div className="text-right">
-                    <p
-                      className={`text-lg font-bold ${
-                        (trade.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                      }`}
+          <>
+            <div className="hidden md:block mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-500 text-xs uppercase tracking-widest border-b border-gray-800">
+                    <th className="text-left py-2">Symbol</th>
+                    <th className="text-left py-2">Side</th>
+                    <th className="text-right py-2">Quantity</th>
+                    <th className="text-right py-2">Entry</th>
+                    <th className="text-right py-2">P&L</th>
+                    <th className="text-right py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((position) => {
+                    const pnl = parseNumber(position.pnl);
+                    const pnlPercent = position.entry_price
+                      ? (pnl / (parseNumber(position.entry_price) * parseNumber(position.quantity))) * 100
+                      : 0;
+                    const isExpanded = Boolean(expandedRows[position.id]);
+                    const highlightClass = highlightRows[position.id]
+                      ? 'ring-2 ring-blue-400/50'
+                      : '';
+
+                    return (
+                      <React.Fragment key={position.id}>
+                        <tr className={`border-b border-gray-900 ${highlightClass}`}>
+                          <td className="py-3 text-white font-semibold">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedRows((prev) => ({ ...prev, [position.id]: !isExpanded }))}
+                              className="hover:text-blue-300 transition"
+                            >
+                              {position.symbol}
+                            </button>
+                          </td>
+                          <td className="py-3 uppercase text-gray-300">{position.side}</td>
+                          <td className="py-3 text-right text-gray-200">{formatQuantity(position.quantity)}</td>
+                          <td className="py-3 text-right text-gray-200">{formatCurrency(position.entry_price)}</td>
+                          <td className={`py-3 text-right font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {formatCurrency(pnl)}
+                            <span className="ml-2 text-xs text-gray-500">{formatPercent(pnlPercent)}</span>
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => openCloseDialog(position)}
+                              className="rounded-full border border-rose-500/60 bg-rose-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:border-rose-400/80"
+                            >
+                              Close
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-black/20">
+                            <td colSpan={6} className="px-3 py-3 text-xs text-gray-400">
+                              Trade ID #{position.id} · Entered {new Date(position.entry_time).toLocaleString()} · Source {position.trade_source}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="md:hidden mt-4 space-y-3">
+              {positions.map((position) => {
+                const pnl = parseNumber(position.pnl);
+                const highlightClass = highlightRows[position.id] ? 'ring-2 ring-blue-400/50' : '';
+                return (
+                  <article
+                    key={position.id}
+                    className={`rounded-2xl border border-gray-800 bg-black/20 p-4 ${highlightClass}`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-sm font-semibold text-white">{position.symbol}</p>
+                        <p className="text-xs uppercase text-gray-500">{position.side}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {formatCurrency(pnl)}
+                        </p>
+                        <p className="text-xs text-gray-500">Qty {formatQuantity(position.quantity)}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openCloseDialog(position)}
+                      className="mt-3 w-full rounded-xl border border-rose-500/60 bg-rose-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-rose-200"
                     >
-                      {formatCurrency(trade.pnl)}
-                    </p>
-                    <p className="text-xs uppercase tracking-[0.4em] text-gray-500">Live P&L</p>
-                  </div>
+                      Close Position
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="rounded-3xl border border-gray-800 bg-gray-900/60 p-5">
+        <h3 className="text-lg font-semibold text-white">Pending Orders</h3>
+        {pendingOrders.length === 0 ? (
+          <p className="mt-4 text-sm text-gray-400">No pending orders.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {pendingOrders.map((order) => (
+              <div key={order.id} className="rounded-2xl border border-gray-800 bg-black/20 px-4 py-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <p className="text-white font-semibold">{order.trade_symbol || 'Unknown'} · {order.side.toUpperCase()}</p>
+                  <p className="text-amber-300 uppercase text-xs tracking-widest">{order.status}</p>
                 </div>
-
-                <div className="mt-4 space-y-3 text-xs text-gray-400">
-                  {renderOrders(trade.orders)}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-full border border-indigo-500/60 bg-indigo-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-indigo-200 transition hover:border-indigo-400/80"
-                      onClick={() => openCloseForm(trade.id)}
-                    >
-                      Close Trade
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full border border-sky-500/60 bg-sky-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-sky-200 transition hover:border-sky-400/80"
-                      onClick={() => openAdjustForm(trade.id)}
-                    >
-                      Adjust Levels
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full border border-emerald-500/60 bg-emerald-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-200 transition hover:border-emerald-400/80"
-                      onClick={() => openAddForm(trade.id)}
-                    >
-                      Add to Position
-                    </button>
-                    <button
-                      type="button"
-                      disabled={aiToggling === trade.id}
-                      onClick={() => handleToggleAI(trade.id)}
-                      className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition disabled:opacity-50 ${
-                        trade.ai_managed
-                          ? 'border border-amber-500/60 bg-amber-500/10 text-amber-200 hover:border-amber-400/80'
-                          : 'border border-gray-600 bg-gray-800/40 text-gray-400 hover:border-gray-500'
-                      }`}
-                    >
-                      {aiToggling === trade.id ? '…' : trade.ai_managed ? 'AI: On' : 'AI: Off'}
-                    </button>
-                  </div>
-                </div>
-
-                {closeState.tradeId === trade.id && (
-                  <form onSubmit={handleCloseSubmit} className="mt-5 space-y-3 rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="text-sm text-gray-300">
-                        Exit price
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={closeState.exitPrice}
-                          onChange={(event) =>
-                            setCloseState((prev) => ({
-                              ...prev,
-                              exitPrice: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500"
-                        />
-                      </label>
-                      <label className="text-sm text-gray-300">
-                        Exit reason
-                        <input
-                          type="text"
-                          maxLength={256}
-                          placeholder="Optional notes"
-                          value={closeState.reason}
-                          onChange={(event) =>
-                            setCloseState((prev) => ({
-                              ...prev,
-                              reason: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-indigo-500"
-                        />
-                      </label>
-                    </div>
-                    {closeState.error && (
-                      <p className="text-xs font-semibold text-rose-300">
-                        {closeState.error}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap justify-end gap-3">
-                      <button
-                        type="button"
-                        className="rounded-xl border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:border-gray-500"
-                        onClick={() => setCloseState(createInitialCloseState)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={closeState.submitting}
-                        className="rounded-xl bg-rose-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {closeState.submitting ? 'Closing…' : 'Close Position'}
-                      </button>
-                    </div>
-                  </form>
+                <p className="mt-1 text-gray-400">
+                  Qty {formatQuantity(order.quantity)} · Filled {formatQuantity(order.filled_quantity)} · Limit {formatCurrency(order.price)}
+                </p>
+                {(order.reason_code || order.reason_message) && (
+                  <p className="mt-2 text-xs text-rose-300">
+                    [{order.reason_code || 'update'}] {order.reason_message || 'Awaiting exchange update'}
+                  </p>
                 )}
-
-                {adjustState.tradeId === trade.id && (
-                  <form onSubmit={handleAdjustSubmit} className="mt-5 space-y-3 rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <label className="text-sm text-gray-300">
-                        Stop loss
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={adjustState.stopLoss}
-                          onChange={(event) =>
-                            setAdjustState((prev) => ({
-                              ...prev,
-                              stopLoss: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-500"
-                        />
-                      </label>
-                      <label className="text-sm text-gray-300">
-                        Take profit
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={adjustState.takeProfit}
-                          onChange={(event) =>
-                            setAdjustState((prev) => ({
-                              ...prev,
-                              takeProfit: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-500"
-                        />
-                      </label>
-                      <label className="text-sm text-gray-300">
-                        Note
-                        <input
-                          type="text"
-                          maxLength={256}
-                          placeholder="Optional note"
-                          value={adjustState.note}
-                          onChange={(event) =>
-                            setAdjustState((prev) => ({
-                              ...prev,
-                              note: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-500"
-                        />
-                      </label>
-                    </div>
-                    {adjustState.error && (
-                      <p className="text-xs font-semibold text-rose-300">
-                        {adjustState.error}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap justify-end gap-3">
-                      <button
-                        type="button"
-                        className="rounded-xl border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:border-gray-500"
-                        onClick={() => setAdjustState(createInitialAdjustState)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={adjustState.submitting}
-                        className="rounded-xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {adjustState.submitting ? 'Saving…' : 'Save Adjustments'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                {addState.tradeId === trade.id && (
-                  <form onSubmit={handleAddSubmit} className="mt-5 space-y-3 rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="text-sm text-gray-300">
-                        Quantity to add
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={addState.quantity}
-                          onChange={(event) =>
-                            setAddState((prev) => ({
-                              ...prev,
-                              quantity: event.target.value,
-                            }))
-                          }
-                          className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-emerald-500"
-                        />
-                      </label>
-                    </div>
-                    {addState.error && (
-                      <p className="text-xs font-semibold text-rose-300">
-                        {addState.error}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap justify-end gap-3">
-                      <button
-                        type="button"
-                        className="rounded-xl border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:border-gray-500"
-                        onClick={() => setAddState(createInitialAddState)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={addState.submitting}
-                        className="rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {addState.submitting ? 'Adding…' : 'Add to Position'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </article>
+              </div>
             ))}
           </div>
         )}
       </div>
+
+      {confirmCloseOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-md rounded-3xl border border-gray-700 bg-gray-950 p-6 shadow-2xl">
+            <p className="text-xs uppercase tracking-[0.35em] text-rose-300">Confirm Close</p>
+            <h3 className="mt-2 text-lg font-semibold text-white">Close full or partial position</h3>
+            <div className="mt-4 space-y-3">
+              <label className="text-sm text-gray-300">
+                Quantity to close
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={closeDraft.quantity}
+                  onChange={(event) => setCloseDraft((prev) => ({ ...prev, quantity: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-rose-500"
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                Reason (optional)
+                <input
+                  type="text"
+                  maxLength={256}
+                  value={closeDraft.closeReason}
+                  onChange={(event) => setCloseDraft((prev) => ({ ...prev, closeReason: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-white outline-none transition focus:border-rose-500"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmCloseOpen(false)}
+                className="rounded-xl border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:border-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmClose}
+                disabled={closeSubmitting}
+                className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400 disabled:opacity-50"
+              >
+                {closeSubmitting ? 'Closing...' : 'Confirm Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 rounded-2xl border px-4 py-3 text-sm shadow-2xl ${toast.type === 'error' ? 'border-rose-500/60 bg-rose-500/10 text-rose-200' : 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200'}`}>
+          <p>{toast.message}</p>
+          {toast.type === 'error' && retryPayload && (
+            <button
+              type="button"
+              className="mt-2 text-xs underline underline-offset-2"
+              onClick={retryClose}
+            >
+              Retry close
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 };
