@@ -4,8 +4,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { systemAPI } from '../services/api';
+import { systemAPI, agentsAPI } from '../services/api';
 import ModelComparison from '../components/ModelComparison';
+import AgentStatusGrid from '../components/AgentStatusGrid';
+import QueueMetrics from '../components/QueueMetrics';
+import PipelineTimeline from '../components/PipelineTimeline';
 
 const STAT_COLOR_MAP = {
   blue: 'bg-blue-500/20 text-blue-300 border-blue-700',
@@ -104,6 +107,13 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Agent dashboard state
+  const [agentData, setAgentData] = useState(null);
+  const [agentLoading, setAgentLoading] = useState(true);
+  const [agentError, setAgentError] = useState('');
+  const [controlLoading, setControlLoading] = useState(false);
+  const [flushLoading, setFlushLoading] = useState(false);
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -127,6 +137,83 @@ const Dashboard = () => {
 
     return () => controller.abort();
   }, []);
+
+  // Fetch agent dashboard data with polling
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchAgentDashboard = async () => {
+      try {
+        const response = await agentsAPI.dashboard(20);
+        setAgentData(response.data);
+        setAgentError('');
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('Failed to fetch agent dashboard:', err);
+          setAgentError(err?.message || 'Unable to load agent status.');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setAgentLoading(false);
+        }
+      }
+    };
+
+    fetchAgentDashboard();
+
+    // Poll every 5 seconds
+    const interval = setInterval(fetchAgentDashboard, 5000);
+
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Agent control handler
+  const handleAgentControl = async (agentName, action) => {
+    setControlLoading(true);
+    try {
+      await agentsAPI.controlAgent(agentName, action);
+      // Refresh dashboard immediately
+      const response = await agentsAPI.dashboard(20);
+      setAgentData(response.data);
+    } catch (err) {
+      console.error('Failed to control agent:', err);
+      setAgentError(err?.message || 'Failed to control agent.');
+    } finally {
+      setControlLoading(false);
+    }
+  };
+
+  // Flush queue handler
+  const handleFlushQueue = async (channel) => {
+    setFlushLoading(true);
+    try {
+      await agentsAPI.flushQueue(channel);
+      // Refresh dashboard immediately
+      const response = await agentsAPI.dashboard(20);
+      setAgentData(response.data);
+    } catch (err) {
+      console.error('Failed to flush queue:', err);
+      setAgentError(err?.message || 'Failed to flush queue.');
+    } finally {
+      setFlushLoading(false);
+    }
+  };
+
+  // Retry signal handler
+  const handleRetrySignal = async (signalId) => {
+    try {
+      await agentsAPI.retrySignal(signalId);
+      // Refresh dashboard immediately
+      const response = await agentsAPI.dashboard(20);
+      setAgentData(response.data);
+    } catch (err) {
+      console.error('Failed to retry signal:', err);
+      setAgentError(err?.message || 'Failed to retry signal.');
+    }
+  };
 
   const healthStatus = useMemo(() => {
     if (loading) {
@@ -208,6 +295,68 @@ const Dashboard = () => {
           }
           loading={loading}
         />
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-white">Agent Operations</h2>
+          <div className="flex items-center gap-2">
+            {agentLoading ? (
+              <span className="text-xs text-gray-500">Loading...</span>
+            ) : agentError ? (
+              <span className="text-xs text-rose-400">Error</span>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs text-gray-500">Live</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {agentError && (
+          <div className="rounded-2xl border border-rose-800 bg-rose-500/10 p-4">
+            <p className="text-sm text-rose-400">{agentError}</p>
+          </div>
+        )}
+
+        <AgentStatusGrid
+          agents={agentData?.agents || []}
+          onControl={handleAgentControl}
+          controlLoading={controlLoading}
+        />
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <QueueMetrics metrics={agentData?.queue_metrics || {}} />
+          <PipelineTimeline events={agentData?.pipeline_events || []} />
+        </div>
+
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-5 shadow-lg shadow-black/40">
+          <h3 className="text-sm font-semibold text-white mb-4">Operator Actions</h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleFlushQueue('trade_signals')}
+              disabled={flushLoading}
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Flush Trade Signals
+            </button>
+            <button
+              onClick={() => handleFlushQueue('market_data')}
+              disabled={flushLoading}
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Flush Market Data
+            </button>
+            <button
+              onClick={() => handleFlushQueue('agent_control')}
+              disabled={flushLoading}
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Flush Agent Control
+            </button>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-4">
