@@ -19,6 +19,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import krakenex
 from pydantic import BaseModel, ConfigDict
+from core.rate_limit import KrakenRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,16 @@ class KrakenService:
         "2w": 21600,
     }
 
+    REQUEST_WEIGHTS = {
+        "AddOrder": 2.0,
+        "CancelOrder": 2.0,
+        "CancelAll": 2.0,
+        "QueryOrders": 1.5,
+        "TradesHistory": 1.5,
+        "OpenOrders": 1.5,
+        "TradeBalance": 1.5,
+    }
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -266,6 +277,7 @@ class KrakenService:
         private: bool,
     ) -> Dict[str, Any]:
         """Make a single Kraken API request without recovery handling."""
+        await KrakenRateLimiter.acquire(weight=self._request_weight(method_name, private))
         await self._rate_limit()
         payload = dict(data or {})
 
@@ -284,6 +296,13 @@ class KrakenService:
             )
 
         return response.get("result", {})
+
+    def _request_weight(self, method_name: str, private: bool) -> float:
+        if method_name in self.REQUEST_WEIGHTS:
+            return self.REQUEST_WEIGHTS[method_name]
+        if private:
+            return 1.5
+        return 1.0
 
     async def _execute_with_recovery(
         self,
