@@ -20,12 +20,14 @@
 ## Current Position
 
 **Phase:** Phase 2 - Autonomous Agent Loop (2 of 11)
-**Plan:** 02-06 complete (6 of 9 in phase)
+**Plan:** 02-08 complete (8 of 9 in phase)
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 02-06-PLAN.md
-**Progress:** ████████████ 100% (34/31 plans complete; 6/9 in current phase)
+**Last activity:** 2026-02-06 - Completed 02-08-PLAN.md
+**Progress:** ████████████ 100% (36/31 plans complete; 8/9 in current phase)
 
 **What's happening:**
+- Completed 02-08: Order execution fallback strategy (volume reduction retry before marking signals failed)
+- Completed 02-07: Trade Executor consumes signals via Redis Streams with analysis context
 - Completed 02-06: Dashboard API endpoints (unified dashboard, queue flush, signal retry)
 - Completed 02-05: Dashboard observability hooks (queue metrics, pipeline events, operator actions)
 - Completed 02-04: Heartbeat monitoring for stuck agent detection and auto-restart
@@ -177,6 +179,9 @@
 | Retry failed signals with priority 0 | 2026-02-06 | Failed signals need reprocessing ahead of routine signals | Re-queuing with priority 0 (critical) ensures retries process before normal priority messages |
 | Unified dashboard endpoint | 2026-02-06 | Single GET /dashboard returns agents, queue metrics, and pipeline events in one call | Reduces frontend roundtrips from 3+ calls to 1; simpler client code |
 | Specific routes before parameterized routes | 2026-02-06 | FastAPI matches routes in definition order; /dashboard must precede /{agent_name} | Prevents "dashboard" from matching agent_name parameter |
+| 50% fallback volume reduction | 2026-02-06 | When primary order fails, reduce volume by half and retry before marking signal failed | Balances giving order chance to succeed vs avoiding micro-orders; 2 attempts allow 50% → 25% reduction |
+| 0.001 minimum fallback volume | 2026-02-06 | Prevent fallback from creating orders too small for Kraken to accept | Stops reduction when volume drops below exchange minimums; prevents API errors |
+| Preserve original volume in fallback | 2026-02-06 | Track original requested volume alongside reduced volume for audit trail | Enables post-mortem analysis of what was requested vs what executed; accountability for decision quality |
 
 ### Active Todos
 
@@ -201,7 +206,22 @@ None currently.
 
 ### Recent Changes
 
-**2026-02-06 (latest - 02-05):**
+**2026-02-06 (latest - 02-08):**
+- Completed 02-08: Order execution fallback strategy
+- Trade Executor automatically reduces volume by 50% when primary order fails
+- Up to 2 fallback attempts before marking signal as failed
+- Minimum volume threshold (0.001) prevents micro-orders
+- Full audit trail preserves original volume and tracks all fallback attempts
+- Duration: 1 minute 30 seconds (2 tasks, 2 commits)
+
+**2026-02-06 (02-07):**
+- Completed 02-07: Trade Executor consumes signals via Redis Streams
+- Trade Executor now consumes from STREAM_TRADE_SIGNALS with consumer group
+- Analysis context (insights, strategy, rationale) logged for audit trail
+- Maintains backward compatibility with pub/sub subscription
+- Duration: ~2 minutes (2 tasks, 2 commits)
+
+**2026-02-06 (02-05):**
 - Completed 02-05: Dashboard observability hooks (queue metrics, pipeline timeline, operator actions)
 - AgentManager exposes get_queue_metrics() for dashboard queue depth/throughput display
 - Pipeline event tracking via PipelineEvent dataclass (capped at 100 events)
@@ -360,15 +380,15 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 01:10-01:11 UTC
-**Stopped at:** Completed 02-06-PLAN.md (dashboard API endpoints)
+**Last session:** 2026-02-06 01:16-01:18 UTC
+**Stopped at:** Completed 02-08-PLAN.md (order execution fallback strategy)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 2 with 02-07 (agent decision loop implementation)
-2. Dashboard API complete: GET /dashboard, POST /queue/flush, POST /signals/{id}/retry
-3. Frontend can consume unified dashboard endpoint in single roundtrip
-4. Operators can flush queues and retry failed signals via manager methods
+1. Continue Phase 2 with 02-09 (final plan in phase)
+2. Trade Executor has fallback strategy: reduces volume by 50% when primary order fails
+3. Up to 2 fallback attempts before marking signal as failed
+4. Full audit trail preserves original volume and tracks all fallback attempts
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -376,6 +396,7 @@ None currently.
 - **AgentManager:** Accessible via app.state.agent_manager; supports configurable Market Analyst replicas
 - **AgentManager observability:** get_queue_metrics(), get_recent_pipeline_events(), record_pipeline_event() available
 - **Operator actions:** flush_queue(channel), retry_signal(signal_id) for queue management
+- **Trade Executor fallback:** Automatic 50% volume reduction on order failure; 2 max attempts; 0.001 min volume; original volume preserved
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
