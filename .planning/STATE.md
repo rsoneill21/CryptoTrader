@@ -20,10 +20,10 @@
 ## Current Position
 
 **Phase:** Phase 3 - Core Risk Management (3 of 11)
-**Plan:** Not started (0 of 3 in current phase)
-**Status:** Ready to execute
-**Last activity:** 2026-02-06 - Completed 02-09-PLAN.md
-**Progress:** █████████░ 90% (27/30 plans complete; Phase 3: 0/3)
+**Plan:** 1 of 3 in current phase
+**Status:** In progress
+**Last activity:** 2026-02-06 - Completed 03-01-PLAN.md
+**Progress:** █████████░ 93% (28/30 plans complete; Phase 3: 1/3)
 
 - **What's happening:**
 - Completed 02-09: Operator dashboard frontend with status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
@@ -183,6 +183,7 @@
 | 50% fallback volume reduction | 2026-02-06 | When primary order fails, reduce volume by half and retry before marking signal failed | Balances giving order chance to succeed vs avoiding micro-orders; 2 attempts allow 50% → 25% reduction |
 | 0.001 minimum fallback volume | 2026-02-06 | Prevent fallback from creating orders too small for Kraken to accept | Stops reduction when volume drops below exchange minimums; prevents API errors |
 | Preserve original volume in fallback | 2026-02-06 | Track original requested volume alongside reduced volume for audit trail | Enables post-mortem analysis of what was requested vs what executed; accountability for decision quality |
+| RiskService as single trade-validation gate | 2026-02-06 | Phase 3 needed one fail-closed path for pause, sizing, frequency, and exposure checks | Trade execution can call one async service and get consistent RiskException payloads |
 
 ### Active Todos
 
@@ -206,6 +207,12 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-06 (latest - 03-01):**
+- Completed 03-01: Core risk infrastructure (settings persistence, RiskException, RiskService, risk API expansion)
+- Added migration `6f3a2cb7c0c1` so existing databases gain new risk columns without runtime failures
+- Added async tests for paused/frequency/exposure rejections and risk settings API persistence
+- Duration: 6 minutes (3 planned task commits + 1 blocking migration fix commit)
 
 **2026-02-06 (latest - 02-09):**
 - Completed 02-09: Operator dashboard frontend with agent status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
@@ -385,15 +392,15 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 14:34 UTC
-**Stopped at:** Completed 02-09-PLAN.md (operator dashboard frontend)
+**Last session:** 2026-02-06 15:36 UTC
+**Stopped at:** Completed 03-01-PLAN.md (core risk infrastructure)
 **Resume file:** None
 
 **For next session:**
-1. Begin Phase 3 with 03-01 (Core Risk Infrastructure & Settings)
-2. Leverage the agent dashboard's unified endpoint and operator actions while building and verifying the new risk guardrails.
-3. Keep queue flush and retry controls in mind for backlog recovery flows and ensure the UI re-fetches data after those actions.
-4. Continue testing in the local dev environment (uvicorn + agents) so dashboards and risk endpoints stay in sync.
+1. Continue Phase 3 with 03-02 (Kraken Rate Limiting & Market Safety).
+2. Wire the new `RiskService.validate_trade` checks into the trade execution path before order placement.
+3. Add liquidity and exchange-rate-limit protections using the new persisted settings fields.
+4. Continue local verification with backend pytest coverage for risk and API behavior.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -407,6 +414,7 @@ None currently.
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
+- `backend/core/risk.py` now centralizes risk validation and raises `RiskException` for paused, sizing, frequency, and asset exposure breaches
 - Use `selectinload` for eager loading relationships in async context
 - Cursor pagination pattern established - use encode_cursor/decode_cursor for list endpoints
 - Shared helper `backend/core/pagination.py` exposes encode/decode/apply_cursor_pagination for reuse
