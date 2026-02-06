@@ -383,6 +383,7 @@ message_queue = MessageQueue()
 # Channel constants for agent communication
 class Channels:
     """Standard channel names for agent communication."""
+    # Existing pub/sub channels (keep for market insights)
     MARKET_DATA = "agent:market_data"
     TRADE_SIGNALS = "agent:trade_signals"
     RISK_ALERTS = "agent:risk_alerts"
@@ -390,3 +391,7 @@ class Channels:
     AI_DECISIONS = "agent:ai_decisions"
     SYSTEM_EVENTS = "agent:system_events"
     ORCHESTRATOR = "agent:orchestrator"
+
+    # Stream channels (use with publish_reliable/consume_reliable)
+    STREAM_TRADE_SIGNALS = "trade_signals"  # Becomes stream:trade_signals:p{N}
+    STREAM_RISK_ALERTS = "risk_alerts"      # Becomes stream:risk_alerts:p{N}
