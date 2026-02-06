@@ -111,8 +111,9 @@ const Dashboard = () => {
   const [agentData, setAgentData] = useState(null);
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState('');
-  const [controlLoading, setControlLoading] = useState(false);
+  const [controlLoading, setControlLoading] = useState(null);
   const [flushLoading, setFlushLoading] = useState(false);
+  const [retrySignalId, setRetrySignalId] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -141,12 +142,15 @@ const Dashboard = () => {
   // Fetch agent dashboard data with polling
   useEffect(() => {
     const controller = new AbortController();
+    let intervalId;
 
     const fetchAgentDashboard = async () => {
       try {
         const response = await agentsAPI.dashboard(20);
-        setAgentData(response.data);
-        setAgentError('');
+        if (!controller.signal.aborted) {
+          setAgentData(response.data);
+          setAgentError('');
+        }
       } catch (err) {
         if (!controller.signal.aborted) {
           console.error('Failed to fetch agent dashboard:', err);
@@ -162,17 +166,17 @@ const Dashboard = () => {
     fetchAgentDashboard();
 
     // Poll every 5 seconds
-    const interval = setInterval(fetchAgentDashboard, 5000);
+    intervalId = setInterval(fetchAgentDashboard, 5000);
 
     return () => {
       controller.abort();
-      clearInterval(interval);
+      clearInterval(intervalId);
     };
   }, []);
 
   // Agent control handler
   const handleAgentControl = async (agentName, action) => {
-    setControlLoading(true);
+    setControlLoading(agentName);
     try {
       await agentsAPI.controlAgent(agentName, action);
       // Refresh dashboard immediately
@@ -182,12 +186,16 @@ const Dashboard = () => {
       console.error('Failed to control agent:', err);
       setAgentError(err?.message || 'Failed to control agent.');
     } finally {
-      setControlLoading(false);
+      setControlLoading(null);
     }
   };
 
   // Flush queue handler
   const handleFlushQueue = async (channel) => {
+    if (!window.confirm(`Flush all messages from "${channel}"? This cannot be undone.`)) {
+      return;
+    }
+
     setFlushLoading(true);
     try {
       await agentsAPI.flushQueue(channel);
@@ -204,11 +212,16 @@ const Dashboard = () => {
 
   // Retry signal handler
   const handleRetrySignal = async (signalId) => {
+    if (!signalId) {
+      return;
+    }
+
     try {
       await agentsAPI.retrySignal(signalId);
       // Refresh dashboard immediately
       const response = await agentsAPI.dashboard(20);
       setAgentData(response.data);
+      setRetrySignalId('');
     } catch (err) {
       console.error('Failed to retry signal:', err);
       setAgentError(err?.message || 'Failed to retry signal.');
@@ -327,7 +340,7 @@ const Dashboard = () => {
         />
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <QueueMetrics metrics={agentData?.queue_metrics || {}} />
+          <QueueMetrics metrics={agentData?.queue_metrics || { channels: {}, total_depth: 0, throughput_per_minute: {} }} />
           <PipelineTimeline events={agentData?.pipeline_events || []} />
         </div>
 
@@ -339,23 +352,35 @@ const Dashboard = () => {
               disabled={flushLoading}
               className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Flush Trade Signals
+              {flushLoading ? 'Flushing...' : 'Flush Trade Signals Queue'}
             </button>
             <button
-              onClick={() => handleFlushQueue('market_data')}
+              onClick={() => handleFlushQueue('risk_alerts')}
               disabled={flushLoading}
               className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Flush Market Data
-            </button>
-            <button
-              onClick={() => handleFlushQueue('agent_control')}
-              disabled={flushLoading}
-              className="px-4 py-2 text-xs font-medium rounded-lg bg-amber-500/20 text-amber-300 border border-amber-700 hover:bg-amber-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Flush Agent Control
+              {flushLoading ? 'Flushing...' : 'Flush Risk Alerts Queue'}
             </button>
           </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={retrySignalId}
+              onChange={(event) => setRetrySignalId(event.target.value)}
+              placeholder="Failed signal id"
+              className="rounded-lg border border-gray-700 bg-gray-950/70 px-3 py-2 text-xs text-white placeholder:text-gray-500 focus:border-blue-500 focus:outline-none"
+            />
+            <button
+              onClick={() => handleRetrySignal(retrySignalId.trim())}
+              disabled={!retrySignalId.trim()}
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-700 hover:bg-emerald-500/30 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Retry Failed Signal
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Flush clears all pending messages from a queue. Retry republishes a failed signal with high priority.
+          </p>
         </div>
       </section>
 
