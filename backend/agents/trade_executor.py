@@ -76,6 +76,8 @@ class PendingOrder:
     order_ids: List[str] = field(default_factory=list)
     last_error: Optional[str] = None
     last_status: Optional[str] = None
+    fallback_attempts: int = 0
+    original_volume: Optional[Decimal] = None
 
 
 class TradeExecutorAgent(BaseAgent):
@@ -84,6 +86,9 @@ class TradeExecutorAgent(BaseAgent):
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
     STATUS_POLL_INTERVAL = 5.0
+    FALLBACK_VOLUME_REDUCTION = Decimal("0.5")  # Reduce to 50%
+    MIN_FALLBACK_VOLUME = Decimal("0.001")  # Minimum volume
+    MAX_FALLBACK_ATTEMPTS = 2
 
     def __init__(self) -> None:
         super().__init__(
@@ -333,6 +338,65 @@ class TradeExecutorAgent(BaseAgent):
             {**base_details, "retries": self.MAX_RETRIES},
         )
         return []
+
+    async def _apply_fallback_strategy(
+        self, signal: TradeSignal, pending: PendingOrder
+    ) -> List[str]:
+        """Apply fallback strategy by reducing volume and retrying."""
+        # Save original volume on first fallback
+        if pending.original_volume is None:
+            pending.original_volume = signal.volume
+
+        # Check if fallback attempts exhausted
+        if pending.fallback_attempts >= self.MAX_FALLBACK_ATTEMPTS:
+            self._log_system_event(
+                "error",
+                "Fallback attempts exhausted for signal",
+                {
+                    **self._signal_details(signal),
+                    "original_volume": str(pending.original_volume),
+                    "fallback_attempts": pending.fallback_attempts,
+                },
+            )
+            return []
+
+        # Calculate reduced volume
+        reduced_volume = signal.volume * self.FALLBACK_VOLUME_REDUCTION
+        pending.fallback_attempts += 1
+
+        # Check minimum volume threshold
+        if reduced_volume < self.MIN_FALLBACK_VOLUME:
+            self._log_system_event(
+                "error",
+                "Reduced volume below minimum threshold",
+                {
+                    **self._signal_details(signal),
+                    "original_volume": str(pending.original_volume),
+                    "reduced_volume": str(reduced_volume),
+                    "min_volume": str(self.MIN_FALLBACK_VOLUME),
+                    "fallback_attempts": pending.fallback_attempts,
+                },
+            )
+            return []
+
+        # Log fallback action
+        self._log_system_event(
+            "warning",
+            "Applying fallback strategy with reduced volume",
+            {
+                **self._signal_details(signal),
+                "original_volume": str(pending.original_volume),
+                "reduced_volume": str(reduced_volume),
+                "fallback_attempts": pending.fallback_attempts,
+                "reduction_factor": str(self.FALLBACK_VOLUME_REDUCTION),
+            },
+        )
+
+        # Create modified signal with reduced volume
+        signal.volume = reduced_volume
+
+        # Retry with reduced volume
+        return await self._place_order_with_retries(signal, pending)
 
     async def _poll_pending_orders(self) -> None:
         if not self._pending_orders:
