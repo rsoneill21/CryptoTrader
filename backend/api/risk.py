@@ -25,6 +25,12 @@ class RiskSettingsResponse(BaseModel):
 
     max_position_size_pct: float
     max_concurrent_positions: int
+    max_asset_exposure: float
+    max_trades_per_hour: int
+    max_trades_per_day: int
+    min_liquidity_threshold: float
+    kraken_tier: str
+    default_stop_loss_pct: float
     daily_loss_limit: float
     max_drawdown_pct: float
     max_risk_score: float
@@ -42,6 +48,24 @@ class RiskSettingsUpdate(BaseModel):
     )
     max_concurrent_positions: Optional[conint(ge=0)] = Field(
         None, description="Cap on simultaneously open positions"
+    )
+    max_asset_exposure: Optional[confloat(ge=0.0)] = Field(
+        None, description="Maximum allowed exposure per asset"
+    )
+    max_trades_per_hour: Optional[conint(ge=0)] = Field(
+        None, description="Maximum number of trades allowed per rolling hour"
+    )
+    max_trades_per_day: Optional[conint(ge=0)] = Field(
+        None, description="Maximum number of trades allowed per rolling day"
+    )
+    min_liquidity_threshold: Optional[confloat(ge=0.0)] = Field(
+        None, description="Minimum liquidity required before entering a trade"
+    )
+    kraken_tier: Optional[str] = Field(
+        None, min_length=1, description="Kraken account tier used for downstream limits"
+    )
+    default_stop_loss_pct: Optional[confloat(ge=0.0, le=100.0)] = Field(
+        None, description="Default stop-loss percentage attached to new positions"
     )
     daily_loss_limit: Optional[confloat(ge=0.0)] = Field(
         None, description="Dollar limit for cumulative losses in a trading day"
@@ -214,6 +238,12 @@ def _build_settings_response(settings: RiskSettings) -> RiskSettingsResponse:
     return RiskSettingsResponse(
         max_position_size_pct=float(settings.max_position_size_pct or 0.0),
         max_concurrent_positions=int(settings.max_concurrent_positions or 0),
+        max_asset_exposure=float(settings.max_asset_exposure or 0.0),
+        max_trades_per_hour=int(settings.max_trades_per_hour or 0),
+        max_trades_per_day=int(settings.max_trades_per_day or 0),
+        min_liquidity_threshold=float(settings.min_liquidity_threshold or 0.0),
+        kraken_tier=str(settings.kraken_tier or ""),
+        default_stop_loss_pct=float(settings.default_stop_loss_pct or 0.0),
         daily_loss_limit=float(settings.daily_loss_limit or 0.0),
         max_drawdown_pct=float(settings.max_drawdown_pct or 0.0),
         max_risk_score=float(settings.max_risk_score or 0.0),
