@@ -75,6 +75,12 @@ class AppSettings(BaseSettings):
     database_backup_retention_days: int = Field(30, env="DATABASE_BACKUP_RETENTION_DAYS")
     database_restore_enabled: bool = Field(True, env="DATABASE_RESTORE_ENABLED")
 
+    # Agent loop scheduling and replica configuration
+    agent_market_analyst_instances: int = Field(1, env="AGENT_MARKET_ANALYST_INSTANCES")
+    agent_market_analyst_interval_seconds: int = Field(5, env="AGENT_MARKET_ANALYST_INTERVAL_SECONDS")
+    agent_orchestrator_interval_seconds: int = Field(2, env="AGENT_ORCHESTRATOR_INTERVAL_SECONDS")
+    agent_trade_executor_interval_seconds: int = Field(1, env="AGENT_TRADE_EXECUTOR_INTERVAL_SECONDS")
+
     # Extra environment variables often present
     backend_host: Optional[str] = Field(None, env="BACKEND_HOST")
     vite_api_url: Optional[str] = Field(None, env="VITE_API_URL")
@@ -162,6 +168,22 @@ class AppSettings(BaseSettings):
     def _validate_backup_retention(cls, value: int) -> int:
         if value < 1:
             raise ValueError("DATABASE_BACKUP_RETENTION_DAYS must be at least 1")
+        return value
+
+    @validator("agent_market_analyst_instances")
+    def _validate_analyst_instances(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("AGENT_MARKET_ANALYST_INSTANCES must be at least 1")
+        return value
+
+    @validator(
+        "agent_market_analyst_interval_seconds",
+        "agent_orchestrator_interval_seconds",
+        "agent_trade_executor_interval_seconds",
+    )
+    def _validate_agent_interval(cls, value: int) -> int:
+        if value < 1 or value >= 60:
+            raise ValueError("Agent interval must be between 1 and 59 seconds")
         return value
 
     @property
