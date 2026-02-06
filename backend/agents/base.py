@@ -92,6 +92,10 @@ class BaseAgent(ABC):
         self._message_queue: asyncio.Queue = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
 
+        # Heartbeat tracking for stuck agent detection
+        self._last_heartbeat: float = 0.0
+        self._heartbeat_interval: float = 5.0  # seconds
+
         # Register with global registry
         AgentRegistry.register(self)
 
@@ -150,6 +154,9 @@ class BaseAgent(ABC):
         """Main run loop for the agent."""
         while self._running:
             try:
+                # Update heartbeat timestamp
+                self._last_heartbeat = asyncio.get_running_loop().time()
+
                 if self._paused:
                     await asyncio.sleep(0.1)
                     continue
@@ -225,6 +232,12 @@ class BaseAgent(ABC):
 
     def get_status(self) -> Dict[str, Any]:
         """Get current agent status."""
+        try:
+            loop_time = asyncio.get_running_loop().time()
+            heartbeat_age = loop_time - self._last_heartbeat if self._last_heartbeat > 0 else None
+        except RuntimeError:
+            heartbeat_age = None
+
         return {
             "name": self.name,
             "description": self.description,
@@ -232,6 +245,8 @@ class BaseAgent(ABC):
             "paused": self._paused,
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "queue_size": self._message_queue.qsize(),
+            "last_heartbeat": self._last_heartbeat,
+            "heartbeat_age_seconds": heartbeat_age,
         }
 
     # Abstract methods to be implemented by subclasses
