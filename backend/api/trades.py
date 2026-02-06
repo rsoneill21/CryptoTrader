@@ -32,6 +32,11 @@ from core.exceptions import DatabaseException, ServiceUnavailableException
 from core.risk import RiskService
 from core.paper_trading import PaperTradeSignal, TradeIntent, TradeSide
 from services.paper_trading_service import paper_trading_engine
+from services.trade_sync import (
+    PENDING_ORDER_STATUSES,
+    TERMINAL_ORDER_STATUSES,
+    order_lifecycle_sync_service,
+)
 
 logger = logging.getLogger("cryptotrader.trades")
 router = APIRouter()
@@ -1141,6 +1146,26 @@ class OrderInfoResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     error_message: Optional[str]
+    reason_code: Optional[str] = None
+    reason_message: Optional[str] = None
+
+
+class PendingOrderResponse(BaseModel):
+    id: int
+    trade_id: Optional[int]
+    trade_symbol: Optional[str]
+    trade_side: Optional[str]
+    exchange_order_id: Optional[str]
+    status: str
+    order_type: str
+    side: str
+    price: Optional[float]
+    quantity: float
+    filled_quantity: float
+    created_at: datetime
+    updated_at: datetime
+    reason_code: Optional[str] = None
+    reason_message: Optional[str] = None
 
 
 @router.get(
@@ -1204,9 +1229,110 @@ async def list_trade_orders(
             created_at=o.created_at,
             updated_at=o.updated_at,
             error_message=o.error_message,
+            reason_code=_extract_reason_details(o.error_message)[0],
+            reason_message=_extract_reason_details(o.error_message)[1],
         )
         for o in orders
     ]
+
+
+def _extract_reason_details(error_message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if not error_message:
+        return None, None
+
+    message = error_message.strip()
+    if message.startswith("[") and "]" in message:
+        token, _, detail = message.partition("]")
+        code = token.strip("[]").strip().lower()
+        parsed_message = detail.strip() or None
+        return code or None, parsed_message
+
+    return None, message
+
+
+@router.get(
+    "/orders/pending",
+    response_model=List[PendingOrderResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_pending_orders(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> List[PendingOrderResponse]:
+    """Return pending/partial orders after lifecycle reconciliation."""
+    try:
+        result = await db.execute(
+            select(Order)
+            .options(selectinload(Order.trade))
+            .where(Order.status.in_(tuple(PENDING_ORDER_STATUSES)))
+            .order_by(Order.created_at.desc())
+        )
+        orders = list(result.scalars().all())
+    except SQLAlchemyError as exc:
+        logger.error("Failed to fetch pending orders", exc_info=True)
+        raise DatabaseException(
+            message="Unable to retrieve pending orders",
+            details={"operation": "list_pending_orders"},
+        ) from exc
+
+    lifecycle_changed = False
+    try:
+        for order in orders:
+            if not order.exchange_order_id:
+                continue
+            sync_result = await order_lifecycle_sync_service.reconcile_order(db, order)
+            lifecycle_changed = lifecycle_changed or sync_result.changed
+
+        if lifecycle_changed:
+            await db.commit()
+            refreshed_result = await db.execute(
+                select(Order)
+                .options(selectinload(Order.trade))
+                .where(Order.status.in_(tuple(PENDING_ORDER_STATUSES)))
+                .order_by(Order.created_at.desc())
+            )
+            orders = list(refreshed_result.scalars().all())
+    except KrakenAPIError as exc:
+        await db.rollback()
+        logger.warning("Unable to reconcile pending orders", exc_info=True)
+        raise ServiceUnavailableException(
+            service="kraken",
+            details={"operation": "list_pending_orders"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        logger.error("Failed to persist pending order reconciliation", exc_info=True)
+        raise DatabaseException(
+            message="Unable to persist pending order status",
+            details={"operation": "list_pending_orders"},
+        ) from exc
+
+    visible_orders = [
+        order for order in orders if (order.status or "").lower() not in TERMINAL_ORDER_STATUSES
+    ]
+    payload: List[PendingOrderResponse] = []
+    for order in visible_orders:
+        reason_code, reason_message = _extract_reason_details(order.error_message)
+        payload.append(
+            PendingOrderResponse(
+                id=order.id,
+                trade_id=order.trade_id,
+                trade_symbol=order.trade.symbol if order.trade else None,
+                trade_side=order.trade.side if order.trade else None,
+                exchange_order_id=order.exchange_order_id,
+                status=order.status,
+                order_type=order.order_type,
+                side=order.side,
+                price=order.price,
+                quantity=order.quantity,
+                filled_quantity=order.filled_quantity,
+                created_at=order.created_at,
+                updated_at=order.updated_at,
+                reason_code=reason_code,
+                reason_message=reason_message,
+            )
+        )
+    return payload
 
 
 class CancelOrderResponse(BaseModel):
@@ -1274,13 +1400,16 @@ async def get_order_status(
 
     if order.exchange_order_id:
         try:
-            info = await kraken_service.get_order_status(order.exchange_order_id)
-            order.status = info.status.value
-            order.filled_quantity = float(info.filled_volume)
-            await db.commit()
+            sync_result = await order_lifecycle_sync_service.reconcile_order(db, order)
+            if sync_result.changed:
+                await db.commit()
             await db.refresh(order)
         except KrakenAPIError as exc:
             logger.warning("Unable to refresh order %s from exchange", order_id, exc_info=True)
+            raise ServiceUnavailableException(
+                service="kraken",
+                details={"operation": "sync_order_status", "order_id": order_id},
+            ) from exc
         except SQLAlchemyError as exc:
             await db.rollback()
             logger.error("DB error syncing order %s", order_id, exc_info=True)
@@ -1296,6 +1425,7 @@ async def get_order_status(
                 details={"operation": "sync_order_status", "order_id": order_id},
             ) from exc
 
+    reason_code, reason_message = _extract_reason_details(order.error_message)
     return OrderInfoResponse(
         id=order.id,
         trade_id=order.trade_id,
@@ -1309,4 +1439,6 @@ async def get_order_status(
         created_at=order.created_at,
         updated_at=order.updated_at,
         error_message=order.error_message,
+        reason_code=reason_code,
+        reason_message=reason_message,
     )
