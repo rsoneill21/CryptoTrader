@@ -6,13 +6,21 @@ When Redis is unavailable or circuit breaker is open, rate limiter raises
 ServiceUnavailableException (503) to prevent bypassing rate limits during outages.
 """
 
-import os
 import logging
+import os
+import time
+import asyncio
+from typing import Dict, Tuple
+
 from fastapi import Request, HTTPException, status
 import redis.asyncio as redis
+from redis.exceptions import WatchError
 from pybreaker import CircuitBreaker
+from sqlalchemy import select
 
 from core.exceptions import RateLimitException, ServiceUnavailableException
+from db.database import AsyncSessionLocal
+from db.models import RiskSettings
 
 logger = logging.getLogger("cryptotrader.rate_limit")
 
@@ -204,3 +212,154 @@ class RateLimiter:
 
         # check_rate_limit now raises exceptions instead of returning bool
         await check_rate_limit(key, self.times, self.seconds)
+
+
+class KrakenRateLimitTimeout(Exception):
+    """Raised when Kraken rate limiter cannot acquire capacity before timeout."""
+
+
+class KrakenRateLimiter:
+    """Redis-backed Kraken call counter with tier-aware decay."""
+
+    _COUNTER_KEY = "rate_limit:kraken:counter"
+    _TIER_CACHE_TTL_SECONDS = 30.0
+    _DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 10.0
+    _DEFAULT_POLL_SECONDS = 0.05
+    _MAX_POLL_SECONDS = 0.5
+    _tier_cache: Tuple[str, float] = ("starter", 0.0)
+
+    _TIER_LIMITS: Dict[str, Dict[str, float]] = {
+        "starter": {"limit": 15.0, "decay_per_second": 0.5},
+        "intermediate": {"limit": 20.0, "decay_per_second": 1.0},
+        "pro": {"limit": 20.0, "decay_per_second": 2.0},
+    }
+
+    @classmethod
+    async def _consume_budget(
+        cls,
+        redis_client,
+        now: float,
+        weight: float,
+        limit: float,
+        decay_per_second: float,
+        ttl_seconds: int,
+    ) -> Tuple[int, float, float]:
+        while True:
+            async with redis_client.pipeline(transaction=True) as pipe:
+                try:
+                    await pipe.watch(cls._COUNTER_KEY)
+                    state = await pipe.hgetall(cls._COUNTER_KEY)
+
+                    counter = float(state.get("counter", 0.0))
+                    updated_at = float(state.get("updated_at", now))
+                    elapsed = max(0.0, now - updated_at)
+                    decayed = max(0.0, counter - (elapsed * decay_per_second))
+
+                    pipe.multi()
+                    pipe.hset(
+                        cls._COUNTER_KEY,
+                        mapping={"counter": decayed, "updated_at": now},
+                    )
+                    pipe.expire(cls._COUNTER_KEY, ttl_seconds)
+
+                    if (decayed + weight) <= limit:
+                        new_counter = decayed + weight
+                        pipe.hset(
+                            cls._COUNTER_KEY,
+                            mapping={"counter": new_counter, "updated_at": now},
+                        )
+                        await pipe.execute()
+                        return 1, new_counter, 0.0
+
+                    await pipe.execute()
+                    wait_seconds = max(0.0, (decayed + weight - limit) / decay_per_second)
+                    return 0, decayed, wait_seconds
+                except WatchError:
+                    continue
+
+    @classmethod
+    async def _load_kraken_tier(cls) -> str:
+        now = time.monotonic()
+        cached_tier, cached_until = cls._tier_cache
+        if now < cached_until:
+            return cached_tier
+
+        tier = "starter"
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(RiskSettings.kraken_tier).order_by(RiskSettings.updated_at.desc()).limit(1)
+                )
+                db_tier = result.scalar_one_or_none()
+                if isinstance(db_tier, str) and db_tier.strip():
+                    tier = db_tier.strip().lower()
+        except Exception:
+            logger.warning("kraken_rate_limiter_settings_lookup_failed", exc_info=True)
+
+        if tier not in cls._TIER_LIMITS:
+            tier = "starter"
+
+        cls._tier_cache = (tier, now + cls._TIER_CACHE_TTL_SECONDS)
+        return tier
+
+    @classmethod
+    async def acquire(
+        cls,
+        weight: float = 1.0,
+        timeout_seconds: float = _DEFAULT_ACQUIRE_TIMEOUT_SECONDS,
+    ) -> None:
+        """Wait asynchronously until the Kraken budget can accept this request."""
+        if weight <= 0:
+            return
+
+        redis_client = await get_redis()
+        if not redis_client:
+            raise ServiceUnavailableException(
+                service="kraken_rate_limiter",
+                retry_after=60,
+                details={"reason": "Redis unavailable for Kraken limiter"},
+            )
+
+        tier = await cls._load_kraken_tier()
+        config = cls._TIER_LIMITS[tier]
+        limit = float(config["limit"])
+        decay_per_second = float(config["decay_per_second"])
+        if decay_per_second <= 0:
+            decay_per_second = 0.1
+
+        deadline = time.monotonic() + max(timeout_seconds, 0.0)
+        ttl_seconds = max(1, int((limit / decay_per_second) + 5))
+
+        while True:
+            now = time.monotonic()
+            try:
+                allowed, counter, wait_seconds = await cls._consume_budget(
+                    redis_client,
+                    now,
+                    float(weight),
+                    limit,
+                    decay_per_second,
+                    ttl_seconds,
+                )
+            except Exception as exc:
+                raise ServiceUnavailableException(
+                    service="kraken_rate_limiter",
+                    retry_after=60,
+                    details={"reason": f"Redis error: {exc.__class__.__name__}"},
+                ) from exc
+
+            if int(allowed) == 1:
+                logger.debug(
+                    "kraken_rate_limiter_acquired",
+                    extra={"tier": tier, "weight": weight, "counter": float(counter)},
+                )
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise KrakenRateLimitTimeout(
+                    f"Unable to acquire Kraken rate-limit budget within {timeout_seconds:.2f}s"
+                )
+
+            sleep_for = min(max(float(wait_seconds), cls._DEFAULT_POLL_SECONDS), cls._MAX_POLL_SECONDS, remaining)
+            await asyncio.sleep(sleep_for)
