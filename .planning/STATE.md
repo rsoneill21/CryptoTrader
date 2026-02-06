@@ -20,12 +20,13 @@
 ## Current Position
 
 **Phase:** Phase 3 - Core Risk Management (3 of 11)
-**Plan:** 1 of 3 in current phase
+**Plan:** 2 of 3 in current phase
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 03-01-PLAN.md
-**Progress:** █████████░ 93% (28/30 plans complete; Phase 3: 1/3)
+**Last activity:** 2026-02-06 - Completed 03-02-PLAN.md
+**Progress:** █████████░ 97% (29/30 plans complete; Phase 3: 2/3)
 
 - **What's happening:**
+- Completed 03-02: Kraken rate limiter + liquidity risk gate across KrakenService and TradeExecutor
 - Completed 02-09: Operator dashboard frontend with status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
 - Completed 02-08: Order execution fallback strategy (volume reduction retry before marking signals failed)
 - Completed 02-07: Trade Executor consumes signals via Redis Streams with analysis context
@@ -184,6 +185,8 @@
 | 0.001 minimum fallback volume | 2026-02-06 | Prevent fallback from creating orders too small for Kraken to accept | Stops reduction when volume drops below exchange minimums; prevents API errors |
 | Preserve original volume in fallback | 2026-02-06 | Track original requested volume alongside reduced volume for audit trail | Enables post-mortem analysis of what was requested vs what executed; accountability for decision quality |
 | RiskService as single trade-validation gate | 2026-02-06 | Phase 3 needed one fail-closed path for pause, sizing, frequency, and exposure checks | Trade execution can call one async service and get consistent RiskException payloads |
+| Kraken limiter uses tier-aware Redis decay counter | 2026-02-06 | Kraken-bound requests need pre-flight throttling to avoid exchange-side rejection and bans | Every KrakenService request acquires limiter budget before transport call |
+| Trade executor validates risk before every order path | 2026-02-06 | Live signals and fallback retries must not bypass liquidity or risk checks | `_handle_signal` and fallback path both gate on `RiskService.validate_trade` |
 
 ### Active Todos
 
@@ -207,6 +210,13 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-06 (latest - 03-02):**
+- Completed 03-02: Kraken-specific Redis rate limiter and liquidity-based risk gating
+- KrakenService now acquires limiter budget before outbound requests with endpoint-based weights
+- TradeExecutor now validates risk/liquidity before primary and fallback placement paths
+- Added targeted tests: `test_kraken_rate_limiter`, `test_kraken_rate_limit_integration`, `test_risk_liquidity`, `test_trade_executor_risk_gate`
+- Duration: 8 minutes (3 tasks, 3 commits)
 
 **2026-02-06 (latest - 03-01):**
 - Completed 03-01: Core risk infrastructure (settings persistence, RiskException, RiskService, risk API expansion)
@@ -392,15 +402,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 15:36 UTC
-**Stopped at:** Completed 03-01-PLAN.md (core risk infrastructure)
+**Last session:** 2026-02-06 15:59 UTC
+**Stopped at:** Completed 03-02-PLAN.md (Kraken rate limiting and liquidity gate)
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 3 with 03-02 (Kraken Rate Limiting & Market Safety).
-2. Wire the new `RiskService.validate_trade` checks into the trade execution path before order placement.
-3. Add liquidity and exchange-rate-limit protections using the new persisted settings fields.
-4. Continue local verification with backend pytest coverage for risk and API behavior.
+1. Continue Phase 3 with 03-03.
+2. Build remaining core risk controls (daily halts/stop-loss orchestration) on top of the new pre-trade gate.
+3. Keep validating fail-closed behavior with targeted backend pytest coverage.
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
@@ -411,10 +420,12 @@ None currently.
 - Agent dashboard polls `/api/agents/dashboard` every 5 seconds to surface heartbeats, queue metrics, pipeline events, and pause/resume state; risk flows can reuse that endpoint.
 - Operator actions (pause/resume, flush queue, retry signal) re-fetch the dashboard immediately so the UI reflects the latest agent state and queue metrics; tests should mirror that flow.
 - **Trade Executor fallback:** Automatic 50% volume reduction on order failure; 2 max attempts; 0.001 min volume; original volume preserved
+- Kraken outbound calls are now throttled through `KrakenRateLimiter.acquire` with endpoint weights.
+- TradeExecutor now blocks primary and fallback order paths when `RiskService.validate_trade` fails.
 - AsyncSession pattern established - use `get_async_db` dependency for all new async routes
 - All database operations in async endpoints must be awaited
 - Alerts, market, strategies, and risk APIs now exclusively rely on AsyncSession dependencies
-- `backend/core/risk.py` now centralizes risk validation and raises `RiskException` for paused, sizing, frequency, and asset exposure breaches
+- `backend/core/risk.py` now centralizes risk validation and raises `RiskException` for paused, sizing, frequency, exposure, and liquidity breaches
 - Use `selectinload` for eager loading relationships in async context
 - Cursor pagination pattern established - use encode_cursor/decode_cursor for list endpoints
 - Shared helper `backend/core/pagination.py` exposes encode/decode/apply_cursor_pagination for reuse
