@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -92,15 +93,24 @@ async def test_risk_management_flow(db_session):
     )
     await db_session.commit()
 
-    trading_control.pause_trading(reason="manual pause", triggered_by="operator")
-    with pytest.raises(RiskException):
-        await RiskService.validate_trade(db_session, "BTC/USD", 1.0, 100.0, "buy")
-    assert trading_control.resume_trading(reason="resume", triggered_by="operator") is True
+    deep_orderbook = {
+        "asks": [{"price": 1000.0, "volume": 10.0}],
+        "bids": [{"price": 1000.0, "volume": 10.0}],
+    }
 
-    with pytest.raises(RiskException):
-        await RiskService.validate_trade(db_session, "BTC/USD", 20.0, 1_000.0, "buy")
+    with patch(
+        "core.risk.kraken_service.get_orderbook",
+        new=AsyncMock(return_value=deep_orderbook),
+    ):
+        trading_control.pause_trading(reason="manual pause", triggered_by="operator")
+        with pytest.raises(RiskException):
+            await RiskService.validate_trade(db_session, "BTC/USD", 1.0, 100.0, "buy")
+        assert trading_control.resume_trading(reason="resume", triggered_by="operator") is True
 
-    await RiskService.validate_trade(db_session, "BTC/USD", 5.0, 1_000.0, "buy")
+        with pytest.raises(RiskException):
+            await RiskService.validate_trade(db_session, "BTC/USD", 20.0, 1_000.0, "buy")
+
+        await RiskService.validate_trade(db_session, "BTC/USD", 5.0, 1_000.0, "buy")
 
     db_session.add_all(
         [
@@ -124,8 +134,12 @@ async def test_risk_management_flow(db_session):
     )
     await db_session.commit()
 
-    with pytest.raises(RiskException):
-        await RiskService.validate_trade(db_session, "SOL/USD", 1.0, 100.0, "buy")
+    with patch(
+        "core.risk.kraken_service.get_orderbook",
+        new=AsyncMock(return_value=deep_orderbook),
+    ):
+        with pytest.raises(RiskException):
+            await RiskService.validate_trade(db_session, "SOL/USD", 1.0, 100.0, "buy")
 
     await db_session.execute(delete(Trade))
     await db_session.commit()
@@ -162,8 +176,12 @@ async def test_risk_management_flow(db_session):
     )
     await db_session.commit()
 
-    with pytest.raises(RiskException):
-        await RiskService.validate_trade(db_session, "ADA/USD", 1.0, 1.0, "buy")
+    with patch(
+        "core.risk.kraken_service.get_orderbook",
+        new=AsyncMock(return_value=deep_orderbook),
+    ):
+        with pytest.raises(RiskException):
+            await RiskService.validate_trade(db_session, "ADA/USD", 1.0, 1.0, "buy")
 
     engine_instance = PaperTradingEngine(
         db_factory=SessionLocal,
@@ -223,5 +241,9 @@ async def test_risk_management_flow(db_session):
     assert halted is True
     assert trading_control.is_paused() is True
 
-    with pytest.raises(RiskException):
-        await RiskService.validate_trade(db_session, "BTC/USD", 1.0, 100.0, "buy")
+    with patch(
+        "core.risk.kraken_service.get_orderbook",
+        new=AsyncMock(return_value=deep_orderbook),
+    ):
+        with pytest.raises(RiskException):
+            await RiskService.validate_trade(db_session, "BTC/USD", 1.0, 100.0, "buy")
