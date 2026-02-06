@@ -61,7 +61,7 @@ Plans:
 5. Agents continue running after individual agent failure without crashing system
 6. Agents shut down gracefully when application stops (no zombie processes)
 
-**Plans:** 8 plans
+**Plans:** 9 plans
 
 Plans:
 - [ ] 02-01-PLAN.md — AgentManager with staggered startup and FastAPI lifespan wiring
@@ -72,6 +72,7 @@ Plans:
 - [ ] 02-06-PLAN.md — Dashboard API endpoints for observability
 - [ ] 02-07-PLAN.md — Wire agents to use Redis Streams with full audit bundles
 - [ ] 02-08-PLAN.md — Trade Executor fallback strategy for order failures
+- [ ] 02-09-PLAN.md — Operator dashboard frontend (status grid, pipeline timeline, queue metrics, controls)
 
 ### Phase 3: Core Risk Management
 **Goal:** Configurable risk limits prevent excessive losses and over-trading
@@ -205,5 +206,5 @@ Plans:
 **Total phases:** 11
 **Total requirements:** 63
 **Completion:** 1/11 phases (9%)
-**Current phase:** Phase 1 (Infrastructure Hardening) — complete
-**Updated:** 2026-02-05
+**Current phase:** Phase 2 (Autonomous Agent Loop) — in progress
+**Updated:** 2026-02-06
