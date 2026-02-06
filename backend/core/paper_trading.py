@@ -15,7 +15,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 
 from db.database import SessionLocal, AsyncSessionLocal
-from db.models import Trade
+from db.models import RiskSettings, Trade
 from services.paper_trading_state import PaperTradingStateService
 
 from core.indicators import indicator_snapshot
@@ -46,6 +46,7 @@ class PaperTradeSignal(BaseModel):
     side: Optional[TradeSide] = None
     quantity: float = Field(gt=0)
     price: Optional[float] = Field(default=None, gt=0)
+    stop_loss: Optional[float] = Field(default=None, gt=0)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     strategy_id: Optional[int] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -72,6 +73,7 @@ class PaperPosition(BaseModel):
     entry_time: datetime
     strategy_id: Optional[int] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    stop_loss_price: Optional[float] = None
     last_price: Optional[float] = None
     unrealized_pnl: float = 0.0
 
@@ -129,6 +131,7 @@ class _MutablePosition:
     strategy_id: Optional[int]
     metadata: Dict[str, Any]
     quantity: float
+    stop_loss_price: Optional[float] = None
 
     def snapshot(self, last_price: Optional[float], unrealized: float) -> PaperPosition:
         return PaperPosition(
@@ -139,6 +142,7 @@ class _MutablePosition:
             entry_time=self.entry_time,
             strategy_id=self.strategy_id,
             metadata=dict(self.metadata),
+            stop_loss_price=self.stop_loss_price,
             last_price=last_price,
             unrealized_pnl=unrealized,
         )
@@ -213,10 +217,36 @@ class PaperTradingEngine:
         if normalized_price <= 0:
             raise ValueError("price must be greater than zero")
 
+        stop_loss_results: List[PaperTradeResult] = []
+
         async with self._lock:
             self._price_book[normalized_symbol] = normalized_price
             self._record_price(normalized_symbol, normalized_price)
             self._recalculate_unrealized()
+
+            symbol_positions = self._positions.get(normalized_symbol, [])
+            if symbol_positions:
+                triggered_positions = [
+                    position
+                    for position in list(symbol_positions)
+                    if self._is_stop_loss_triggered(position, normalized_price)
+                ]
+                for position in triggered_positions:
+                    result = self._close_position_for_stop_loss(
+                        normalized_symbol,
+                        position,
+                        normalized_price,
+                    )
+                    stop_loss_results.append(result)
+                if stop_loss_results:
+                    if not symbol_positions:
+                        self._positions.pop(normalized_symbol, None)
+                    self._recalculate_unrealized()
+
+        if stop_loss_results:
+            await self.persist_closed_trades(stop_loss_results)
+            await self.persist_state()
+            return
 
         # Periodically persist state (every 10th price update to avoid excessive writes)
         # Can be optimized with time-based throttling if needed
@@ -253,6 +283,7 @@ class PaperTradingEngine:
             )
 
     def _open_position(self, signal: PaperTradeSignal, price: float) -> None:
+        stop_loss_price = self._resolve_stop_loss_price(signal, price)
         entry = _MutablePosition(
             symbol=signal.symbol,
             side=signal.side,  # type: ignore[arg-type]
@@ -261,9 +292,99 @@ class PaperTradingEngine:
             strategy_id=signal.strategy_id,
             metadata=dict(signal.metadata),
             quantity=signal.quantity,
+            stop_loss_price=stop_loss_price,
         )
         self._positions[entry.symbol].append(entry)
         self._recalculate_unrealized()
+
+    def _resolve_stop_loss_price(self, signal: PaperTradeSignal, entry_price: float) -> Optional[float]:
+        if signal.stop_loss is not None:
+            return float(signal.stop_loss)
+
+        default_stop_loss_pct = self._load_default_stop_loss_pct()
+        if default_stop_loss_pct <= 0:
+            return None
+
+        multiplier = default_stop_loss_pct / 100.0
+        if signal.side == TradeSide.BUY:
+            return entry_price * (1.0 - multiplier)
+        return entry_price * (1.0 + multiplier)
+
+    def _load_default_stop_loss_pct(self) -> float:
+        db = self._db_factory()
+        try:
+            settings = (
+                db.query(RiskSettings)
+                .order_by(RiskSettings.updated_at.desc())
+                .first()
+            )
+            if settings is None:
+                return 0.0
+            return float(settings.default_stop_loss_pct or 0.0)
+        except Exception as exc:
+            logger.warning("Unable to load default stop loss setting: %s", exc)
+            return 0.0
+        finally:
+            db.close()
+
+    def _is_stop_loss_triggered(self, position: _MutablePosition, price: float) -> bool:
+        if position.stop_loss_price is None:
+            return False
+        if position.side == TradeSide.BUY:
+            return price <= position.stop_loss_price
+        return price >= position.stop_loss_price
+
+    def _close_position_for_stop_loss(
+        self,
+        symbol: str,
+        position: _MutablePosition,
+        price: float,
+    ) -> PaperTradeResult:
+        pnl = self._calculate_pnl(position.side, position.entry_price, price, position.quantity)
+        self._realized_pnl += pnl
+        self._cash += pnl
+
+        stop_loss_reason = {
+            "summary": "Stop-Loss Triggered",
+            "trigger_price": price,
+            "stop_loss_price": position.stop_loss_price,
+        }
+
+        exit_metadata = dict(position.metadata)
+        exit_metadata["exit_reasoning"] = stop_loss_reason
+        exit_metadata["market_conditions_exit"] = {
+            "trigger": "stop_loss",
+            "price": price,
+            "stop_loss_price": position.stop_loss_price,
+        }
+        exit_metadata["indicators_exit"] = None
+        exit_metadata["near_miss_exit"] = {
+            "flag": False,
+            "threshold": None,
+            "reason": "stop loss trigger",
+            "change_pct": None,
+        }
+
+        result = PaperTradeResult(
+            symbol=symbol,
+            side=position.side,
+            quantity=position.quantity,
+            entry_price=position.entry_price,
+            exit_price=price,
+            entry_time=position.entry_time,
+            exit_time=datetime.utcnow(),
+            pnl=pnl,
+            strategy_id=position.strategy_id,
+            metadata=exit_metadata,
+        )
+        self._record_strategy_metrics(result)
+
+        symbol_positions = self._positions.get(symbol, [])
+        try:
+            symbol_positions.remove(position)
+        except ValueError:
+            pass
+        return result
 
     def _close_positions(
         self, signal: PaperTradeSignal, price: float, context: Dict[str, Any]
@@ -539,7 +660,8 @@ class PaperTradingEngine:
                                 entry_time=datetime.fromisoformat(pos_data["entry_time"]),
                                 strategy_id=pos_data.get("strategy_id"),
                                 metadata=pos_data.get("metadata", {}),
-                                quantity=pos_data["quantity"]
+                                quantity=pos_data["quantity"],
+                                stop_loss_price=pos_data.get("stop_loss_price"),
                             )
                             self._positions[symbol].append(pos)
 
@@ -583,7 +705,8 @@ class PaperTradingEngine:
                             "entry_price": pos.entry_price,
                             "entry_time": pos.entry_time.isoformat(),
                             "strategy_id": pos.strategy_id,
-                            "metadata": pos.metadata
+                            "metadata": pos.metadata,
+                            "stop_loss_price": pos.stop_loss_price,
                         }
                         for pos in pos_list
                     ]
