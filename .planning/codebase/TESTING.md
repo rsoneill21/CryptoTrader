@@ -29,6 +29,41 @@ pytest /home/packnation82/projects/CryptoTrader/backend/tests/test_auth.py::test
 npm test
 ```
 
+## AI-Driven Authenticated Test Workflow (GSD)
+
+Going forward, the AI model performs authenticated smoke tests using credentials from `.env`.
+
+**Required env vars:**
+- `AI_USERNAME`
+- `AI_PASSWORD`
+
+**Execution order:**
+1. Start the full stack with `./init.sh` and wait for the success banner.
+2. Run authenticated API checks with `.env` credentials.
+3. Run targeted test suites (`pytest` and lint) for the changed scope.
+
+**Reference commands:**
+```bash
+# Load env vars
+set -a; source .env; set +a
+
+# Login using AI credentials from .env
+curl -sS -X POST http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  --data "{\"email\":\"$AI_USERNAME\",\"password\":\"$AI_PASSWORD\"}"
+
+# Session validation (cookie-based example)
+curl -sS -c /tmp/ct.cookies -X POST http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  --data "{\"email\":\"$AI_USERNAME\",\"password\":\"$AI_PASSWORD\"}" >/dev/null
+curl -sS -b /tmp/ct.cookies http://127.0.0.1:8000/api/auth/session
+```
+
+**Policy notes:**
+- Do not commit credential values; only reference variable names.
+- Do not hardcode alternate test users when `.env` credentials are available.
+- If public-domain checks fail but local checks pass, record the infrastructure blocker (DNS/tunnel/proxy) explicitly.
+
 ## Test File Organization
 
 **Location:**

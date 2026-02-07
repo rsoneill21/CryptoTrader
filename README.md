@@ -151,6 +151,8 @@ cd backend && pytest
 cd frontend && npm run lint
 ```
 
+For the standardized AI-operated test workflow (including authenticated smoke tests using `.env` `AI_USERNAME`/`AI_PASSWORD`), see `.planning/codebase/TESTING.md`.
+
 ### Triad Task Synchronization
 
 - **Purpose:** `triad/bin/sync_features_to_tasks.py` reads every feature stored in `features.db`, converts it into a Triad `tasks` row, and writes that row to `triad/triad.db`. This makes the legacy feature backlog available to the worker loop without touching `features.db` at runtime.

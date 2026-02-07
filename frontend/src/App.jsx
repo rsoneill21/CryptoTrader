@@ -16,6 +16,7 @@ import Dashboard from './pages/Dashboard';
 import ForgotPassword from './pages/ForgotPassword';
 import SystemLogs from './pages/SystemLogs';
 import StrategyLab from './pages/StrategyLab';
+import Backtesting from './pages/Backtesting';
 import LiveTrading from './pages/LiveTrading';
 import AIChat from './pages/AIChat';
 import Alerts from './pages/Alerts';
@@ -51,6 +52,16 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <StrategyLab />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/backtesting"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Backtesting />
                   </Layout>
                 </ProtectedRoute>
               }

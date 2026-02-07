@@ -37,6 +37,7 @@ from api.ai import router as ai_router
 from api.export import router as export_router
 from api.risk import router as risk_router
 from api.strategies import router as strategies_router
+from api.backtests import router as backtests_router
 from api.trades import router as trades_router
 
 
@@ -733,6 +734,7 @@ app.include_router(alerts_router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
 app.include_router(ai_router, prefix="/api/ai", tags=["AI"])
 app.include_router(strategies_router, prefix="/api/strategies", tags=["Strategies"])
+app.include_router(backtests_router, prefix="/api/backtests", tags=["Backtests"])
 app.include_router(trades_router, prefix="/api/trades", tags=["Trades"])
 app.include_router(risk_router, prefix="/api/risk", tags=["Risk"])
 app.include_router(export_router, prefix="/api/export", tags=["Export"])

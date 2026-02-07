@@ -120,6 +120,13 @@ Plans:
 4. Limit orders execute when market reaches target price
 5. Stop-loss orders trigger automatically when price threshold breached
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Risk-gated manual market/limit entry and partial/full close API contracts
+- [ ] 04-02-PLAN.md — Order lifecycle reconciliation for pending, partial fill, and rejection outcomes
+- [x] 04-03-PLAN.md — Live Trading UI upgrade for review-first ticket, pending section, and close workflow
+
 ### Phase 5: Strategy Backtesting
 **Goal:** Users can test trading strategies against historical data before live deployment
 
@@ -133,6 +140,11 @@ Plans:
 3. Results show total trades, win rate, P&L, max drawdown
 4. Backtest respects configured risk limits
 5. Results stored in database for comparison
+
+**Plans:**
+- [x] 05-01-PLAN.md — Database model and API foundation for backtesting
+- [x] 05-02-PLAN.md — Backtest engine and strategy rule evaluator
+- [x] 05-03-PLAN.md — Backtesting UI component and integration
 
 ### Phase 6: Advanced Strategy Features
 **Goal:** Strategies can use complex rules, multiple timeframes, and AI-driven decisions

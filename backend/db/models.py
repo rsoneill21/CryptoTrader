@@ -76,6 +76,7 @@ class Strategy(Base):
 
     performance = relationship("StrategyPerformance", back_populates="strategy")
     trades = relationship("Trade", back_populates="strategy")
+    backtests = relationship("BacktestRun", back_populates="strategy")
 
 
 class StrategyPerformance(Base):
@@ -320,3 +321,26 @@ class PaperTradingState(Base):
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     archived_at = Column(DateTime, nullable=True)
+
+
+class BacktestRun(Base):
+    """Record of a strategy backtest simulation."""
+    __tablename__ = "backtest_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False)
+    symbol = Column(String(50), nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    initial_capital = Column(Float, default=100000.0)
+    final_capital = Column(Float, nullable=True)
+    total_pnl = Column(Float, nullable=True)
+    max_drawdown = Column(Float, nullable=True)
+    win_rate = Column(Float, nullable=True)
+    total_trades = Column(Integer, default=0)
+    status = Column(String(20), default="running")  # running, completed, failed
+    results_json = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    strategy = relationship("Strategy", back_populates="backtests")
