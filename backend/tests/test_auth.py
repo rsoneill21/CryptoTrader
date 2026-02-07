@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch, AsyncMock
 
 ROOT_PATH = Path(__file__).resolve().parent.parent
 if str(ROOT_PATH) not in sys.path:
@@ -19,34 +20,55 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
 import pytest
 from fastapi import HTTPException, Response
-import sys
-from unittest.mock import MagicMock, patch, AsyncMock
 
 from core.exceptions import RateLimitException
 
-# Mock core.settings because of pydantic version mismatch in environment
-mock_settings_module = MagicMock()
+# Define mock settings at module level so they can be accessed by tests
 mock_settings = MagicMock()
 mock_settings.session_cookie_name = "cryptotrader_session"
 mock_settings.secure_cookies = False
 mock_settings.session_cookie_same_site = "lax"
 mock_settings.allow_email_enumeration = True
-mock_settings_module.get_app_settings.return_value = mock_settings
-sys.modules["core.settings"] = mock_settings_module
 
-# Mock missing dependencies in venv
-mock_websockets = MagicMock()
-sys.modules["websockets"] = mock_websockets
-sys.modules["websockets.exceptions"] = MagicMock()
-
-sys.modules["pandas"] = MagicMock()
-sys.modules["numpy"] = MagicMock()
-sys.modules["ta"] = MagicMock()
-sys.modules["openai"] = MagicMock()
-sys.modules["anthropic"] = MagicMock()
-sys.modules["jose"] = MagicMock()
-sys.modules["passlib"] = MagicMock()
-sys.modules["passlib.context"] = MagicMock()
+@pytest.fixture(autouse=True, scope="module")
+def mock_dependencies():
+    """
+    Fixture to mock dependencies that might be missing or cause issues in the test environment.
+    Uses module scope to ensure they are available for all tests in this file but restored after.
+    """
+    mocks = {
+        "core.settings": MagicMock(),
+        "websockets": MagicMock(),
+        "websockets.exceptions": MagicMock(),
+        "pandas": MagicMock(),
+        "numpy": MagicMock(),
+        "ta": MagicMock(),
+        "openai": MagicMock(),
+        "anthropic": MagicMock(),
+        "jose": MagicMock(),
+        "passlib": MagicMock(),
+        "passlib.context": MagicMock(),
+    }
+    
+    mocks["core.settings"].get_app_settings.return_value = mock_settings
+    
+    # Save original modules to restore them later
+    original_modules = {}
+    for name, m in mocks.items():
+        if name in sys.modules:
+            original_modules[name] = sys.modules[name]
+        sys.modules[name] = m
+        
+    # Patch the settings object already imported in api.auth
+    with patch("api.auth.settings", mock_settings):
+        yield mocks
+    
+    # Restore original modules
+    for name in mocks:
+        if name in original_modules:
+            sys.modules[name] = original_modules[name]
+        else:
+            del sys.modules[name]
 
 from api.auth import (
     register,

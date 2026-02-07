@@ -23,12 +23,32 @@ for candidate in (
 
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
-sys.modules.setdefault("openai", MagicMock())
-anthropic_mock = MagicMock()
-anthropic_mock.AI_PROMPT = ""
-anthropic_mock.HUMAN_PROMPT = ""
-anthropic_mock.Anthropic = MagicMock()
-sys.modules.setdefault("anthropic", anthropic_mock)
+@pytest.fixture(autouse=True, scope="module")
+def mock_missing_deps():
+    """Fixture to mock missing dependencies and restore them after tests."""
+    anthropic_mock = MagicMock()
+    anthropic_mock.AI_PROMPT = ""
+    anthropic_mock.HUMAN_PROMPT = ""
+    anthropic_mock.Anthropic = MagicMock()
+    
+    mocks = {
+        "openai": MagicMock(),
+        "anthropic": anthropic_mock,
+    }
+    
+    original_modules = {}
+    for name, m in mocks.items():
+        if name in sys.modules:
+            original_modules[name] = sys.modules[name]
+        sys.modules[name] = m
+        
+    yield mocks
+    
+    for name in mocks:
+        if name in original_modules:
+            sys.modules[name] = original_modules[name]
+        else:
+            del sys.modules[name]
 
 from api.risk import (
     RiskSettingsUpdate,

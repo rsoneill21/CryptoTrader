@@ -16,26 +16,45 @@ if str(ROOT_PATH) not in sys.path:
 TEST_DB_PATH = Path("/tmp/cryptotrader_auth_rate_limit_test.db")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
 
-mock_settings_module = MagicMock()
+# Define mock settings at module level
 mock_settings = MagicMock()
 mock_settings.session_cookie_name = "cryptotrader_session"
 mock_settings.secure_cookies = False
 mock_settings.session_cookie_same_site = "lax"
 mock_settings.allow_email_enumeration = True
-mock_settings_module.get_app_settings.return_value = mock_settings
-sys.modules["core.settings"] = mock_settings_module
 
-mock_websockets = MagicMock()
-sys.modules["websockets"] = mock_websockets
-sys.modules["websockets.exceptions"] = MagicMock()
-sys.modules["pandas"] = MagicMock()
-sys.modules["numpy"] = MagicMock()
-sys.modules["ta"] = MagicMock()
-sys.modules["openai"] = MagicMock()
-sys.modules["anthropic"] = MagicMock()
-sys.modules["jose"] = MagicMock()
-sys.modules["passlib"] = MagicMock()
-sys.modules["passlib.context"] = MagicMock()
+@pytest.fixture(autouse=True, scope="module")
+def mock_dependencies():
+    """Fixture to mock dependencies and restore them after tests."""
+    mocks = {
+        "core.settings": MagicMock(),
+        "websockets": MagicMock(),
+        "websockets.exceptions": MagicMock(),
+        "pandas": MagicMock(),
+        "numpy": MagicMock(),
+        "ta": MagicMock(),
+        "openai": MagicMock(),
+        "anthropic": MagicMock(),
+        "jose": MagicMock(),
+        "passlib": MagicMock(),
+        "passlib.context": MagicMock(),
+    }
+    
+    mocks["core.settings"].get_app_settings.return_value = mock_settings
+    
+    original_modules = {}
+    for name, m in mocks.items():
+        if name in sys.modules:
+            original_modules[name] = sys.modules[name]
+        sys.modules[name] = m
+        
+    yield mocks
+    
+    for name in mocks:
+        if name in original_modules:
+            sys.modules[name] = original_modules[name]
+        else:
+            del sys.modules[name]
 
 from api.auth import LoginRequest, login
 from core.exceptions import RateLimitException, ServiceUnavailableException
