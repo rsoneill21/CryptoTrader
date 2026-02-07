@@ -203,10 +203,9 @@ PY
     run_tests() {
         echo ""
         echo "Running backend tests..."
-        cd backend
-        source venv/bin/activate
-        PYTHONPATH="$(pwd)/.." pytest
-        cd ..
+        # Run from root with PYTHONPATH pointing to backend
+        source backend/venv/bin/activate
+        PYTHONPATH="$(pwd)/backend" pytest backend/tests
 
         echo ""
         echo "Running frontend lint..."
@@ -215,16 +214,79 @@ PY
         cd ..
     }
 
+    start_redis() {
+        local redis_host="${REDIS_HOST:-127.0.0.1}"
+        local redis_port="${REDIS_PORT:-6379}"
+        local redis_log="/tmp/cryptotrader-redis.log"
+
+        if [[ -n "${REDIS_URL:-}" ]]; then
+            local parsed
+            parsed="$(python3 - <<'PY'
+import os
+from urllib.parse import urlparse
+
+url = os.environ.get("REDIS_URL", "")
+if url:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    port = parsed.port or ""
+    print(host)
+    print(port)
+PY
+            )"
+            if [[ -n "${parsed}" ]]; then
+                read -r parsed_host parsed_port <<<"${parsed}"
+                [[ -n "${parsed_host}" ]] && redis_host="${parsed_host}"
+                [[ -n "${parsed_port}" ]] && redis_port="${parsed_port}"
+            fi
+        fi
+
+        if command -v redis-cli >/dev/null 2>&1 && redis-cli -h "${redis_host}" -p "${redis_port}" ping >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC} Redis already running at ${redis_host}:${redis_port}"
+            return 0
+        fi
+
+        if ! command -v redis-server >/dev/null 2>&1; then
+            echo -e "${YELLOW}!${NC} redis-server not installed; skipping automatic start"
+            return 0
+        fi
+
+        echo "Starting Redis on ${redis_host}:${redis_port}..."
+        redis-server --bind "${redis_host}" --port "${redis_port}" --save "" --appendonly no >"${redis_log}" 2>&1 &
+        REDIS_PID=$!
+
+        for _ in {1..10}; do
+            if command -v redis-cli >/dev/null 2>&1 && redis-cli -h "${redis_host}" -p "${redis_port}" ping >/dev/null 2>&1; then
+                echo -e "${GREEN}✓${NC} Redis ready at ${redis_host}:${redis_port}"
+                return 0
+            fi
+            sleep 0.2
+        done
+
+        echo -e "${YELLOW}!${NC} Redis did not respond (check ${redis_log})"
+    }
+
+    cleanup() {
+        for pid in "${REDIS_PID:-}" "${BACKEND_PID:-}" "${FRONTEND_PID:-}"; do
+            if [[ -n "${pid}" ]]; then
+                kill "${pid}" 2>/dev/null || true
+            fi
+        done
+    }
+
     # Start backend in background
     echo "Starting FastAPI backend on ${backend_host}:${backend_port}..."
-    cd backend
-    source venv/bin/activate
-    PYTHONPATH="$(pwd)/.." uvicorn main:app --reload --host "${backend_host}" --port "${backend_port}" &
-    BACKEND_PID=$!
-    cd ..
+    start_redis
+    trap "cleanup; exit 1" ERR
+    trap "cleanup; exit" SIGINT SIGTERM
+    trap "cleanup" EXIT
 
-    # Wait for backend to start
-    sleep 2
+    source backend/venv/bin/activate
+    PYTHONPATH="$(pwd)/backend" uvicorn backend.main:app --reload --host "${backend_host}" --port "${backend_port}" &
+    BACKEND_PID=$!
+
+    # Wait for backend to become ready before launching the frontend
+    wait_for_url "http://${backend_check_host}:${backend_port}/docs" "Backend" 40 1
 
     # Start frontend in background
     echo "Starting React frontend on port ${frontend_port}..."
@@ -233,11 +295,7 @@ PY
     FRONTEND_PID=$!
     cd ..
 
-    # Ensure we clean up if anything fails
-    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit 1" ERR
-
     # Wait for services to be ready
-    wait_for_url "http://${backend_check_host}:${backend_port}/docs" "Backend" 40 1
     wait_for_url "http://localhost:${frontend_port}" "Frontend" 40 1
 
     # Run validation tests
