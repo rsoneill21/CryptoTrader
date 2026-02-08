@@ -214,7 +214,7 @@ async def validation_exception_handler(
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler to keep the error format consistent."""
 
-    logger.exception("Unhandled exception for %s %s", request.method, request.url, exc=exc)
+    logger.exception("Unhandled exception for %s %s", request.method, request.url, exc_info=exc)
     payload = build_error_payload(500, None, default_code="unexpected_error")
     _log_api_error(request, 500, payload, exc, source="api.generic")
     return JSONResponse(status_code=500, content=payload.model_dump())

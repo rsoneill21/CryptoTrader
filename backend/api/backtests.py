@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
-from db.database import get_async_db, async_session_factory
+from db.database import get_async_db, AsyncSessionLocal
 from db.models import BacktestRun, Strategy, User
 from core.exceptions import DatabaseException
 from services.backtest_service import BacktestService
@@ -21,7 +21,7 @@ router = APIRouter()
 
 async def _run_backtest_task(backtest_id: int):
     """Background task to run the backtest."""
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         service = BacktestService(session)
         await service.run_backtest(backtest_id)
 
