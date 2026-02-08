@@ -495,7 +495,18 @@ class ChatAIService:
             sections.append(
                 f"Learned preferences:\n{json.dumps(request.preferences_json, default=str, indent=2)}"
             )
-        sections.append(request.message.strip())
+        
+        # Detect if trade rationale is requested
+        msg_lower = request.message.lower()
+        if any(kw in msg_lower for kw in ("why", "trade", "rationale")):
+            rationale_instr = (
+                "\n\nIf providing a trade rationale, append a JSON block formatted exactly as: "
+                "<rationale>{\"thesis\": \"...\", \"market_signals\": [], \"risk_checks\": [], \"counterfactual\": \"...\"}</rationale>"
+            )
+            sections.append(request.message.strip() + rationale_instr)
+        else:
+            sections.append(request.message.strip())
+            
         prompt = "\n\n".join(sections)
         if request.tone:
             prompt = f"[Tone: {request.tone}]\n{prompt}"
@@ -649,7 +660,32 @@ async def _streaming_chat_response(
 
         # At the end, normalize while preserving final contract metadata
         final_text = "".join(accumulator).strip()
-        model_output = {"summary_paragraph": final_text}
+        
+        # Extract rationale if present
+        trade_explanation = None
+        summary_paragraph = final_text
+        if "<rationale>" in final_text and "</rationale>" in final_text:
+            try:
+                start_tag = "<rationale>"
+                end_tag = "</rationale>"
+                start_idx = final_text.find(start_tag) + len(start_tag)
+                end_idx = final_text.find(end_tag)
+                rationale_json = final_text[start_idx:end_idx].strip()
+                trade_explanation = json.loads(rationale_json)
+                
+                # Strip rationale from summary_paragraph
+                prefix = final_text[:final_text.find(start_tag)].strip()
+                suffix = final_text[end_idx + len(end_tag):].strip()
+                summary_paragraph = f"{prefix} {suffix}".strip()
+            except Exception as exc:
+                logger.warning("Failed to parse AI rationale JSON: %s", exc)
+
+        model_output = {
+            "summary_paragraph": summary_paragraph,
+            "trade_explanation": trade_explanation,
+            "provider": service.last_provider,
+            "model": service.last_model,
+        }
 
         # Try to normalize to capture generated at/provider/model meta
         try:
@@ -659,8 +695,15 @@ async def _streaming_chat_response(
                 model_output=model_output,
                 prompt=request.message,
             )
-            # Emit final meta frame
-            yield f"data: {json.dumps({'meta': contract['meta'], 'done': True})}\n\n"
+            
+            # Emit final meta frame with trade_explanation and portfolio_impact
+            final_meta = {
+                "meta": contract["meta"],
+                "trade_explanation": contract["trade_explanation"],
+                "portfolio_impact": (contract.get("recommendations") or {}).get("portfolio_impact"),
+                "done": True,
+            }
+            yield f"data: {json.dumps(final_meta)}\n\n"
         except (ValueError, KeyError) as exc:
             logger.warning("Final contract normalization skipped: %s", exc)
             yield f"data: {json.dumps({'done': True})}\n\n"
