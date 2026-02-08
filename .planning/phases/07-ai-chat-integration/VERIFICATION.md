@@ -3,9 +3,9 @@ phase: 07-ai-chat-integration
 status: gaps_found
 score: 4/7
 gaps:
-  - "Recommendations Rendering: The backend generates primary and backup recommendations, but the ChatWindow.js component does not render them."
-  - "Why-trade Structural Enforcement: The requirement for thesis, market signals, etc., is defined in the normalizer but bypassed by the orchestrator, and not rendered in the UI."
-  - "Portfolio Impact Rendering: Calculated on the backend but ignored by the UI."
+  - "AI Not Grounded: The assembled trading context (portfolio, risk, and baseline data) is generated on the backend but never passed to the AI streaming service."
+  - "Chat History Display Blocked: A critical syntax error in the frontend prevents the chat history from rendering at all."
+  - "History Richness Lost: While live chat shows rich badges and rationales, these are not persisted in a way that allows the history view to reconstruct them."
 ---
 
 # Phase 7: AI Chat Integration - Verification Report
@@ -16,27 +16,15 @@ gaps:
 
 3 gaps blocking goal achievement:
 
-1. **Recommendations Rendering** — The backend generates primary and backup recommendations, but the `ChatWindow.js` component does not render them.
-   - Missing: JSX in `ChatWindow.js` to display `message.structuredResponse.recommendations`.
-2. **Why-trade Structural Enforcement** — The requirement for thesis, market signals, etc., is defined in the normalizer but bypassed by the orchestrator, and not rendered in the UI.
-   - Missing: Orchestrator logic to parse/instruct AI for structured output; UI rendering for `trade_explanation`.
-3. **Portfolio Impact Rendering** — Calculated on the backend but ignored by the UI.
-   - Missing: UI rendering for `portfolio_impact`.
+1. **AI Not Grounded** — The assembled trading context (portfolio, risk, and baseline data) is generated on the backend but never passed to the AI streaming service.
+   - Missing: Passing `context` to `request.context_json` before calling `service.stream_response(request)` in `backend/api/ai.py`.
+2. **Chat History Display Blocked** — A critical syntax error in the frontend prevents the chat history from rendering at all.
+   - Missing: `return sortedRows;` (or `return rows;`) at the end of `normalizeHistoryMessages` in `frontend/src/components/ChatWindow.js`.
+3. **History Richness Lost** — While live chat shows rich badges and rationales, these are not persisted in a way that allows the history view to reconstruct them.
+   - Missing: Storing the full structured response (contract) in the database or updating the frontend to reconstruct rich elements from `context_json`.
 
-## Artifact Status
-
-- `backend/api/ai.py`: ✓ VERIFIED (Substantive, correctly wired)
-- `backend/services/chat_context.py`: ✓ VERIFIED (Correct logic for freshness)
-- `backend/services/chat_policy.py`: ✓ VERIFIED (Correct policy branching)
-- `backend/services/chat_response.py`: ✓ VERIFIED (Correct contract definition)
-- `frontend/src/components/ChatWindow.js`: ⚠️ PARTIAL (Implemented SSE, but ignores structured recommendations and explanations)
-
-## Requirements Coverage
-
-- Broad prompts return clarifying follow-up: ✓ SATISFIED
-- Stale/incomplete context refusal: ✓ SATISFIED
-- Recommendation primary/backup: ✗ BLOCKED (Not visible to user)
-- Elevated-risk mode default hold: ✓ SATISFIED (Backend logic)
-- Why-trade structured responses: ✗ BLOCKED (Not enforced or rendered)
-- Confidence on request only: ✓ SATISFIED
-- Portfolio impact visibility: ✗ BLOCKED (Not visible to user)
+## Verified Must-Haves
+- ✓ **Policy-driven modes**: Clarify/Refuse/Answer logic is correctly implemented in `ChatPolicyEngine`.
+- ✓ **Live Rich Rendering**: Streaming responses correctly render color-coded recommendation badges and structured rationales.
+- ✓ **Adaptive Timeframe**: Context assembler correctly classifies prompts into session/24h/7d windows.
+- ✓ **Guardrails**: Risk-based refusal and elevated-risk mode defaults are implemented in the policy engine.
