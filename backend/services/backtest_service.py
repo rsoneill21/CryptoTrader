@@ -3,7 +3,7 @@
 import logging
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 import pandas as pd
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,21 +34,35 @@ class BacktestService:
             if not strategy:
                 raise ValueError(f"Strategy {backtest.strategy_id} not found")
 
-            # 1. Fetch historical data
-            df = await self._fetch_historical_data(
-                backtest.symbol, backtest.start_date, backtest.end_date
-            )
-            if df.empty:
-                raise ValueError(f"No market data found for {backtest.symbol} in range")
+            # 1. Parse strategy rules to identify ALL required timeframes
+            rules = strategy.rules_json
+            timeframes = self._extract_timeframes(rules)
+            # Ensure base timeframe is included
+            base_tf = rules.get("base_timeframe", "1m")
+            timeframes.add(base_tf)
 
-            # 2. Evaluate strategy signals
-            evaluator = StrategyEvaluator(strategy.rules_json)
-            eval_df = evaluator.evaluate(df)
+            # 2. Fetch historical data for each timeframe
+            data_map = {}
+            for tf in timeframes:
+                df = await self._fetch_historical_data(
+                    backtest.symbol, backtest.start_date, backtest.end_date, timeframe=tf
+                )
+                if not df.empty:
+                    data_map[tf] = df
+                else:
+                    logger.warning(f"No market data for {backtest.symbol} at {tf} in range")
 
-            # 3. Simulate trading
+            if base_tf not in data_map:
+                raise ValueError(f"No base market data ({base_tf}) found for {backtest.symbol} in range")
+
+            # 3. Evaluate strategy signals
+            evaluator = StrategyEvaluator(rules)
+            eval_df = evaluator.evaluate(data_map, base_timeframe=base_tf)
+
+            # 4. Simulate trading
             results = await self._simulate(eval_df, backtest)
 
-            # 4. Save results
+            # 5. Save results
             backtest.status = "completed"
             backtest.final_capital = results["final_capital"]
             backtest.total_pnl = results["total_pnl"]
@@ -66,14 +80,30 @@ class BacktestService:
             backtest.error_message = str(exc)
             await self.db.commit()
 
+    def _extract_timeframes(self, rules: Dict[str, Any]) -> Set[str]:
+        """Extract all timeframes mentioned in the strategy rules."""
+        tfs = set()
+        all_conditions = []
+        if 'entry' in rules:
+            all_conditions.extend(rules['entry'].get('conditions', []))
+        if 'exit' in rules:
+            all_conditions.extend(rules['exit'].get('conditions', []))
+            
+        for cond in all_conditions:
+            tf = cond.get('timeframe')
+            if tf:
+                tfs.add(tf)
+        return tfs
+
     async def _fetch_historical_data(
-        self, symbol: str, start_date: datetime, end_date: datetime
+        self, symbol: str, start_date: datetime, end_date: datetime, timeframe: str = "1m"
     ) -> pd.DataFrame:
         """Fetch and prepare historical data from DB."""
         stmt = (
             select(MarketData)
             .where(
                 MarketData.symbol == symbol,
+                MarketData.timeframe == timeframe,
                 MarketData.timestamp >= start_date,
                 MarketData.timestamp <= end_date
             )
@@ -96,7 +126,12 @@ class BacktestService:
             }
             for r in rows
         ]
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df.set_index("timestamp", inplace=True)
+            # Ensure it's sorted
+            df.sort_index(inplace=True)
+        return df
 
     async def _simulate(self, df: pd.DataFrame, backtest: BacktestRun) -> Dict[str, Any]:
         """Run the simulation loop."""
@@ -107,8 +142,7 @@ class BacktestService:
         equity_curve = [backtest.initial_capital]
         
         # We iterate row by row to simulate time
-        for index, row in df.iterrows():
-            timestamp = row['timestamp']
+        for timestamp, row in df.iterrows():
             price = float(row['close'])
             
             # Update engine price
@@ -116,10 +150,6 @@ class BacktestService:
             
             # Check for signals
             if row.get('entry_signal'):
-                # Check if already in position (simplified: engine handles multiple positions if we want)
-                # For now, let's assume we want to enter if signals say so.
-                # In a real backtest, we'd check current exposure.
-                
                 # Check available cash
                 snapshot = await engine.snapshot()
                 if snapshot.cash > price:
