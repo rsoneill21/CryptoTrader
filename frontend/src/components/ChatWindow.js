@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import api, { getToken } from '../services/api';
-
-const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+import api, { aiAPI, normalizeAIChatPayload } from '../services/api';
 
 const createId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -20,6 +18,91 @@ const truncateText = (value, limit = 110) => {
     return value;
   }
   return `${value.slice(0, limit - 1)}…`;
+};
+
+const parseSSEFrame = (frame) => {
+  if (!frame) {
+    return null;
+  }
+
+  const lines = frame.split('\n');
+  let eventType = null;
+  const dataLines = [];
+
+  for (const line of lines) {
+    const normalizedLine = line.trimEnd();
+    if (!normalizedLine || normalizedLine.startsWith(':')) {
+      continue;
+    }
+    if (normalizedLine.startsWith('event:')) {
+      eventType = normalizedLine.slice(6).trim();
+      continue;
+    }
+    if (normalizedLine.startsWith('data:')) {
+      dataLines.push(normalizedLine.slice(5).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  const rawData = dataLines.join('\n');
+  let payload = rawData;
+  try {
+    payload = JSON.parse(rawData);
+  } catch {
+    payload = rawData;
+  }
+
+  return {
+    eventType,
+    payload,
+  };
+};
+
+const normalizeHistoryMessages = (history) => {
+  const rows = [];
+
+  history.forEach((entry, index) => {
+    const baseId = entry.id ?? `history-${index}`;
+    const timestamp = entry.timestamp ?? entry.created_at ?? new Date().toISOString();
+    const userText = typeof entry.user_message === 'string' ? entry.user_message.trim() : '';
+    const assistantPayload = normalizeAIChatPayload(entry.ai_response);
+    const assistantText = assistantPayload.text || '';
+
+    if (userText) {
+      rows.push({
+        id: `${baseId}-user`,
+        role: 'user',
+        content: userText,
+        timestamp,
+        sortRank: 0,
+      });
+    }
+
+    if (assistantText) {
+      rows.push({
+        id: `${baseId}-assistant`,
+        role: 'assistant',
+        content: assistantText,
+        timestamp,
+        sortRank: 1,
+        structuredResponse: assistantPayload.hasStructuredContent ? assistantPayload : null,
+      });
+    }
+  });
+
+  return rows.sort((a, b) => {
+      const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+      if (a.sortRank !== b.sortRank) {
+        return a.sortRank - b.sortRank;
+      }
+      return String(a.id).localeCompare(String(b.id));
+    });
 };
 
 const ChatWindow = () => {
@@ -47,14 +130,7 @@ const ChatWindow = () => {
           ? response.data.history
           : [];
 
-        const normalized = history
-          .map((entry, index) => ({
-            id: entry.id ?? createId(`history-${index}`),
-            role: entry.role === 'user' ? 'user' : 'assistant',
-            content: entry.content ?? entry.output ?? entry.text ?? entry.message ?? '',
-            timestamp: entry.timestamp ?? entry.created_at ?? new Date().toISOString(),
-          }))
-          .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const normalized = normalizeHistoryMessages(history);
 
         setMessages(normalized);
       } catch (error) {
@@ -161,20 +237,7 @@ const ChatWindow = () => {
     let hadError = false;
 
     try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ prompt: trimmed }),
-      });
-
-      if (!response.ok) {
-        const fallback = await response.text();
-        throw new Error(fallback || 'AI chat request failed.');
-      }
+      const response = await aiAPI.streamChat({ prompt: trimmed });
 
       const reader = response.body?.getReader();
       if (!reader) {
@@ -182,16 +245,98 @@ const ChatWindow = () => {
       }
 
       const decoder = new TextDecoder();
+      let buffer = '';
+      let streamCompleted = false;
+      let finalContent = '';
+      let structuredResponse = null;
+      let guardrailPayload = null;
+      let metaPayload = null;
+
+      const applyNormalizedPayload = (normalized, eventType) => {
+        if (normalized.errorMessage) {
+          throw new Error(normalized.errorMessage);
+        }
+
+        if (normalized.meta) {
+          metaPayload = normalized.meta;
+        }
+        if (normalized.guardrail) {
+          guardrailPayload = normalized.guardrail;
+        }
+        if (normalized.hasStructuredContent) {
+          structuredResponse = normalized;
+          finalContent = normalized.text || finalContent;
+        }
+
+        const lowerEvent = String(eventType || '').toLowerCase();
+        const isDoneEvent = lowerEvent === 'done';
+        const isChunkEvent = lowerEvent === 'chunk' || !lowerEvent;
+
+        if (isChunkEvent && normalized.chunk) {
+          streamedText += normalized.chunk;
+        } else if ((isDoneEvent || !isChunkEvent) && normalized.text && !normalized.hasStructuredContent) {
+          finalContent = normalized.text;
+        }
+
+        const nextContent = finalContent || streamedText;
+        updateAssistant({
+          content: nextContent,
+          ...(structuredResponse ? { structuredResponse } : {}),
+          ...(guardrailPayload ? { guardrail: guardrailPayload } : {}),
+          ...(metaPayload ? { meta: metaPayload } : {}),
+        });
+
+        if (isDoneEvent) {
+          streamCompleted = true;
+        }
+      };
+
+      const processFrame = (frame) => {
+        const parsedFrame = parseSSEFrame(frame);
+        if (!parsedFrame) {
+          return;
+        }
+
+        const normalizedPayload = normalizeAIChatPayload(parsedFrame.payload);
+        const payloadEventType =
+          parsedFrame.eventType ||
+          (typeof parsedFrame.payload === 'object' && parsedFrame.payload
+            ? parsedFrame.payload.type || parsedFrame.payload.event
+            : null);
+        applyNormalizedPayload(normalizedPayload, payloadEventType);
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
           break;
         }
-        streamedText += decoder.decode(value, { stream: true });
-        updateAssistant({ content: streamedText });
+
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() || '';
+        for (const frame of frames) {
+          processFrame(frame);
+        }
       }
 
-      updateAssistant({ content: streamedText });
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        processFrame(buffer.trim());
+      }
+
+      const resolvedContent = finalContent || streamedText;
+      updateAssistant({
+        content: resolvedContent,
+        streaming: false,
+        ...(structuredResponse ? { structuredResponse } : {}),
+        ...(guardrailPayload ? { guardrail: guardrailPayload } : {}),
+        ...(metaPayload ? { meta: metaPayload } : {}),
+      });
+
+      if (!streamCompleted && !resolvedContent) {
+        throw new Error('AI response stream completed without content.');
+      }
     } catch (error) {
       hadError = true;
       const message = error?.message || 'Unable to receive a response right now.';
@@ -247,9 +392,31 @@ const ChatWindow = () => {
               </span>
             )}
           </div>
-          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-white">
-            {message.content || 'Waiting for response...'}
-          </p>
+          {message.structuredResponse?.hasStructuredContent ? (
+            <div className="mt-2 space-y-2 text-white">
+              {message.structuredResponse.summaryParagraph && (
+                <p className="whitespace-pre-line text-sm leading-relaxed">
+                  {message.structuredResponse.summaryParagraph}
+                </p>
+              )}
+              {message.structuredResponse.bullets.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-gray-100">
+                  {message.structuredResponse.bullets.map((bullet, index) => (
+                    <li key={`${message.id}-bullet-${index}`}>
+                      {bullet.label ? `${bullet.label}: ${bullet.text}` : bullet.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-white">
+              {message.content || 'Waiting for response...'}
+            </p>
+          )}
+          {message.guardrail?.refusal_reason && (
+            <p className="mt-2 text-xs text-amber-300">Guardrail: {message.guardrail.refusal_reason}</p>
+          )}
           {message.error && (
             <p className="mt-2 text-xs text-rose-300">Error: {message.error}</p>
           )}
