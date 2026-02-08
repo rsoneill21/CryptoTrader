@@ -188,6 +188,61 @@ class StrategyAIService:
 
         return self._heuristic_promotion_recommendation(context, raw_response)
 
+    async def analyze_degradation(
+        self,
+        strategy_id: int,
+        strategy_name: str,
+        performance_summary: Dict[str, Any],
+        provider: Optional[AIProvider] = None,
+    ) -> Dict[str, Any]:
+        """Analyze a degraded strategy and propose adjustments."""
+        chosen = self._select_provider(provider)
+        
+        prompt = [
+            f"Strategy degradation analysis for '{strategy_name}' (ID: {strategy_id})",
+            "Performance data:",
+            json.dumps(performance_summary, indent=2),
+            "",
+            "Analyze why the strategy might be failing and propose concrete rule adjustments.",
+            "Return a JSON object with: reasoning, suggestions (list), and proposed_rules (object).",
+        ]
+        
+        system_message = "You are a senior quantitative strategist specializing in self-healing trading systems."
+        user_message = "\n".join(prompt)
+
+        try:
+            if chosen == AIProvider.OPENAI:
+                completion = await openai.ChatCompletion.acreate(
+                    model=self._openai_model,
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.3,
+                    max_tokens=800,
+                )
+                text = completion.choices[0].message.content
+            else:
+                # Claude implementation
+                anthropic_prompt = f"{HUMAN_PROMPT}{user_message}{AI_PROMPT}"
+                response = await asyncio.to_thread(
+                    self._anthropic_client.completions.create,
+                    model=self._claude_model,
+                    prompt=anthropic_prompt,
+                    max_tokens_to_sample=800,
+                    temperature=0.3,
+                )
+                text = response.completion
+
+            return self._parse_response(text)
+        except Exception as exc:
+            logger.error("Degradation analysis failed for strategy %s", strategy_id, exc_info=True)
+            return {
+                "reasoning": f"AI analysis failed: {str(exc)}",
+                "suggestions": ["Manually review recent trades", "Consider pausing the strategy"],
+                "proposed_rules": {}
+            }
+
     def _select_provider(self, candidate: Optional[AIProvider]) -> AIProvider:
         """Pick an available provider based on the requested preference."""
         if candidate and self._is_provider_available(candidate):
