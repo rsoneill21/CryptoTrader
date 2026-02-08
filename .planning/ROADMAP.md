@@ -174,12 +174,14 @@ Plans:
 4. Chat references market conditions from Market Analyst agent
 5. User can request strategy adjustments via conversational interface
 
-**Plans:** 3 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Backend chat context assembly, guardrail policy engine, and response contract normalization
-- [ ] 07-02-PLAN.md — Frontend ChatWindow SSE parsing, history mapping, and hybrid response rendering
-- [ ] 07-03-PLAN.md — AI chat API orchestration with guardrail enforcement and integration regressions
+- [x] 07-01-PLAN.md — Backend chat context assembly, guardrail policy engine, and response contract normalization
+- [x] 07-02-PLAN.md — Frontend ChatWindow SSE parsing, history mapping, and hybrid response rendering
+- [x] 07-03-PLAN.md — AI chat API orchestration with guardrail enforcement and integration regressions
+- [ ] 07-04-PLAN.md — Structured trade rationale orchestration (gap closure)
+- [ ] 07-05-PLAN.md — High-fidelity chat rendering for recommendations and rationales (gap closure)
 
 ### Phase 8: Performance Analytics
 **Goal:** Dashboard displays comprehensive trading performance metrics
@@ -242,5 +244,5 @@ Plans:
 **Total phases:** 11
 **Total requirements:** 63
 **Completion:** 6/11 phases (54%)
-**Current phase:** Phase 7 (AI Chat Integration) — ready to execute
+**Current phase:** Phase 7 (AI Chat Integration) — ready to execute gaps
 **Updated:** 2026-02-08
