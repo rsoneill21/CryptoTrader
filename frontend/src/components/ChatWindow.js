@@ -63,8 +63,9 @@ const parseSSEFrame = (frame) => {
 
 const normalizeHistoryMessages = (history) => {
   const rows = [];
+  const safeHistory = Array.isArray(history) ? history : [];
 
-  history.forEach((entry, index) => {
+  safeHistory.forEach((entry, index) => {
     const baseId = entry.id ?? `history-${index}`;
     const timestamp = entry.timestamp ?? entry.created_at ?? new Date().toISOString();
     const userText = typeof entry.user_message === 'string' ? entry.user_message.trim() : '';
@@ -93,18 +94,18 @@ const normalizeHistoryMessages = (history) => {
     }
   });
 
-  const sortedRows = rows.sort((a, b) => {
-      const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-      if (timeDiff !== 0) {
-        return timeDiff;
-      }
-      if (a.sortRank !== b.sortRank) {
-        return a.sortRank - b.sortRank;
-      }
-      return String(a.id).localeCompare(String(b.id));
-    });
+  const result = [...rows].sort((a, b) => {
+    const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    if (timeDiff !== 0) {
+      return timeDiff;
+    }
+    if (a.sortRank !== b.sortRank) {
+      return a.sortRank - b.sortRank;
+    }
+    return String(a.id).localeCompare(String(b.id));
+  });
 
-  return sortedRows;
+  return result;
 };
 
 const RecommendationDisplay = ({ recommendations }) => {
