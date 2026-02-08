@@ -77,75 +77,40 @@ def sync_manual_trades(lookback_minutes: int = 60):
 
 
 @celery_app.task
-def monitor_strategy_health():
+def monitor_active_strategies():
     """
     Periodic task to monitor health of active strategies.
     Identifies degrading strategies and triggers AI analysis.
     """
     import asyncio
     from db.database import AsyncSessionLocal
-    from db.models import Strategy, Alert
-    from sqlalchemy import select
-    from services.strategy_service import check_strategy_health, HealthStatus
-    from services.strategy_ai import strategy_ai_service
+    from services.strategy_service import monitor_strategies
     import logging
 
     logger = logging.getLogger("cryptotrader.tasks")
 
-    async def _monitor():
+    async def _run():
         async with AsyncSessionLocal() as db:
-            # Iterate all live/paper strategies
-            query = select(Strategy).where(Strategy.status.in_(["live", "paper"]))
-            result = await db.execute(query)
-            strategies = result.scalars().all()
-            
-            monitored_count = 0
-            degraded_count = 0
-            
-            for strategy in strategies:
-                monitored_count += 1
-                health_result = await check_strategy_health(db, strategy.id)
-                status = health_result["status"]
-                
-                # Update strategy health status in DB
-                strategy.health_status = status.value
-                
-                if status in [HealthStatus.DEGRADED, HealthStatus.CRITICAL]:
-                    degraded_count += 1
-                    # 1. Create System Alert
-                    alert = Alert(
-                        type="strategy_health",
-                        title=f"Strategy {strategy.name} is {status.value}",
-                        message=f"Performance degradation detected for {strategy.name}: Win Rate {health_result['metrics']['win_rate']:.2%}",
-                        severity="warning" if status == HealthStatus.DEGRADED else "critical",
-                        related_strategy_id=strategy.id
-                    )
-                    db.add(alert)
-                    
-                    # 2. Call AI for suggestions
-                    try:
-                        suggestions = await strategy_ai_service.analyze_degradation(
-                            strategy.id,
-                            strategy.name,
-                            health_result["metrics"]
-                        )
-                        # 3. Save suggestion
-                        strategy.pending_adjustment_json = suggestions
-                    except Exception:
-                        logger.exception("AI degradation analysis failed for strategy %s", strategy.id)
-            
-            await db.commit()
-            return {
-                "strategies_monitored": monitored_count,
-                "degraded_identified": degraded_count
-            }
+            return await monitor_strategies(db)
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(_monitor(), loop)
-            return future.result()
+        # Check if we are already in an event loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # In a running loop, we can't use asyncio.run
+            # This is common in some test environments or if celery is running with an event loop
+            import threading
+            
+            # Use a separate thread to run the async logic if we're blocked
+            # Actually, for celery, it usually runs in a worker process.
+            # If we're here, we're likely in a sync context.
+            return asyncio.run(_run())
         else:
-            return asyncio.run(_monitor())
+            return asyncio.run(_run())
     except Exception:
-        return asyncio.run(_monitor())
+        # Fallback for complex environments
+        return asyncio.run(_run())
