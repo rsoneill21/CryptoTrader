@@ -19,11 +19,11 @@
 
 ## Current Position
 
-**Phase:** Phase 6 - Advanced Strategy Features (6 of 11)
-**Plan:** Phase complete
-**Status:** Completed
-**Last activity:** 2026-02-08 - Completed Phase 6
-**Progress:** █████████░ 93% (40/43 plans complete; Phase 6: 4/4)
+**Phase:** Phase 7 - AI Chat Integration (7 of 11)
+**Plan:** 2 of 3
+**Status:** In progress
+**Last activity:** 2026-02-08 - Completed 07-02-PLAN.md
+**Progress:** ██████████ 95% (41/43 plans complete; Phase 7: 1/3)
 
 - **What's happening:**
 - Completed 06-02: Strategy Health Monitoring (Self-Healing logic)
@@ -184,6 +184,8 @@
 | Orchestrator fetches all required timeframes | 2026-02-08 | Required for live evaluation of multi-timeframe strategies | Orchestrator parses rules and calls kraken_service.get_ohlc for each unique timeframe |
 | Dedicated endpoints for applying/discarding adjustments | 2026-02-08 | Cleaner than generic PUT for complex rule merging logic | Backend owns rule merging; frontend reviews via Before/After comparison |
 | StrategyCard as rich component for lifecycle | 2026-02-08 | Encapsulates complex promotion and optimization review flows | Reduces StrategyLab complexity; enables reusable health/status UI |
+| ChatWindow parses SSE by frame boundaries and `data:` lines | 2026-02-08 | Backend streams SSE payloads; raw chunk appends leak protocol text into UI | Streaming chat now decodes structured events (`chunk/meta/guardrail/done`) without corrupting messages |
+| Chat history normalized as persisted turn pairs | 2026-02-08 | Backend history stores `user_message` + `ai_response` per row, not role/content rows | UI now expands each record into user + assistant messages in deterministic chronological order |
 
 ### Active Todos
 
@@ -207,6 +209,13 @@
 None currently.
 
 ### Recent Changes
+
+**2026-02-08 (latest - 07-02):**
+- Completed 07-02: Frontend ChatWindow SSE parsing, history mapping, and hybrid response rendering
+- Added SSE frame parser and structured event handling to prevent raw protocol text in streamed UI
+- Mapped `/api/ai/chat/history` turn pairs into chronological user+assistant messages
+- Added `normalizeAIChatPayload` and `aiAPI.streamChat` helpers for contract-aware rendering + fallback text
+- Duration: 3 minutes (3 task commits)
 
 **2026-02-06 (latest - 04-02):**
 - Completed 04-02: pending/partial/fill/reject lifecycle reconciliation across service + trade APIs
@@ -419,12 +428,12 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-08 01:40 UTC
-**Stopped at:** Completed Phase 6 - Advanced Strategy Features
+**Last session:** 2026-02-08 02:33 UTC
+**Stopped at:** Completed 07-02-PLAN.md
 **Resume file:** None
 
 **For next session:**
-1. Proceed to Phase 7: AI Chat Integration.
+1. Continue Phase 7 by executing 07-01-PLAN.md (backend chat context/policy), then 07-03 integration verification.
 
 
 **Context to carry forward:**
