@@ -142,6 +142,8 @@ export const normalizeAIChatPayload = (rawPayload) => {
       summaryParagraph: null,
       bullets: [],
       recommendations: null,
+      tradeExplanation: null,
+      portfolioImpact: null,
       guardrail: null,
       meta: null,
       hasStructuredContent: false,
@@ -156,6 +158,8 @@ export const normalizeAIChatPayload = (rawPayload) => {
       summaryParagraph: null,
       bullets: [],
       recommendations: null,
+      tradeExplanation: null,
+      portfolioImpact: null,
       guardrail: null,
       meta: null,
       hasStructuredContent: false,
@@ -186,21 +190,38 @@ export const normalizeAIChatPayload = (rawPayload) => {
     normalizeText(payload.details) ||
     null;
 
+  const recommendations =
+    payload.recommendations && typeof payload.recommendations === 'object'
+      ? payload.recommendations
+      : null;
+  const tradeExplanation =
+    (payload.trade_explanation || payload.tradeExplanation) &&
+    typeof (payload.trade_explanation || payload.tradeExplanation) === 'object'
+      ? payload.trade_explanation || payload.tradeExplanation
+      : null;
+  const portfolioImpact =
+    normalizeText(payload.portfolio_impact) || normalizeText(payload.portfolioImpact);
+
   return {
     text,
     chunk,
     summaryParagraph,
     bullets,
-    recommendations:
-      payload.recommendations && typeof payload.recommendations === 'object'
-        ? payload.recommendations
-        : null,
+    recommendations,
+    tradeExplanation,
+    portfolioImpact,
     guardrail:
       payload.guardrail && typeof payload.guardrail === 'object'
         ? payload.guardrail
         : null,
     meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : null,
-    hasStructuredContent: Boolean(summaryParagraph || bullets.length),
+    hasStructuredContent: Boolean(
+      summaryParagraph ||
+        bullets.length ||
+        recommendations ||
+        tradeExplanation ||
+        portfolioImpact
+    ),
     errorMessage,
   };
 };
