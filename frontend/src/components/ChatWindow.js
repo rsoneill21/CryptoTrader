@@ -103,6 +103,8 @@ const normalizeHistoryMessages = (history) => {
       }
       return String(a.id).localeCompare(String(b.id));
     });
+
+  return sortedRows;
 };
 
 const RecommendationDisplay = ({ recommendations }) => {
