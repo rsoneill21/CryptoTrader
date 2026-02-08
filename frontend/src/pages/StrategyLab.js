@@ -1,12 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
-
-const STATUS_STYLES = {
-  paper: 'bg-blue-600/80 text-blue-50 border-blue-500',
-  live: 'bg-green-600/80 text-green-50 border-green-500',
-  paused: 'bg-yellow-500/80 text-yellow-950 border-yellow-400',
-  archived: 'bg-gray-700/80 text-gray-100 border-gray-600',
-};
+import StrategyCard from '../components/StrategyCard';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-US', {
@@ -48,29 +42,29 @@ const StrategyLab = () => {
     return () => clearInterval(interval);
   }, [fetchPaperPortfolio]);
 
-  useEffect(() => {
-    const fetchStrategies = async () => {
-      setLoading(true);
-      setError('');
+  const fetchStrategies = useCallback(async () => {
+    setLoading(true);
+    setError('');
 
-      try {
-        const params = {};
-        if (statusFilter !== 'all') {
-          params.status = statusFilter;
-        }
-        const response = await api.get('/api/strategies', { params });
-        const list = Array.isArray(response.data) ? response.data : [];
-        setStrategies(list);
-      } catch (fetchError) {
-        console.error('Unable to load strategies:', fetchError);
-        setError(fetchError?.message || 'Failed to load strategies.');
-      } finally {
-        setLoading(false);
+    try {
+      const params = {};
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
       }
-    };
-
-    fetchStrategies();
+      const response = await api.get('/api/strategies', { params });
+      const list = Array.isArray(response.data?.strategies) ? response.data.strategies : (Array.isArray(response.data) ? response.data : []);
+      setStrategies(list);
+    } catch (fetchError) {
+      console.error('Unable to load strategies:', fetchError);
+      setError(fetchError?.message || 'Failed to load strategies.');
+    } finally {
+      setLoading(false);
+    }
   }, [statusFilter]);
+
+  useEffect(() => {
+    fetchStrategies();
+  }, [fetchStrategies]);
 
   useEffect(() => {
     if (!selectedStrategyId && strategies.length) {
@@ -256,11 +250,11 @@ const StrategyLab = () => {
   };
 
   const strategyListContent = () => {
-    if (loading) {
+    if (loading && !strategies.length) {
       return <p className="text-sm text-gray-400">Fetching strategies…</p>;
     }
 
-    if (error) {
+    if (error && !strategies.length) {
       return <p className="text-sm text-red-400">{error}</p>;
     }
 
@@ -270,29 +264,15 @@ const StrategyLab = () => {
 
     return (
       <div className="space-y-3">
-        {strategies.map((strategy) => {
-          const isActive = selectedStrategyId === strategy.id;
-          const statusClass = STATUS_STYLES[strategy.status] || STATUS_STYLES.paper;
-
-          return (
-            <button
-              key={strategy.id}
-              type="button"
-              onClick={() => setSelectedStrategyId(strategy.id)}
-              className={`w-full text-left rounded-xl border px-4 py-3 transition-all duration-200 focus:outline-none ${
-                isActive ? 'border-blue-400 bg-gray-800/80 shadow-lg shadow-blue-500/20' : 'border-gray-700 bg-gray-900/80'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-white">{strategy.name}</h3>
-                <span className={`inline-flex items-center rounded-full px-3 py-0.5 text-xs font-semibold ${statusClass}`}>
-                  {strategy.status?.toUpperCase() || 'PAPER'}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-gray-400 line-clamp-2">{strategy.description || 'Optimizing...'}</p>
-            </button>
-          );
-        })}
+        {strategies.map((strategy) => (
+          <StrategyCard
+            key={strategy.id}
+            strategy={strategy}
+            isActive={selectedStrategyId === strategy.id}
+            onSelect={setSelectedStrategyId}
+            onUpdate={fetchStrategies}
+          />
+        ))}
       </div>
     );
   };

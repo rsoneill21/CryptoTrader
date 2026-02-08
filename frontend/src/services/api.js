@@ -418,5 +418,33 @@ export const agentsAPI = {
     api.post(`/api/agents/signals/${signalId}/retry`),
 };
 
+// Strategies API
+export const strategiesAPI = {
+  list: (params = {}) =>
+    api.get('/api/strategies', { params }),
+  get: (id) =>
+    api.get(`/api/strategies/${id}`),
+  create: (data) =>
+    api.post('/api/strategies', data),
+  update: (id, data) =>
+    api.put(`/api/strategies/${id}`, data),
+  delete: (id) =>
+    api.delete(`/api/strategies/${id}`),
+  promote: (id, confirm = true) =>
+    api.post(`/api/strategies/${id}/promote`, { confirm }),
+  simulate: (id, data) =>
+    api.post(`/api/strategies/${id}/simulate`, data),
+  getPaperPortfolio: () =>
+    api.get('/api/strategies/paper-portfolio'),
+  resetPaperTrading: (data) =>
+    api.post('/api/strategies/paper-trading/reset', data),
+  importGithub: (url) =>
+    api.post('/api/strategies/import/github', { github_url: url }),
+  applyAdjustment: (id) =>
+    api.post(`/api/strategies/${id}/adjustments/apply`),
+  discardAdjustment: (id) =>
+    api.delete(`/api/strategies/${id}/adjustments`),
+};
+
 // Export default instance for custom requests
 export default api;
