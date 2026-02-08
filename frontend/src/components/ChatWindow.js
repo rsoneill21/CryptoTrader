@@ -93,7 +93,7 @@ const normalizeHistoryMessages = (history) => {
     }
   });
 
-  return rows.sort((a, b) => {
+  const sortedRows = rows.sort((a, b) => {
       const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
       if (timeDiff !== 0) {
         return timeDiff;
@@ -103,6 +103,12 @@ const normalizeHistoryMessages = (history) => {
       }
       return String(a.id).localeCompare(String(b.id));
     });
+
+  return sortedRows.map((message) => {
+    const { sortRank, ...rest } = message;
+    void sortRank;
+    return rest;
+  });
 };
 
 const ChatWindow = () => {
