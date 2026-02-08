@@ -53,6 +53,10 @@ celery_app.conf.update(
             "schedule": 300.0,  # Every 5 minutes
             "args": (60,),  # 60 minute lookback
         },
+        "monitor-strategy-health": {
+            "task": "core.tasks.monitor_active_strategies",
+            "schedule": 3600.0,  # Every hour
+        },
     },
 )
 
