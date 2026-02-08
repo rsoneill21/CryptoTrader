@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import StrategyCard from '../components/StrategyCard';
+import StrategyWizard from '../components/StrategyWizard';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-US', {
@@ -25,6 +26,7 @@ const StrategyLab = () => {
   const [paperMode, setPaperMode] = useState(true);
   const [paperTrades, setPaperTrades] = useState([]);
   const [paperPortfolio, setPaperPortfolio] = useState(null);
+  const [showWizard, setShowWizard] = useState(false);
 
   const fetchPaperPortfolio = useCallback(async () => {
     try {
@@ -296,12 +298,20 @@ const StrategyLab = () => {
         <aside className="rounded-2xl border border-gray-700 bg-gray-900/60 p-5 shadow-inner shadow-black/40">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Strategy catalog</h2>
-            <button
-              onClick={handleGithubImport}
-              className="text-[10px] font-bold uppercase tracking-wider text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Import
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowWizard(true)}
+                className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+              >
+                New
+              </button>
+              <button
+                onClick={handleGithubImport}
+                className="text-[10px] font-bold uppercase tracking-wider text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                Import
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-1 border-b border-gray-800 pb-3">
@@ -532,6 +542,12 @@ const StrategyLab = () => {
           </div>
         </section>
       </div>
+
+      <StrategyWizard
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        onSave={fetchStrategies}
+      />
     </div>
   );
 };
