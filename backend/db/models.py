@@ -73,6 +73,8 @@ class Strategy(Base):
     ai_modifications_json = Column(JSON, nullable=True)
     promoted_at = Column(DateTime, nullable=True)
     promoted_by_recommendation = Column(Boolean, default=False)
+    health_status = Column(String(50), default="healthy")  # healthy, degraded, critical
+    pending_adjustment_json = Column(JSON, nullable=True)
 
     performance = relationship("StrategyPerformance", back_populates="strategy")
     trades = relationship("Trade", back_populates="strategy")
