@@ -654,6 +654,10 @@ async def _streaming_chat_response(
     # 4. Answer mode: Start with policy-driven recommendations
     service = ChatAIService()
 
+    # Log context grounding
+    context_keys = list(context.keys()) if context else []
+    logger.info("AI Chat grounded with context keys: %s", context_keys)
+
     # Send initial metadata including recommendations and guardrails
     initial_meta = {
         "mode": policy["mode"],
@@ -666,6 +670,7 @@ async def _streaming_chat_response(
     yield f"data: {json.dumps(initial_meta)}\n\n"
 
     accumulator: List[str] = []
+    contract = None
     try:
         async for chunk in service.stream_response(request):
             accumulator.append(chunk)
@@ -729,33 +734,45 @@ async def _streaming_chat_response(
         if accumulator:
             final_text = "".join(accumulator).strip()
             
-            # Re-extract rationale to ensure final_payload for persistence is accurate
-            trade_explanation = None
-            summary_paragraph = final_text
-            if "<rationale>" in final_text and "</rationale>" in final_text:
-                try:
-                    start_tag = "<rationale>"
-                    end_tag = "</rationale>"
-                    start_idx = final_text.find(start_tag) + len(start_tag)
-                    end_idx = final_text.find(end_tag)
-                    rationale_json = final_text[start_idx:end_idx].strip()
-                    trade_explanation = json.loads(rationale_json)
-                    
-                    prefix = final_text[:final_text.find(start_tag)].strip()
-                    suffix = final_text[end_idx + len(end_tag):].strip()
-                    summary_paragraph = f"{prefix} {suffix}".strip()
-                except Exception:
-                    pass
+            if contract:
+                # Use rich contract for persistence if available
+                final_payload = {
+                    "text": final_text,
+                    "summary_paragraph": contract.get("summary_paragraph"),
+                    "recommendations": contract.get("recommendations"),
+                    "portfolio_impact": (contract.get("recommendations") or {}).get("portfolio_impact"),
+                    "trade_explanation": contract.get("trade_explanation"),
+                    "provider": service.last_provider,
+                    "model": service.last_model,
+                }
+            else:
+                # Fallback to existing extraction logic
+                trade_explanation = None
+                summary_paragraph = final_text
+                if "<rationale>" in final_text and "</rationale>" in final_text:
+                    try:
+                        start_tag = "<rationale>"
+                        end_tag = "</rationale>"
+                        start_idx = final_text.find(start_tag) + len(start_tag)
+                        end_idx = final_text.find(end_tag)
+                        rationale_json = final_text[start_idx:end_idx].strip()
+                        trade_explanation = json.loads(rationale_json)
+                        
+                        prefix = final_text[:final_text.find(start_tag)].strip()
+                        suffix = final_text[end_idx + len(end_tag):].strip()
+                        summary_paragraph = f"{prefix} {suffix}".strip()
+                    except Exception:
+                        pass
 
-            final_payload = {
-                "text": final_text,
-                "summary_paragraph": summary_paragraph,
-                "recommendations": policy.get("recommendations"),
-                "portfolio_impact": (policy.get("recommendations") or {}).get("portfolio_impact"),
-                "trade_explanation": trade_explanation,
-                "provider": service.last_provider,
-                "model": service.last_model,
-            }
+                final_payload = {
+                    "text": final_text,
+                    "summary_paragraph": summary_paragraph,
+                    "recommendations": policy.get("recommendations"),
+                    "portfolio_impact": (policy.get("recommendations") or {}).get("portfolio_impact"),
+                    "trade_explanation": trade_explanation,
+                    "provider": service.last_provider,
+                    "model": service.last_model,
+                }
 
             await _persist_chat_history(
                 db=db,
