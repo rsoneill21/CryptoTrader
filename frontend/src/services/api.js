@@ -426,6 +426,10 @@ export const strategiesAPI = {
     api.get(`/api/strategies/${id}`),
   create: (data) =>
     api.post('/api/strategies', data),
+  saveStrategy: (data) =>
+    api.post('/api/strategies', data),
+  generateStrategy: (data) =>
+    api.post('/api/strategies/suggestions', data),
   update: (id, data) =>
     api.put(`/api/strategies/${id}`, data),
   delete: (id) =>
