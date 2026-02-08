@@ -27,6 +27,9 @@ from db.database import get_async_db
 from db.models import Alert, ChatHistory, StrategyPerformance, SystemLog
 
 from services.ai_models import AIModelDescriptor, AIModelsService, AIProvider
+from services.chat_context import ChatContextAssembler
+from services.chat_policy import ChatPolicyEngine
+from services.chat_response import ChatResponseNormalizer
 
 from api.alerts import AlertResponse
 
@@ -525,11 +528,19 @@ class ChatAIService:
 
 
 def _prepare_context_snapshot(
-    request: ChatRequest, provider: ChatProvider, model: Optional[str]
+    request: ChatRequest,
+    provider: Optional[ChatProvider],
+    model: Optional[str],
+    context_json: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    base = copy.deepcopy(request.context_json) if request.context_json else {}
+    # Use explicitly passed context_json (the assembled one) or fall back to request context
+    base = (
+        copy.deepcopy(context_json)
+        if context_json
+        else (copy.deepcopy(request.context_json) if request.context_json else {})
+    )
     meta: Dict[str, Any] = {
-        "provider": provider.value,
+        "provider": provider.value if provider else None,
         "model": model,
         "tone": request.tone,
         "generated_at": datetime.utcnow().isoformat(),
@@ -546,11 +557,14 @@ async def _persist_chat_history(
     db: AsyncSession,
     request: ChatRequest,
     ai_response: str,
-    provider: ChatProvider,
+    provider: Optional[ChatProvider],
     model: Optional[str],
+    context_json: Optional[Dict[str, Any]] = None,
 ) -> None:
-    context_snapshot = _prepare_context_snapshot(request, provider, model)
-    preferences_snapshot = copy.deepcopy(request.preferences_json) if request.preferences_json else None
+    context_snapshot = _prepare_context_snapshot(request, provider, model, context_json)
+    preferences_snapshot = (
+        copy.deepcopy(request.preferences_json) if request.preferences_json else None
+    )
     entry = ChatHistory(
         user_message=request.message,
         ai_response=ai_response,
@@ -568,29 +582,104 @@ async def _persist_chat_history(
 
 async def _streaming_chat_response(
     request: ChatRequest,
-    service: ChatAIService,
     db: AsyncSession,
 ) -> AsyncIterator[str]:
+    # 1. Assemble context via ChatContextAssembler
+    assembler = ChatContextAssembler()
+    context = await assembler.build(
+        db=db, prompt=request.message, context_json=request.context_json
+    )
+
+    # 2. Evaluate policy via ChatPolicyEngine
+    policy_engine = ChatPolicyEngine()
+    policy = policy_engine.evaluate(prompt=request.message, context=context)
+
+    normalizer = ChatResponseNormalizer()
+
+    # 3. Handle refuse/clarify branches before provider streaming
+    if policy["mode"] in ("refuse", "clarify"):
+        contract = normalizer.normalize(
+            policy=policy, context=context, prompt=request.message
+        )
+
+        # Emit normalized contract metadata
+        meta_payload = {
+            "mode": contract["mode"],
+            "timeframe_used": contract["timeframe_used"],
+            "guardrail": contract["guardrail"],
+            "meta": contract["meta"],
+        }
+        yield f"data: {json.dumps(meta_payload)}\n\n"
+
+        # Emit deterministic chunk (clarifying question or refusal summary)
+        yield f"data: {json.dumps({'chunk': contract['summary_paragraph']})}\n\n"
+
+        # Finalize
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+        # Persist normalized chat context metadata
+        await _persist_chat_history(
+            db=db,
+            request=request,
+            ai_response=contract["summary_paragraph"],
+            provider=None,
+            model=None,
+            context_json=context,
+        )
+        return
+
+    # 4. Answer mode: Start with policy-driven recommendations
+    service = ChatAIService()
+
+    # Send initial metadata including recommendations and guardrails
+    initial_meta = {
+        "mode": policy["mode"],
+        "timeframe_used": context.get("timeframe_used"),
+        "guardrail": policy.get("guardrail"),
+        "recommendations": policy.get("recommendations"),
+        "include_confidence": policy.get("include_confidence"),
+    }
+    yield f"data: {json.dumps(initial_meta)}\n\n"
+
     accumulator: List[str] = []
     try:
         async for chunk in service.stream_response(request):
             accumulator.append(chunk)
-            payload = {"chunk": chunk}
-            yield f"data: {json.dumps(payload)}\n\n"
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+        # At the end, normalize while preserving final contract metadata
+        final_text = "".join(accumulator).strip()
+        model_output = {"summary_paragraph": final_text}
+
+        # Try to normalize to capture generated at/provider/model meta
+        try:
+            contract = normalizer.normalize(
+                policy=policy,
+                context=context,
+                model_output=model_output,
+                prompt=request.message,
+            )
+            # Emit final meta frame
+            yield f"data: {json.dumps({'meta': contract['meta'], 'done': True})}\n\n"
+        except (ValueError, KeyError) as exc:
+            logger.warning("Final contract normalization skipped: %s", exc)
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
     except Exception as exc:
         logger.error("Chat stream error", exc_info=True)
         error_payload = {"error": "AI chat request failed", "details": str(exc)}
         yield f"data: {json.dumps(error_payload)}\n\n"
         raise
     finally:
-        if accumulator and service.last_provider:
+        if accumulator:
             final_response = "".join(accumulator).strip()
             await _persist_chat_history(
-                db,
-                request,
-                final_response,
-                service.last_provider,
-                service.last_model,
+                db=db,
+                request=request,
+                ai_response=final_response,
+                provider=service.last_provider,
+                model=service.last_model,
+                context_json=context,
             )
 
 
@@ -599,8 +688,7 @@ async def chat_stream(
     payload: ChatRequest, db: AsyncSession = Depends(get_async_db)
 ) -> StreamingResponse:
     """Stream the AI chat response while persisting the conversation."""
-    service = ChatAIService()
-    generator = _streaming_chat_response(payload, service, db)
+    generator = _streaming_chat_response(payload, db)
     return StreamingResponse(
         generator,
         media_type="text/event-stream",
