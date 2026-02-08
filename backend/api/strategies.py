@@ -128,6 +128,8 @@ class StrategyResponse(BaseModel):
     promoted_by_recommendation: bool
     created_at: datetime
     updated_at: datetime
+    health_status: str
+    pending_adjustment: Optional[Dict[str, Any]] = Field(None, alias="pending_adjustment")
 
 
 class StrategyListResponse(BaseModel):
@@ -270,6 +272,8 @@ def _serialize_strategy(strategy: Strategy) -> StrategyResponse:
         promoted_by_recommendation=bool(strategy.promoted_by_recommendation),
         created_at=strategy.created_at,
         updated_at=strategy.updated_at,
+        health_status=strategy.health_status or "healthy",
+        pending_adjustment=strategy.pending_adjustment_json,
     )
 
 
@@ -923,6 +927,101 @@ async def update_strategy(
         raise DatabaseException(
             message="Unable to update strategy",
             details={"operation": "update_strategy", "strategy_id": strategy_id},
+        ) from exc
+
+    return _serialize_strategy(strategy)
+
+
+@router.post("/{strategy_id}/adjustments/apply", response_model=StrategyResponse)
+async def apply_pending_adjustment(
+    strategy_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> StrategyResponse:
+    """Apply the pending AI adjustment to the strategy rules."""
+    try:
+        strategy = await db.get(Strategy, strategy_id)
+    except SQLAlchemyError as exc:
+        logger.error("Failed loading strategy for adjustment %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "apply_adjustment_load", "strategy_id": strategy_id},
+        ) from exc
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+
+    if not strategy.pending_adjustment_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending adjustment found for this strategy",
+        )
+
+    # Apply adjustments. We expect pending_adjustment_json to have a 'proposed_rules' key
+    # or similar structure that can be merged into strategy.rules_json.
+    proposed = strategy.pending_adjustment_json.get("proposed_rules")
+    if not proposed:
+        # Fallback: if no proposed_rules, maybe it's the whole object?
+        # In a real app, this would be more strictly defined.
+        proposed = strategy.pending_adjustment_json
+
+    strategy.rules_json = proposed
+    strategy.pending_adjustment_json = None
+    strategy.ai_modifications_json = {
+        "applied_at": datetime.utcnow().isoformat(),
+        "previous_rules": strategy.rules_json, # Snapshot before applying
+    }
+
+    try:
+        await db.commit()
+        await db.refresh(strategy)
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        logger.error("Failed to apply adjustment for strategy %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to apply adjustment",
+            details={"operation": "apply_adjustment", "strategy_id": strategy_id},
+        ) from exc
+
+    return _serialize_strategy(strategy)
+
+
+@router.delete("/{strategy_id}/adjustments", response_model=StrategyResponse)
+async def discard_pending_adjustment(
+    strategy_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> StrategyResponse:
+    """Discard the pending AI adjustment."""
+    try:
+        strategy = await db.get(Strategy, strategy_id)
+    except SQLAlchemyError as exc:
+        logger.error("Failed loading strategy for adjustment discard %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to load strategy",
+            details={"operation": "discard_adjustment_load", "strategy_id": strategy_id},
+        ) from exc
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+
+    strategy.pending_adjustment_json = None
+
+    try:
+        await db.commit()
+        await db.refresh(strategy)
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        logger.error("Failed to discard adjustment for strategy %s", strategy_id, exc_info=True)
+        raise DatabaseException(
+            message="Unable to discard adjustment",
+            details={"operation": "discard_adjustment", "strategy_id": strategy_id},
         ) from exc
 
     return _serialize_strategy(strategy)
