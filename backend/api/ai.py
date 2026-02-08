@@ -605,6 +605,9 @@ async def _streaming_chat_response(
     policy_engine = ChatPolicyEngine()
     policy = policy_engine.evaluate(prompt=request.message, context=context)
 
+    # Ground request with the fully assembled context for the AI provider
+    request.context_json = context
+
     normalizer = ChatResponseNormalizer()
 
     # 3. Handle refuse/clarify branches before provider streaming
@@ -648,6 +651,7 @@ async def _streaming_chat_response(
         "timeframe_used": context.get("timeframe_used"),
         "guardrail": policy.get("guardrail"),
         "recommendations": policy.get("recommendations"),
+        "portfolio_impact": (policy.get("recommendations") or {}).get("portfolio_impact"),
         "include_confidence": policy.get("include_confidence"),
     }
     yield f"data: {json.dumps(initial_meta)}\n\n"
@@ -696,10 +700,9 @@ async def _streaming_chat_response(
                 prompt=request.message,
             )
             
-            # Emit final meta frame with trade_explanation and portfolio_impact
+            # Emit final meta frame with rich data and completion marker
             final_meta = {
-                "meta": contract["meta"],
-                "trade_explanation": contract["trade_explanation"],
+                **contract,
                 "portfolio_impact": (contract.get("recommendations") or {}).get("portfolio_impact"),
                 "done": True,
             }
