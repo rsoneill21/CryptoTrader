@@ -103,12 +103,122 @@ const normalizeHistoryMessages = (history) => {
       }
       return String(a.id).localeCompare(String(b.id));
     });
+};
 
-  return sortedRows.map((message) => {
-    const { sortRank, ...rest } = message;
-    void sortRank;
-    return rest;
-  });
+const RecommendationDisplay = ({ recommendations }) => {
+  if (!recommendations) return null;
+
+  const renderBadge = (rec, label) => {
+    if (!rec || !rec.action) return null;
+
+    const action = rec.action.toLowerCase();
+    let bgColor = 'bg-gray-800/50';
+    let textColor = 'text-gray-300';
+    let borderColor = 'border-gray-700';
+
+    if (action === 'buy') {
+      bgColor = 'bg-emerald-500/10';
+      textColor = 'text-emerald-400';
+      borderColor = 'border-emerald-500/30';
+    } else if (action === 'sell' || action === 'reduce' || action === 'hold') {
+      bgColor = 'bg-amber-500/10';
+      textColor = 'text-amber-400';
+      borderColor = 'border-amber-500/30';
+    }
+
+    return (
+      <div className={`rounded-xl border ${borderColor} ${bgColor} p-3`}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400">
+            {label} Recommendation
+          </span>
+          <span className={`text-xs font-bold uppercase tracking-widest ${textColor}`}>
+            {rec.action}
+          </span>
+        </div>
+        {rec.rationale && (
+          <p className="text-xs text-gray-300 leading-relaxed italic">
+            "{rec.rationale}"
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-2 mt-3">
+      {renderBadge(recommendations.primary, 'Primary')}
+      {renderBadge(recommendations.backup, 'Backup')}
+    </div>
+  );
+};
+
+const ImpactDisplay = ({ impact }) => {
+  if (!impact) return null;
+
+  return (
+    <div className="mt-3 flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2">
+      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/20">
+        <svg className="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        </svg>
+      </div>
+      <span className="text-xs font-medium text-blue-200">Portfolio Impact:</span>
+      <span className="text-xs font-bold text-white">{impact}</span>
+    </div>
+  );
+};
+
+const RationaleDisplay = ({ explanation }) => {
+  if (!explanation) return null;
+
+  const { thesis, market_signals, risk_checks, counterfactual } = explanation;
+
+  return (
+    <div className="mt-4 space-y-4 rounded-2xl border border-gray-800 bg-black/20 p-4">
+      {thesis && (
+        <div>
+          <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-500 mb-1">Thesis</h4>
+          <p className="text-sm font-medium text-gray-100 leading-relaxed italic">{thesis}</p>
+        </div>
+      )}
+
+      {market_signals && market_signals.length > 0 && (
+        <div>
+          <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-500 mb-1">Signals</h4>
+          <ul className="list-none space-y-1">
+            {market_signals.map((signal, idx) => (
+              <li key={idx} className="flex items-start gap-2 text-xs text-gray-300">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-sky-400" />
+                <span>{signal}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {risk_checks && risk_checks.length > 0 && (
+        <div>
+          <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-500 mb-1">Risk Analysis</h4>
+          <ul className="list-none space-y-1">
+            {risk_checks.map((check, idx) => (
+              <li key={idx} className="flex items-start gap-2 text-xs text-gray-300">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-rose-400" />
+                <span>{check}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {counterfactual && (
+        <div className="pt-2 border-t border-gray-800">
+          <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-500 mb-1">What to watch for</h4>
+          <p className="text-xs text-gray-400 leading-relaxed">{counterfactual}</p>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const ChatWindow = () => {
@@ -405,6 +515,8 @@ const ChatWindow = () => {
                   {message.structuredResponse.summaryParagraph}
                 </p>
               )}
+              <RecommendationDisplay recommendations={message.structuredResponse.recommendations} />
+              <ImpactDisplay impact={message.structuredResponse.portfolioImpact} />
               {message.structuredResponse.bullets.length > 0 && (
                 <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-gray-100">
                   {message.structuredResponse.bullets.map((bullet, index) => (
@@ -414,6 +526,7 @@ const ChatWindow = () => {
                   ))}
                 </ul>
               )}
+              <RationaleDisplay explanation={message.structuredResponse.tradeExplanation} />
             </div>
           ) : (
             <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-white">
