@@ -631,11 +631,20 @@ async def _streaming_chat_response(
         # Finalize
         yield f"data: {json.dumps({'done': True})}\n\n"
 
-        # Persist normalized chat context metadata
+        # Persist rich chat metadata
+        final_payload = {
+            "text": contract["summary_paragraph"],
+            "summary_paragraph": contract["summary_paragraph"],
+            "recommendations": contract.get("recommendations"),
+            "portfolio_impact": (contract.get("recommendations") or {}).get("portfolio_impact"),
+            "trade_explanation": None,
+            "provider": None,
+            "model": None,
+        }
         await _persist_chat_history(
             db=db,
             request=request,
-            ai_response=contract["summary_paragraph"],
+            ai_response=json.dumps(final_payload),
             provider=None,
             model=None,
             context_json=context,
@@ -718,11 +727,40 @@ async def _streaming_chat_response(
         raise
     finally:
         if accumulator:
-            final_response = "".join(accumulator).strip()
+            final_text = "".join(accumulator).strip()
+            
+            # Re-extract rationale to ensure final_payload for persistence is accurate
+            trade_explanation = None
+            summary_paragraph = final_text
+            if "<rationale>" in final_text and "</rationale>" in final_text:
+                try:
+                    start_tag = "<rationale>"
+                    end_tag = "</rationale>"
+                    start_idx = final_text.find(start_tag) + len(start_tag)
+                    end_idx = final_text.find(end_tag)
+                    rationale_json = final_text[start_idx:end_idx].strip()
+                    trade_explanation = json.loads(rationale_json)
+                    
+                    prefix = final_text[:final_text.find(start_tag)].strip()
+                    suffix = final_text[end_idx + len(end_tag):].strip()
+                    summary_paragraph = f"{prefix} {suffix}".strip()
+                except Exception:
+                    pass
+
+            final_payload = {
+                "text": final_text,
+                "summary_paragraph": summary_paragraph,
+                "recommendations": policy.get("recommendations"),
+                "portfolio_impact": (policy.get("recommendations") or {}).get("portfolio_impact"),
+                "trade_explanation": trade_explanation,
+                "provider": service.last_provider,
+                "model": service.last_model,
+            }
+
             await _persist_chat_history(
                 db=db,
                 request=request,
-                ai_response=final_response,
+                ai_response=json.dumps(final_payload),
                 provider=service.last_provider,
                 model=service.last_model,
                 context_json=context,
