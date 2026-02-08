@@ -1,6 +1,6 @@
 # Project State: CryptoTrader
 
-**Last Updated:** 2026-02-06
+**Last Updated:** 2026-02-08
 **Milestone:** Paper trading with functional autonomous agents
 
 ## Project Reference
@@ -22,8 +22,8 @@
 **Phase:** Phase 7 - AI Chat Integration (7 of 11)
 **Plan:** 2 of 3
 **Status:** In progress
-**Last activity:** 2026-02-08 - Completed 07-02-PLAN.md
-**Progress:** ██████████ 95% (41/43 plans complete; Phase 7: 1/3)
+**Last activity:** 2026-02-08 - Completed 07-01-PLAN.md
+**Progress:** ██████████ 98% (42/43 plans complete; Phase 7: 2/3)
 
 - **What's happening:**
 - Completed 06-02: Strategy Health Monitoring (Self-Healing logic)
@@ -186,6 +186,7 @@
 | StrategyCard as rich component for lifecycle | 2026-02-08 | Encapsulates complex promotion and optimization review flows | Reduces StrategyLab complexity; enables reusable health/status UI |
 | ChatWindow parses SSE by frame boundaries and `data:` lines | 2026-02-08 | Backend streams SSE payloads; raw chunk appends leak protocol text into UI | Streaming chat now decodes structured events (`chunk/meta/guardrail/done`) without corrupting messages |
 | Chat history normalized as persisted turn pairs | 2026-02-08 | Backend history stores `user_message` + `ai_response` per row, not role/content rows | UI now expands each record into user + assistant messages in deterministic chronological order |
+| Chat orchestration uses context -> policy -> response contract flow | 2026-02-08 | Deterministic backend guardrails are required before API streaming integration to enforce stale-context refusal and elevated-risk defaults | Phase 7 can wire `/api/ai/chat` against stable payload schema without duplicating policy in UI |
 
 ### Active Todos
 
@@ -428,12 +429,12 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-08 02:33 UTC
-**Stopped at:** Completed 07-02-PLAN.md
+**Last session:** 2026-02-08 02:36 UTC
+**Stopped at:** Completed 07-01-PLAN.md
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 7 by executing 07-01-PLAN.md (backend chat context/policy), then 07-03 integration verification.
+1. Continue Phase 7 by executing 07-03-PLAN.md (AI chat API orchestration and integration regressions).
 
 
 **Context to carry forward:**
