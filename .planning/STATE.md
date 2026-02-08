@@ -20,12 +20,14 @@
 ## Current Position
 
 **Phase:** Phase 6 - Advanced Strategy Features (6 of 11)
-**Plan:** 1 of 4 in current phase
+**Plan:** 4 of 4 in current phase
 **Status:** In progress
-**Last activity:** 2026-02-08 - Completed 06-01-PLAN.md
-**Progress:** █████████░ 86% (37/43 plans complete; Phase 6: 1/4)
+**Last activity:** 2026-02-08 - Completed 06-03-PLAN.md
+**Progress:** █████████░ 91% (39/43 plans complete; Phase 6: 3/4)
 
 - **What's happening:**
+- Completed 06-03: Strategy Wizard (AI-driven generation UI)
+- Completed 06-04: Strategy Lifecycle Management (Promotion, Health, Adjustments)
 - Completed 06-01: Multi-timeframe strategy engine (Evaluator, Backtest, Orchestrator)
 - Completed 05-03: Backtesting UI component and integration
 - Completed 05-02: Backtest engine and strategy rule evaluator
@@ -179,6 +181,8 @@
 | Strategy rules specify 'timeframe' per condition | 2026-02-08 | Enables complex strategies (e.g., 1h trend + 5m entry) | Rules must include 'timeframe' key in conditions; base_timeframe defines target resolution |
 | Higher timeframe data is forward-filled | 2026-02-08 | Simplifies evaluation logic by ensuring every base candle has higher-TF indicator values | StrategyEvaluator aligns data-map using reindex(method='ffill') |
 | Orchestrator fetches all required timeframes | 2026-02-08 | Required for live evaluation of multi-timeframe strategies | Orchestrator parses rules and calls kraken_service.get_ohlc for each unique timeframe |
+| Dedicated endpoints for applying/discarding adjustments | 2026-02-08 | Cleaner than generic PUT for complex rule merging logic | Backend owns rule merging; frontend reviews via Before/After comparison |
+| StrategyCard as rich component for lifecycle | 2026-02-08 | Encapsulates complex promotion and optimization review flows | Reduces StrategyLab complexity; enables reusable health/status UI |
 
 ### Active Todos
 
