@@ -19,40 +19,23 @@
 
 ## Current Position
 
-**Phase:** Phase 4 - Position & Order Management (4 of 11)
-**Plan:** 2 of 3 in current phase
+**Phase:** Phase 6 - Advanced Strategy Features (6 of 11)
+**Plan:** 1 of 4 in current phase
 **Status:** In progress
-**Last activity:** 2026-02-06 - Completed 04-02-PLAN.md
-**Progress:** █████████░ 94% (32/34 plans complete; Phase 4: 2/3)
+**Last activity:** 2026-02-08 - Completed 06-01-PLAN.md
+**Progress:** █████████░ 86% (37/43 plans complete; Phase 6: 1/4)
 
 - **What's happening:**
+- Completed 06-01: Multi-timeframe strategy engine (Evaluator, Backtest, Orchestrator)
+- Completed 05-03: Backtesting UI component and integration
+- Completed 05-02: Backtest engine and strategy rule evaluator
+- Completed 05-01: Database model and API foundation for backtesting
+- Completed 04-03: Live Trading UI upgrade for review-first ticket, pending section, and close workflow
+- Completed 04-02: pending/partial/fill/reject lifecycle reconciliation across service + trade APIs
+- Completed 04-01: risk-gated manual market/limit order entry and partial/full close backend contracts
+- Completed 03-03: daily total P&L halt controls and paper-engine stop-loss enforcement
 - Completed 03-02: Kraken rate limiter + liquidity risk gate across KrakenService and TradeExecutor
-- Completed 02-09: Operator dashboard frontend with status grid, queue metrics, pipeline timeline, pause/resume toggles, and flush/retry operator actions
-- Completed 02-08: Order execution fallback strategy (volume reduction retry before marking signals failed)
-- Completed 02-07: Trade Executor consumes signals via Redis Streams with analysis context
-- Completed 02-06: Dashboard API endpoints (unified dashboard, queue flush, signal retry)
-- Completed 02-05: Dashboard observability hooks (queue metrics, pipeline events, operator actions)
-- Completed 02-04: Heartbeat monitoring for stuck agent detection and auto-restart
-- Completed 02-03: Agent control API endpoints (status, pause, resume)
-- Completed 02-02: Redis Streams for reliable trade signal delivery with priority queues
-- Completed 02-01: AgentManager with staggered startup, supervision, and crash recovery
-- Completed 01-01: Async database session factory
-- Completed 01-02: Structured exceptions & fail-closed rate limiting
-- Completed 01-03: Paper trading state persistence
-- Completed 01-04: Cursor-based pagination for alerts
-- Completed 01-05: Backend import path fixes and pybreaker dependency
-- Completed 01-06: Wire paper trading engine hooks to FastAPI lifespan
-- Completed 01-07: AsyncSession migration for alerts, market, strategies, and risk APIs
-- Completed 01-08: Shared pagination helper plus cursor-based strategies & trades listings
-- Completed 01-09: Structured exception handling and exc_info logging across backend APIs
-- Completed 01-10: Trade creation endpoints reload orders before serialization (fixes POST /api/trades 500s)
-- Completed 01-11: Paper trading session reset/archive endpoints exposed via FastAPI
-- Completed 01-12: Cursor pagination helper enforces DESC comparisons with optional ASC support
-- Completed 01-13: Auth login route now trusts exception-based rate limiter; regression tests cover login + Redis outages
-- Completed 01-14: Auth, export, AI, and system log APIs now use AsyncSession plus awaited select queries end-to-end
-- Completed 01-15: Market, strategies, trades, and system APIs now raise typed DatabaseException/ServiceUnavailableException with exc_info logging
-- Completed 01-17: Market analysis indicator/sentiment collectors no longer return degraded 200s; outages raise ServiceUnavailableException with regression tests locking the behavior
-- Completed 01-16: System health endpoints probe Kraken latency and raise ServiceUnavailableException so `/health` and `/connection-status` log outages with stack traces
+- Completed 03-01: Core risk infrastructure (settings persistence, RiskException, RiskService, risk API expansion)
 
 **What works:**
 - FastAPI backend with structured API routes
@@ -193,6 +176,9 @@
 | Close endpoint executes at market price with partial support | 2026-02-06 | Position management requires deterministic close semantics for both trim and full exit flows | `/api/trades/{trade_id}/close` resolves latest price and persists requested/fill metadata |
 | Lifecycle reconciliation persists reason code/message in error payload | 2026-02-06 | Needed machine-readable rejection/cancel metadata without adding schema columns mid-phase | `Order.error_message` now stores `[code] message` and APIs expose `reason_code` + `reason_message` |
 | Order refresh keeps filled quantity monotonic | 2026-02-06 | Exchange snapshots can lag and report lower interim fill volumes | Reconciliation applies `max(existing, exchange)` so status refreshes cannot regress exposure |
+| Strategy rules specify 'timeframe' per condition | 2026-02-08 | Enables complex strategies (e.g., 1h trend + 5m entry) | Rules must include 'timeframe' key in conditions; base_timeframe defines target resolution |
+| Higher timeframe data is forward-filled | 2026-02-08 | Simplifies evaluation logic by ensuring every base candle has higher-TF indicator values | StrategyEvaluator aligns data-map using reindex(method='ffill') |
+| Orchestrator fetches all required timeframes | 2026-02-08 | Required for live evaluation of multi-timeframe strategies | Orchestrator parses rules and calls kraken_service.get_ohlc for each unique timeframe |
 
 ### Active Todos
 
@@ -428,14 +414,14 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-06 17:27 UTC
-**Stopped at:** Completed 04-02-PLAN.md (order lifecycle reconciliation for pending/partial/failure states)
+**Last session:** 2026-02-08 12:00 UTC
+**Stopped at:** Completed 06-01-PLAN.md (multi-timeframe strategy engine)
 **Resume file:** None
 
 **For next session:**
-1. Execute 04-03 to wire lifecycle-aware pending and outcome messaging into the Live Trading UI.
-2. Consume `/api/trades/orders/pending` in the separate pending section (do not mix with open positions).
-3. Surface `reason_code` and `reason_message` in ticket-local and global activity views.
+1. Execute 06-02 to implement AI-driven strategy suggestions and customizable AI-proposed strategies.
+2. Ensure strategy suggestions correctly handle the new multi-timeframe rule structure.
+
 
 **Context to carry forward:**
 - **Import pattern:** Use 'from core.X', 'from api.X', 'from agents.X', 'from services.X' (no backend. prefix)
