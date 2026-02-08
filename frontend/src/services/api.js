@@ -74,6 +74,158 @@ const normalizeAPIError = (errorResponseData) => {
   };
 };
 
+const formatHybridChatText = (summaryParagraph, bullets, fallbackText = null) => {
+  const segments = [];
+  if (summaryParagraph) {
+    segments.push(summaryParagraph);
+  }
+  if (Array.isArray(bullets) && bullets.length > 0) {
+    segments.push(
+      bullets
+        .map((bullet) => {
+          if (bullet.label && bullet.text) {
+            return `- ${bullet.label}: ${bullet.text}`;
+          }
+          return `- ${bullet.text || bullet.label}`;
+        })
+        .join('\n')
+    );
+  }
+  if (segments.length > 0) {
+    return segments.join('\n\n');
+  }
+  return fallbackText;
+};
+
+const normalizeBullet = (value) => {
+  if (typeof value === 'string') {
+    const text = normalizeText(value);
+    return text ? { label: null, text } : null;
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const label = normalizeText(value.label) || normalizeText(value.title);
+  const text =
+    normalizeText(value.text) ||
+    normalizeText(value.content) ||
+    normalizeText(value.value) ||
+    normalizeText(value.message);
+  if (!label && !text) {
+    return null;
+  }
+  return { label, text: text || label };
+};
+
+export const normalizeAIChatPayload = (rawPayload) => {
+  const parseJsonString = (value) => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return value;
+    }
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  };
+
+  const payload = parseJsonString(rawPayload);
+  if (typeof payload === 'string') {
+    const text = normalizeText(payload) || '';
+    return {
+      text,
+      chunk: text,
+      summaryParagraph: null,
+      bullets: [],
+      recommendations: null,
+      guardrail: null,
+      meta: null,
+      hasStructuredContent: false,
+      errorMessage: null,
+    };
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return {
+      text: '',
+      chunk: null,
+      summaryParagraph: null,
+      bullets: [],
+      recommendations: null,
+      guardrail: null,
+      meta: null,
+      hasStructuredContent: false,
+      errorMessage: null,
+    };
+  }
+
+  const summaryParagraph =
+    normalizeText(payload.summary_paragraph) || normalizeText(payload.summaryParagraph);
+  const bullets = (Array.isArray(payload.bullets) ? payload.bullets : [])
+    .map((entry) => normalizeBullet(entry))
+    .filter(Boolean);
+  const chunk =
+    normalizeText(payload.chunk) ||
+    normalizeText(payload.delta) ||
+    normalizeText(payload.token) ||
+    normalizeText(payload.partial);
+  const plainText =
+    normalizeText(payload.response) ||
+    normalizeText(payload.message) ||
+    normalizeText(payload.text) ||
+    null;
+  const structuredText = formatHybridChatText(summaryParagraph, bullets, null);
+  const text = structuredText || chunk || plainText || '';
+  const errorMessage =
+    normalizeText(payload.error) ||
+    normalizeText(payload.detail) ||
+    normalizeText(payload.details) ||
+    null;
+
+  return {
+    text,
+    chunk,
+    summaryParagraph,
+    bullets,
+    recommendations:
+      payload.recommendations && typeof payload.recommendations === 'object'
+        ? payload.recommendations
+        : null,
+    guardrail:
+      payload.guardrail && typeof payload.guardrail === 'object'
+        ? payload.guardrail
+        : null,
+    meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : null,
+    hasStructuredContent: Boolean(summaryParagraph || bullets.length),
+    errorMessage,
+  };
+};
+
+export const extractAIErrorMessage = (value, fallback = 'AI chat request failed.') => {
+  const parsed = normalizeAPIError(value);
+  if (parsed?.message) {
+    return parsed.message;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (value && typeof value === 'object') {
+    const detail = normalizeText(value.detail);
+    if (detail) {
+      return detail;
+    }
+    const error = normalizeText(value.error);
+    if (error) {
+      return error;
+    }
+  }
+  return fallback;
+};
+
 const normalizeLifecycleStatus = (statusValue) => {
   const normalized = String(statusValue || '')
     .trim()
@@ -400,6 +552,29 @@ export const aiAPI = {
     api.put('/api/ai/models/active', { provider }),
   chatHistory: (params = {}) =>
     api.get('/api/ai/chat/history', { params }),
+  streamChat: async (payload = {}) => {
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let responsePayload = null;
+      try {
+        responsePayload = await response.json();
+      } catch {
+        responsePayload = await response.text();
+      }
+      throw new Error(extractAIErrorMessage(responsePayload));
+    }
+
+    return response;
+  },
 };
 
 // Agents API - agent observability and control
