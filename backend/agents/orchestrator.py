@@ -3,18 +3,23 @@
 import asyncio
 import logging
 import uuid
+import pandas as pd
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import select
 
 from api.ai import ChatAIService, ChatRequest
 from agents.base import AgentMessage, BaseAgent
 from core.message_queue import Channels, message_queue
+from core.strategy_evaluator import StrategyEvaluator
 from core.tasks import log_system_event
 from core.trading_control import trading_control
+from db.database import AsyncSessionLocal
+from db.models import Strategy
 from services.kraken import OrderSide, OrderType, kraken_service
 
 logger = logging.getLogger(__name__)
@@ -298,8 +303,8 @@ class OrchestratorAgent(BaseAgent):
     async def _maybe_create_trade_signal(self, symbol: str) -> None:
         async with self._decision_lock:
             insight = self._insights.get(symbol)
-            strategy = self._strategies.get(symbol)
-            if not insight or not strategy:
+            strategy_payload = self._strategies.get(symbol)
+            if not insight or not strategy_payload:
                 return
             if trading_control.is_paused():
                 self._log_event("info", "Trading paused, skipping decision", {"symbol": symbol})
@@ -309,16 +314,55 @@ class OrchestratorAgent(BaseAgent):
             last = self._decision_timestamps.get(symbol)
             if last and (now - last) < self.DECISION_COOLDOWN:
                 return
-            side = self._side_from_insight(insight)
-            if not side:
+
+            # Fetch full strategy rules from DB
+            rules = await self._fetch_strategy_rules(strategy_payload.strategy_id)
+            if not rules:
+                self._log_event("warning", "Could not fetch strategy rules", {"strategy_id": strategy_payload.strategy_id})
                 return
+
+            # Identify all required timeframes
+            timeframes = self._extract_timeframes(rules)
+            base_tf = rules.get("base_timeframe", "1m")
+            timeframes.add(base_tf)
+
+            # Fetch latest candles for all timeframes
+            data_map = {}
+            for tf in timeframes:
+                df = await self._fetch_latest_candles(symbol, tf)
+                if not df.empty:
+                    data_map[tf] = df
+                else:
+                    self._log_event("warning", "No candle data for timeframe", {"symbol": symbol, "timeframe": tf})
+
+            if base_tf not in data_map:
+                self._log_event("warning", "Base timeframe data missing", {"symbol": symbol, "base_tf": base_tf})
+                return
+
+            # Evaluate strategy
+            evaluator = StrategyEvaluator(rules)
+            eval_df = evaluator.evaluate(data_map, base_timeframe=base_tf)
+            
+            if eval_df.empty:
+                return
+
+            # Get the most recent signals
+            latest = eval_df.iloc[-1]
+            entry_signal = latest.get("entry_signal", False)
+            exit_signal = latest.get("exit_signal", False)
+
+            if not entry_signal and not exit_signal:
+                return
+
+            side = OrderSide.BUY if entry_signal else OrderSide.SELL
+            
             price = await self._fetch_latest_price(symbol)
             if price is None or price <= 0:
                 return
-            volume = self._calculate_volume(price, strategy.params)
+            volume = self._calculate_volume(price, strategy_payload.params)
             if volume <= 0:
                 return
-            payload = self._build_trade_signal(symbol, side, volume, insight, strategy)
+            payload = self._build_trade_signal(symbol, side, volume, insight, strategy_payload)
 
             # Determine priority based on signal type (per user decision)
             # 0 = critical (halt signals), 1 = high (buy/sell), 2 = normal (research)
@@ -360,6 +404,59 @@ class OrchestratorAgent(BaseAgent):
                     "pubsub_published": published_pubsub,
                 },
             )
+
+    async def _fetch_strategy_rules(self, strategy_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch full strategy rules from database."""
+        try:
+            async with AsyncSessionLocal() as session:
+                stmt = select(Strategy).where(Strategy.id == strategy_id)
+                result = await session.execute(stmt)
+                strategy = result.scalar_one_or_none()
+                return strategy.rules_json if strategy else None
+        except Exception as exc:
+            self._log_event("error", "Failed to fetch strategy rules from DB", {"strategy_id": strategy_id, "error": str(exc)})
+            return None
+
+    def _extract_timeframes(self, rules: Dict[str, Any]) -> Set[str]:
+        """Extract all timeframes mentioned in the strategy rules."""
+        tfs = set()
+        all_conditions = []
+        if 'entry' in rules:
+            all_conditions.extend(rules['entry'].get('conditions', []))
+        if 'exit' in rules:
+            all_conditions.extend(rules['exit'].get('conditions', []))
+            
+        for cond in all_conditions:
+            tf = cond.get('timeframe')
+            if tf:
+                tfs.add(tf)
+        return tfs
+
+    async def _fetch_latest_candles(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        """Fetch recent OHLCV data from Kraken for live evaluation."""
+        try:
+            candles, _ = await kraken_service.get_ohlc(symbol, interval=timeframe)
+            if not candles:
+                return pd.DataFrame()
+                
+            data = [
+                {
+                    "timestamp": c.timestamp,
+                    "open": float(c.open),
+                    "high": float(c.high),
+                    "low": float(c.low),
+                    "close": float(c.close),
+                    "volume": float(c.volume)
+                }
+                for c in candles
+            ]
+            df = pd.DataFrame(data)
+            df.set_index("timestamp", inplace=True)
+            df.sort_index(inplace=True)
+            return df
+        except Exception as exc:
+            self._log_event("error", "Failed to fetch candles from Kraken", {"symbol": symbol, "timeframe": timeframe, "error": str(exc)})
+            return pd.DataFrame()
 
     def _side_from_insight(self, insight: MarketInsightPayload) -> Optional[OrderSide]:
         level = (insight.level or "").strip().lower()
