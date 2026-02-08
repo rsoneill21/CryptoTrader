@@ -9,61 +9,61 @@ Requirements for initial release. Paper trading only — no real money until val
 
 ### Infrastructure Fixes (INFRA)
 
-- [ ] **INFRA-01**: Paper trading state persists across server restarts
-- [ ] **INFRA-02**: Rate limiter fails closed on auth/sensitive endpoints when Redis is down
-- [ ] **INFRA-03**: Async database queries in async endpoints (no event loop blocking)
-- [ ] **INFRA-04**: Bare exception handlers replaced with specific exceptions and logging
-- [ ] **INFRA-05**: Database indexes on frequently queried columns (user_id, timestamps, strategy_id)
-- [ ] **INFRA-06**: Pagination on list endpoints (trades, strategies, alerts)
+- [x] **INFRA-01**: Paper trading state persists across server restarts
+- [x] **INFRA-02**: Rate limiter fails closed on auth/sensitive endpoints when Redis is down
+- [x] **INFRA-03**: Async database queries in async endpoints (no event loop blocking)
+- [x] **INFRA-04**: Bare exception handlers replaced with specific exceptions and logging
+- [x] **INFRA-05**: Database indexes on frequently queried columns (user_id, timestamps, strategy_id)
+- [x] **INFRA-06**: Pagination on list endpoints (trades, strategies, alerts)
 
 ### Autonomous Trading Loop (LOOP)
 
-- [ ] **LOOP-01**: Agent Manager starts all agents on application startup via FastAPI lifespan
-- [ ] **LOOP-02**: Agents run continuously on configurable schedule (sub-minute granularity)
-- [ ] **LOOP-03**: Market data streams from Kraken WebSocket into Market Analyst agent in real-time
-- [ ] **LOOP-04**: Market Analyst publishes insights to message queue for other agents
-- [ ] **LOOP-05**: Orchestrator evaluates insights against active strategies and generates trade signals
-- [ ] **LOOP-06**: Trade Executor receives signals and places paper orders
-- [ ] **LOOP-07**: Agents gracefully shut down on application exit
-- [ ] **LOOP-08**: Agent execution loop recovers from individual agent failures without crashing
+- [x] **LOOP-01**: Agent Manager starts all agents on application startup via FastAPI lifespan
+- [x] **LOOP-02**: Agents run continuously on configurable schedule (sub-minute granularity)
+- [x] **LOOP-03**: Market data streams from Kraken WebSocket into Market Analyst agent in real-time
+- [x] **LOOP-04**: Market Analyst publishes insights to message queue for other agents
+- [x] **LOOP-05**: Orchestrator evaluates insights against active strategies and generates trade signals
+- [x] **LOOP-06**: Trade Executor receives signals and places paper orders
+- [x] **LOOP-07**: Agents gracefully shut down on application exit
+- [x] **LOOP-08**: Agent execution loop recovers from individual agent failures without crashing
 
 ### Risk Management (RISK)
 
-- [ ] **RISK-01**: Maximum position size enforced (configurable % of capital per trade)
-- [ ] **RISK-02**: Stop-loss automatically placed on every position
-- [ ] **RISK-03**: Daily loss limit halts all trading for the day when breached
-- [ ] **RISK-04**: Maximum portfolio exposure limit per asset
-- [ ] **RISK-05**: Trade frequency limit prevents over-trading (max trades per hour/day)
-- [ ] **RISK-06**: Minimum liquidity check before entering a position
-- [ ] **RISK-07**: API rate limits respected to avoid Kraken bans
+- [x] **RISK-01**: Maximum position size enforced (configurable % of capital per trade)
+- [x] **RISK-02**: Stop-loss automatically placed on every position
+- [x] **RISK-03**: Daily loss limit halts all trading for the day when breached
+- [x] **RISK-04**: Maximum portfolio exposure limit per asset
+- [x] **RISK-05**: Trade frequency limit prevents over-trading (max trades per hour/day)
+- [x] **RISK-06**: Minimum liquidity check before entering a position
+- [x] **RISK-07**: API rate limits respected to avoid Kraken bans
 
 ### Position Management (POS)
 
-- [ ] **POS-01**: Open new positions with market orders
-- [ ] **POS-02**: Open new positions with limit orders
-- [ ] **POS-03**: Close positions (take-profit and stop-loss exits)
-- [ ] **POS-04**: Position sizing calculated from risk parameters and account balance
-- [ ] **POS-05**: Partial fills tracked and reconciled
-- [ ] **POS-06**: Open positions displayed with real-time P&L
-- [ ] **POS-07**: Failed orders retried or alerted
+- [x] **POS-01**: Open new positions with market orders
+- [x] **POS-02**: Open new positions with limit orders
+- [x] **POS-03**: Close positions (take-profit and stop-loss exits)
+- [x] **POS-04**: Position sizing calculated from risk parameters and account balance
+- [x] **POS-05**: Partial fills tracked and reconciled
+- [x] **POS-06**: Open positions displayed with real-time P&L
+- [x] **POS-07**: Failed orders retried or alerted
 
 ### Performance Tracking (PERF)
 
-- [ ] **PERF-01**: Realized and unrealized P&L calculated accurately
-- [ ] **PERF-02**: Win rate tracked (percentage of profitable trades)
-- [ ] **PERF-03**: Return on investment tracked over time
-- [ ] **PERF-04**: Maximum drawdown from peak tracked
-- [ ] **PERF-05**: Complete trade history browsable in UI
-- [ ] **PERF-06**: Performance attributed per strategy
+- [x] **PERF-01**: Realized and unrealized P&L calculated accurately
+- [x] **PERF-02**: Win rate tracked (percentage of profitable trades)
+- [x] **PERF-03**: Return on investment tracked over time
+- [x] **PERF-04**: Maximum drawdown from peak tracked
+- [x] **PERF-05**: Complete trade history browsable in UI
+- [x] **PERF-06**: Performance attributed per strategy
 
 ### Monitoring & Alerting (MON)
 
-- [ ] **MON-01**: System health dashboard shows agent status, API connectivity, queue health
-- [ ] **MON-02**: Alert generated on every trade entry and exit
-- [ ] **MON-03**: Alert generated when risk limits are approached or breached
-- [ ] **MON-04**: Alert generated on system errors (agent crash, API failure, DB issues)
-- [ ] **MON-05**: Daily performance summary generated automatically
-- [ ] **MON-06**: Exchange connection status displayed in UI
+- [x] **MON-01**: System health dashboard shows agent status, API connectivity, queue health
+- [x] **MON-02**: Alert generated on every trade entry and exit
+- [x] **MON-03**: Alert generated when risk limits are approached or breached
+- [x] **MON-04**: Alert generated on system errors (agent crash, API failure, DB issues)
+- [x] **MON-05**: Daily performance summary generated automatically
+- [x] **MON-06**: Exchange connection status displayed in UI
 
 ### Safety Features (SAFE)
 
@@ -181,20 +181,20 @@ Deferred to future release. Not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 1 | Pending |
-| INFRA-02 | Phase 1 | Pending |
-| INFRA-03 | Phase 1 | Pending |
-| INFRA-04 | Phase 1 | Pending |
-| INFRA-05 | Phase 1 | Pending |
-| INFRA-06 | Phase 1 | Pending |
-| LOOP-01 | Phase 2 | Pending |
-| LOOP-02 | Phase 2 | Pending |
-| LOOP-03 | Phase 2 | Pending |
-| LOOP-04 | Phase 2 | Pending |
-| LOOP-05 | Phase 2 | Pending |
-| LOOP-06 | Phase 2 | Pending |
-| LOOP-07 | Phase 2 | Pending |
-| LOOP-08 | Phase 2 | Pending |
+| INFRA-01 | Phase 1 | Complete |
+| INFRA-02 | Phase 1 | Complete |
+| INFRA-03 | Phase 1 | Complete |
+| INFRA-04 | Phase 1 | Complete |
+| INFRA-05 | Phase 1 | Complete |
+| INFRA-06 | Phase 1 | Complete |
+| LOOP-01 | Phase 2 | Complete |
+| LOOP-02 | Phase 2 | Complete |
+| LOOP-03 | Phase 2 | Complete |
+| LOOP-04 | Phase 2 | Complete |
+| LOOP-05 | Phase 2 | Complete |
+| LOOP-06 | Phase 2 | Complete |
+| LOOP-07 | Phase 2 | Complete |
+| LOOP-08 | Phase 2 | Complete |
 | RISK-01 | Phase 3 | Complete |
 | RISK-02 | Phase 3 | Complete |
 | RISK-03 | Phase 3 | Complete |
@@ -202,25 +202,25 @@ Deferred to future release. Not in current roadmap.
 | RISK-05 | Phase 3 | Complete |
 | RISK-06 | Phase 3 | Complete |
 | RISK-07 | Phase 3 | Complete |
-| POS-01 | Phase 4 | Pending |
-| POS-02 | Phase 4 | Pending |
-| POS-03 | Phase 4 | Pending |
-| POS-04 | Phase 4 | Pending |
-| POS-05 | Phase 4 | Pending |
-| POS-06 | Phase 4 | Pending |
-| POS-07 | Phase 4 | Pending |
-| PERF-01 | Phase 5 | Pending |
-| PERF-02 | Phase 5 | Pending |
-| PERF-03 | Phase 5 | Pending |
-| PERF-04 | Phase 5 | Pending |
-| PERF-05 | Phase 5 | Pending |
-| PERF-06 | Phase 5 | Pending |
-| MON-01 | Phase 6 | Pending |
-| MON-02 | Phase 6 | Pending |
-| MON-03 | Phase 6 | Pending |
-| MON-04 | Phase 6 | Pending |
-| MON-05 | Phase 6 | Pending |
-| MON-06 | Phase 6 | Pending |
+| POS-01 | Phase 4 | Complete |
+| POS-02 | Phase 4 | Complete |
+| POS-03 | Phase 4 | Complete |
+| POS-04 | Phase 4 | Complete |
+| POS-05 | Phase 4 | Complete |
+| POS-06 | Phase 4 | Complete |
+| POS-07 | Phase 4 | Complete |
+| PERF-01 | Phase 5 | Complete |
+| PERF-02 | Phase 5 | Complete |
+| PERF-03 | Phase 5 | Complete |
+| PERF-04 | Phase 5 | Complete |
+| PERF-05 | Phase 5 | Complete |
+| PERF-06 | Phase 5 | Complete |
+| MON-01 | Phase 6 | Complete |
+| MON-02 | Phase 6 | Complete |
+| MON-03 | Phase 6 | Complete |
+| MON-04 | Phase 6 | Complete |
+| MON-05 | Phase 6 | Complete |
+| MON-06 | Phase 6 | Complete |
 | SIG-01 | Phase 7 | Pending |
 | SIG-02 | Phase 7 | Pending |
 | SIG-03 | Phase 7 | Pending |

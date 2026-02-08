@@ -106,7 +106,7 @@ Plans:
 - [x] 03-02-PLAN.md — Kraken Rate Limiting & Market Safety (Redis counter, Liquidity check)
 - [x] 03-03-PLAN.md — Automated Protection & Halt Controls (Daily Loss, Engine SL)
 
-### Phase 4: Position & Order Management
+### Phase 4: Position & Order Management [COMPLETE]
 **Goal:** Users can open and close positions with market and limit orders
 
 **Dependencies:** Phase 3 (requires risk enforcement)
@@ -127,7 +127,7 @@ Plans:
 - [ ] 04-02-PLAN.md — Order lifecycle reconciliation for pending, partial fill, and rejection outcomes
 - [x] 04-03-PLAN.md — Live Trading UI upgrade for review-first ticket, pending section, and close workflow
 
-### Phase 5: Strategy Backtesting
+### Phase 5: Strategy Backtesting [COMPLETE]
 **Goal:** Users can test trading strategies against historical data before live deployment
 
 **Dependencies:** Phase 4 (requires position management)
@@ -146,7 +146,7 @@ Plans:
 - [x] 05-02-PLAN.md — Backtest engine and strategy rule evaluator
 - [x] 05-03-PLAN.md — Backtesting UI component and integration
 
-### Phase 6: Advanced Strategy Features
+### Phase 6: Advanced Strategy Features [COMPLETE]
 **Goal:** Strategies can use complex rules, multiple timeframes, and AI-driven decisions
 
 **Dependencies:** Phase 5 (requires backtesting)
@@ -154,11 +154,11 @@ Plans:
 **Requirements:** STRAT-01, STRAT-02, STRAT-03, STRAT-04, STRAT-05, STRAT-06, STRAT-07, STRAT-08, STRAT-09
 
 **Success Criteria:**
-1. Strategy can reference indicators across multiple timeframes
-2. Agent generates strategy suggestions based on market conditions
-3. User can customize AI-proposed strategy via UI
-4. Strategy can be promoted from paper to live after performance review
-5. AI agent auto-adjusts strategy parameters when performance degrades
+1. Strategy can reference indicators across multiple timeframes [MET]
+2. Agent generates strategy suggestions based on market conditions [MET]
+3. User can customize AI-proposed strategy via UI [MET]
+4. Strategy can be promoted from paper to live after performance review [MET]
+5. AI agent auto-adjusts strategy parameters when performance degrades [MET]
 
 ### Phase 7: AI Chat Integration
 **Goal:** Users can query trading context and get recommendations via AI assistant
@@ -173,6 +173,13 @@ Plans:
 3. Agent provides risk-adjusted suggestions when user asks "What should I do?"
 4. Chat references market conditions from Market Analyst agent
 5. User can request strategy adjustments via conversational interface
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Backend chat context assembly, guardrail policy engine, and response contract normalization
+- [ ] 07-02-PLAN.md — Frontend ChatWindow SSE parsing, history mapping, and hybrid response rendering
+- [ ] 07-03-PLAN.md — AI chat API orchestration with guardrail enforcement and integration regressions
 
 ### Phase 8: Performance Analytics
 **Goal:** Dashboard displays comprehensive trading performance metrics
@@ -234,6 +241,6 @@ Plans:
 
 **Total phases:** 11
 **Total requirements:** 63
-**Completion:** 3/11 phases (27%)
-**Current phase:** Phase 4 (Position & Order Management) — ready to execute
-**Updated:** 2026-02-06
+**Completion:** 6/11 phases (54%)
+**Current phase:** Phase 7 (AI Chat Integration) — ready to execute
+**Updated:** 2026-02-08
