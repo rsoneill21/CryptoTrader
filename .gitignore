@@ -7,8 +7,12 @@ triad/triad.db-wal
 triad/triad.db-shm
 __pycache__/
 *.pyc
+.venv/
 backend/venv/
 node_modules/
 *.db
 *.db-wal
 *.db-shm
+*.log
+trigger_snapshot.py
+verify_sse.py
