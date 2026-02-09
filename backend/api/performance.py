@@ -41,6 +41,7 @@ class PerformanceHistoryPoint(BaseModel):
     sortino_ratio: Optional[float]
     volatility: Optional[float]
     max_drawdown: Optional[float]
+    win_rate: Optional[float]
     alpha: Optional[float]
 
 class PerformanceHistoryResponse(BaseModel):
