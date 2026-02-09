@@ -19,6 +19,7 @@ import StrategyLab from './pages/StrategyLab';
 import Backtesting from './pages/Backtesting';
 import LiveTrading from './pages/LiveTrading';
 import AIChat from './pages/AIChat';
+import PerformanceAnalytics from './pages/PerformanceAnalytics';
 import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
 
@@ -82,6 +83,16 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <AIChat />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/performance"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <PerformanceAnalytics />
                   </Layout>
                 </ProtectedRoute>
               }
