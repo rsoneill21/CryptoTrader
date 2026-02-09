@@ -49,3 +49,6 @@ httpx>=0.26.0
 
 # Kraken API
 krakenex>=2.2.1
+
+# Performance Analytics
+quantstats>=0.0.62
