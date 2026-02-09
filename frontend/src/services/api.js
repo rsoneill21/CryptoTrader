@@ -646,5 +646,13 @@ export const strategiesAPI = {
     api.delete(`/api/strategies/${id}/adjustments`),
 };
 
+// Performance API
+export const performanceAPI = {
+  summary: () => api.get('/api/performance/summary'),
+  history: (timeframe = '1w') => api.get('/api/performance/history', { params: { timeframe } }),
+  trades: (limit = 20) => api.get('/api/performance/trades', { params: { limit } }),
+  streamURL: `${API_BASE_URL}/api/performance/stream`,
+};
+
 // Export default instance for custom requests
 export default api;
