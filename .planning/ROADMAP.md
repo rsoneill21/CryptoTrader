@@ -184,14 +184,14 @@ Plans:
 - [x] 07-05-PLAN.md — High-fidelity chat rendering for recommendations and rationales (gap closure)
 - [x] 07-06-PLAN.md — AI context grounding and frontend history fix (gap closure)
 - [x] 07-07-PLAN.md — Restore history richness via structured persistence (gap closure)
-- [ ] 07-08-PLAN.md — Address verification gaps (context grounding, history rendering, richness persistence)
+- [x] 07-08-PLAN.md — Address verification gaps (context grounding, history rendering, richness persistence)
 
 ### Phase 8: Performance Analytics
 **Goal:** Dashboard displays comprehensive trading performance metrics
 
 **Dependencies:** Phase 7 (requires full data pipeline)
 
-**Requirements:** DASH-01, DASH-02, DASH-03, DASH-04, DASH-05, DASH-06, DASH-07
+**Requirements:** PERF-01, PERF-02, PERF-03, PERF-04, PERF-05, PERF-06
 
 **Success Criteria:**
 1. Dashboard shows cumulative P&L chart over time
@@ -199,6 +199,14 @@ Plans:
 3. Dashboard displays Sharpe ratio, max drawdown, win rate
 4. Performance compared against buy-and-hold baseline
 5. Dashboard updates in real-time as trades execute
+
+**Plans:** 4 plans
+
+Plans:
+- [x] 08-01-PLAN.md — Performance snapshot engine with periodic and event-based triggers
+- [ ] 08-02-PLAN.md — Analytics service with QuantStats integration and real-time SSE API
+- [ ] 08-03-PLAN.md — Performance analytics dashboard with equity curve and financial metrics
+- [ ] 08-04-PLAN.md — Phase 08 gap closure: formalization and integration testing
 
 ### Phase 9: Safety & Reliability
 **Goal:** System detects and mitigates failures before they cause losses
@@ -246,6 +254,6 @@ Plans:
 
 **Total phases:** 11
 **Total requirements:** 63
-**Completion:** 6/11 phases (54%)
-**Current phase:** Phase 7 (AI Chat Integration) — ready to execute gaps
-**Updated:** 2026-02-08
+**Completion:** 7/11 phases (63%)
+**Current phase:** Phase 8 (Performance Analytics) — gap closure
+**Updated:** 2026-02-09
