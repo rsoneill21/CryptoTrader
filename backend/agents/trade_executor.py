@@ -508,6 +508,15 @@ class TradeExecutorAgent(BaseAgent):
                         "fee": str(status.fee),
                     },
                 )
+                
+                # Trigger performance snapshot on closed order
+                if status.status == OrderStatus.CLOSED:
+                    try:
+                        from services.performance_service import performance_service
+                        asyncio.create_task(performance_service.capture_snapshot())
+                    except Exception as exc:
+                        logger.warning("Failed to trigger performance snapshot: %s", exc)
+
                 self._pending_orders.pop(signal_id, None)
             else:
                 logger.debug(

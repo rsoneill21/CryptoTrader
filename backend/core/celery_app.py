@@ -57,6 +57,14 @@ celery_app.conf.update(
             "task": "core.tasks.monitor_active_strategies",
             "schedule": 3600.0,  # Every hour
         },
+        "capture-periodic-snapshot": {
+            "task": "core.tasks.capture_periodic_snapshot",
+            "schedule": 3600.0,  # Every hour
+        },
+        "cleanup-performance-snapshots": {
+            "task": "core.tasks.cleanup_old_performance_snapshots",
+            "schedule": 86400.0,  # Every 24 hours
+        },
     },
 )
 

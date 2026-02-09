@@ -114,3 +114,25 @@ def monitor_active_strategies():
     except Exception:
         # Fallback for complex environments
         return asyncio.run(_run())
+
+
+@celery_app.task
+def capture_periodic_snapshot():
+    """
+    Periodic task to capture portfolio performance snapshot.
+    """
+    import asyncio
+    from services.performance_service import performance_service
+
+    return asyncio.run(performance_service.capture_snapshot())
+
+
+@celery_app.task
+def cleanup_old_performance_snapshots():
+    """
+    Periodic task to cleanup old performance snapshots based on retention policy.
+    """
+    import asyncio
+    from services.performance_service import performance_service
+
+    return asyncio.run(performance_service.cleanup_old_snapshots())
