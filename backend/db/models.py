@@ -364,6 +364,7 @@ class PerformanceSnapshot(Base):
     # Metrics (Historical Fidelity)
     sharpe_ratio = Column(Float, nullable=True)
     sortino_ratio = Column(Float, nullable=True)
+    volatility = Column(Float, nullable=True)
     max_drawdown = Column(Float, nullable=True)
     win_rate = Column(Float, nullable=True)
     alpha = Column(Float, nullable=True)

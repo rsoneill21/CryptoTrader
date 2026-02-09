@@ -11,6 +11,7 @@ from db.database import AsyncSessionLocal
 from db.models import PerformanceSnapshot, Trade, MarketData
 from services.portfolio import portfolio_service
 from agents.market_analyst import market_analyst_agent
+from core.message_queue import message_queue, Channels
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class PerformanceService:
                 # Default metrics
                 sharpe = 0.0
                 sortino = 0.0
+                volatility = 0.0
                 max_drawdown = 0.0
                 win_rate = 0.0
                 alpha = 0.0
@@ -103,6 +105,7 @@ class PerformanceService:
                         try:
                             sharpe = float(qs.stats.sharpe(returns))
                             sortino = float(qs.stats.sortino(returns))
+                            volatility = float(qs.stats.volatility(returns))
                             max_drawdown = float(qs.stats.max_drawdown(returns))
                         except Exception as e:
                             logger.warning(f"Error calculating quantstats: {e}")
@@ -129,6 +132,7 @@ class PerformanceService:
                     metadata_json={"prices": prices},
                     sharpe_ratio=self._sanitize_metric(sharpe),
                     sortino_ratio=self._sanitize_metric(sortino),
+                    volatility=self._sanitize_metric(volatility),
                     max_drawdown=self._sanitize_metric(max_drawdown),
                     win_rate=win_rate,
                     alpha=self._sanitize_metric(alpha),
@@ -138,6 +142,23 @@ class PerformanceService:
                 await session.commit()
                 await session.refresh(snapshot)
                 
+                # Publish snapshot to SSE channel
+                try:
+                    await message_queue.publish(Channels.PERFORMANCE, {
+                        "total_equity": float(snapshot.total_equity),
+                        "cash_balance": float(snapshot.cash_balance),
+                        "asset_value": float(snapshot.asset_value),
+                        "sharpe_ratio": float(snapshot.sharpe_ratio or 0),
+                        "sortino_ratio": float(snapshot.sortino_ratio or 0),
+                        "volatility": float(snapshot.volatility or 0),
+                        "max_drawdown": float(snapshot.max_drawdown or 0),
+                        "win_rate": float(snapshot.win_rate or 0),
+                        "alpha": float(snapshot.alpha or 0),
+                        "timestamp": snapshot.timestamp.isoformat()
+                    })
+                except Exception as mq_err:
+                    logger.warning(f"Failed to publish performance snapshot to MQ: {mq_err}")
+
                 logger.info(f"Captured performance snapshot: equity={total_equity:.2f}, sharpe={sharpe:.2f}")
                 return snapshot
                 

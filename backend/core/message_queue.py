@@ -391,6 +391,7 @@ class Channels:
     AI_DECISIONS = "agent:ai_decisions"
     SYSTEM_EVENTS = "agent:system_events"
     ORCHESTRATOR = "agent:orchestrator"
+    PERFORMANCE = "agent:performance"
 
     # Stream channels (use with publish_reliable/consume_reliable)
     STREAM_TRADE_SIGNALS = "trade_signals"  # Becomes stream:trade_signals:p{N}
