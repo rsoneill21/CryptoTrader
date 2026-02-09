@@ -19,13 +19,14 @@
 
 ## Current Position
 
-**Phase:** Phase 7 - AI Chat Integration (7 of 11)
-**Plan:** 8 of 8
-**Status:** Phase complete
-**Last activity:** 2026-02-08 - Completed 07-08: Address verification gaps (context grounding, history rendering, richness persistence)
-**Progress:** ██████████ 100% (48/48 plans complete; Phase 7: 8/8)
+**Phase:** Phase 8 - Performance Analytics (8 of 11)
+**Plan:** 1 of 3
+**Status:** In progress
+**Last activity:** 2026-02-09 - Completed 08-01: Implement Core Performance Snapshot Engine
+**Progress:** ██████████ 96% (49/51 plans complete; Phase 8: 1/3)
 
 - **What's happening:**
+- Completed 08-01: Core performance snapshot engine with automated capture and tiered retention.
 - Completed 07-08: Close verification gaps in AI chat integration.
 - Completed 07-07: Restore history richness via structured persistence
 - Completed 07-06: AI context grounding and frontend history fix
@@ -192,6 +193,9 @@
 | Chat orchestration uses context -> policy -> response contract flow | 2026-02-08 | Deterministic backend guardrails are required before API streaming integration to enforce stale-context refusal and elevated-risk defaults | Phase 7 can wire `/api/ai/chat` against stable payload schema without duplicating policy in UI |
 | Use distinct colors for trade actions in chat | 2026-02-08 | Visual clarity for recommendations; green for Buy, amber for Sell/Hold/Reduce improves readability | Frontend ChatWindow uses color-coded badges |
 | Preserve snake_case for inner rationale metadata | 2026-02-08 | Align with backend data structure from rationale extraction; avoids unnecessary mapping of deep nested objects | RationaleDisplay uses snake_case keys for thesis/signals/risk/counterfactual |
+| Use quantstats for metrics | 2026-02-09 | Leveraged quantstats library for standardized financial metric calculations (Sharpe, Alpha, etc.) | Standardizes performance reporting across the system |
+| Tiered retention policy | 2026-02-09 | Prune old data while keeping daily anchors to manage DB growth | Prevents performance snapshot table from bloating over time |
+| Dual capture triggers | 2026-02-09 | Snapshots captured hourly AND immediately after trade closure | Ensures both periodic history and trade-impact fidelity |
 
 ### Active Todos
 
@@ -444,12 +448,12 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-02-08 14:20 UTC
-**Stopped at:** Completed 07-05-PLAN.md
+**Last session:** 2026-02-09 10:00 UTC
+**Stopped at:** Completed 08-01-PLAN.md
 **Resume file:** None
 
 **For next session:**
-1. Continue Phase 7 by executing 07-05-PLAN.md (Final verification and gap closure for AI chat integration).
+1. Continue Phase 8 by executing 08-02-PLAN.md (Equity Curve & Metrics API).
 
 
 **Context to carry forward:**
