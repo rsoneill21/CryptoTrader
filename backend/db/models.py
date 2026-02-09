@@ -346,3 +346,26 @@ class BacktestRun(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     strategy = relationship("Strategy", back_populates="backtests")
+
+
+class PerformanceSnapshot(Base):
+    """Historical portfolio performance snapshots."""
+    __tablename__ = "performance_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, server_default=func.now(), index=True)
+    total_equity = Column(Float, nullable=False)
+    cash_balance = Column(Float, nullable=False)
+    asset_value = Column(Float, nullable=False)
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
+    asset_pair = Column(String(50), nullable=True)
+    metadata_json = Column(JSON, nullable=True)  # Store asset prices used
+    
+    # Metrics (Historical Fidelity)
+    sharpe_ratio = Column(Float, nullable=True)
+    sortino_ratio = Column(Float, nullable=True)
+    max_drawdown = Column(Float, nullable=True)
+    win_rate = Column(Float, nullable=True)
+    alpha = Column(Float, nullable=True)
+
+    strategy = relationship("Strategy")
