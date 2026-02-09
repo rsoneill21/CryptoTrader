@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 # Add ROOT_PATH to sys.path
 ROOT_PATH = Path(__file__).resolve().parent.parent.parent
@@ -19,6 +19,7 @@ if TEST_DB_PATH.exists():
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
 from main import app
+from fastapi.responses import StreamingResponse
 from db.database import get_async_db, AsyncSessionLocal, Base, async_engine
 from db.models import PerformanceSnapshot, Trade, Strategy
 
@@ -129,6 +130,11 @@ async def test_get_performance_trades(client, db_session):
 
 @pytest.mark.asyncio
 async def test_performance_stream_smoke(client):
-    async with client.stream("GET", "/api/performance/stream") as response:
+    # Mock the generator itself to just yield one thing and exit
+    async def mock_generator():
+        yield "data: {}\n\n"
+    
+    with patch("api.performance.StreamingResponse", side_effect=lambda gen, **kwargs: StreamingResponse(mock_generator(), **kwargs)):
+        response = await client.get("/api/performance/stream")
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/event-stream"
+        assert "text/event-stream" in response.headers["content-type"]

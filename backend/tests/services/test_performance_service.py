@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, PropertyMock
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -62,10 +62,11 @@ async def test_capture_snapshot_paper(db_session):
     mock_snapshot.cash = 10000.0
     mock_snapshot.open_positions = []
     
-    with patch("services.performance_service.paper_trading_engine.snapshot", AsyncMock(return_value=mock_snapshot)), \
-         patch("services.performance_service.kraken_service.is_authenticated", False), \
+    with patch("services.paper_trading_service.paper_trading_engine.snapshot", AsyncMock(return_value=mock_snapshot)), \
+         patch("services.kraken.KrakenService.is_authenticated", new_callable=PropertyMock) as mock_auth, \
          patch("services.performance_service.AsyncSessionLocal", return_value=AsyncContextManagerMock(db_session)):
         
+        mock_auth.return_value = False
         snapshot = await performance_service.capture_snapshot()
         assert snapshot is not None
         assert snapshot.total_equity == 15000.0

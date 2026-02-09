@@ -206,7 +206,7 @@ Plans:
 - [x] 08-01-PLAN.md — Performance snapshot engine with periodic and event-based triggers
 - [x] 08-02-PLAN.md — Analytics service with QuantStats integration and real-time SSE API
 - [x] 08-03-PLAN.md — Performance analytics dashboard with equity curve and financial metrics
-- [ ] 08-04-PLAN.md — Phase 08 gap closure: formalization and integration testing
+- [x] 08-04-PLAN.md — Phase 08 gap closure: formalization and integration testing
 
 ### Phase 9: Safety & Reliability
 **Goal:** System detects and mitigates failures before they cause losses
