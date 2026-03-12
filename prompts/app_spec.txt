@@ -1,0 +1,675 @@
+<project_specification>
+  <project_name>CryptoTrader</project_name>
+
+  <overview>
+    A web-based AI-powered cryptocurrency trading platform that acts like a real human trader - analyzing markets in real-time, proposing and testing strategies via paper trading, and executing live trades with user approval. The system features a multi-agent architecture where specialized AI agents handle market analysis, strategy optimization, sentiment monitoring, risk management, and trade execution. Built for personal use with long-term continual AI integration.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>React</framework>
+      <styling>Modern CSS / CSS-in-JS (TailwindCSS or styled-components)</styling>
+      <charts>TradingView lightweight charts or similar for real-time crypto charts</charts>
+      <state_management>React Context or Redux for complex state</state_management>
+    </frontend>
+    <backend>
+      <runtime>Python 3.11+</runtime>
+      <framework>FastAPI (async support for real-time data)</framework>
+      <database>SQLite</database>
+      <task_queue>Celery or asyncio background tasks for agent processes</task_queue>
+    </backend>
+    <communication>
+      <api>RESTful API with WebSocket support for real-time updates</api>
+      <real_time>WebSockets for live price data and AI status updates</real_time>
+    </communication>
+    <ai_integration>
+      <models>OpenAI (GPT-4), Anthropic (Claude), Ollama (local models)</models>
+      <model_switching>Configurable model selection per agent or globally</model_switching>
+      <model_comparison>Performance tracking per model for comparison</model_comparison>
+    </ai_integration>
+    <exchange>
+      <primary>Kraken API</primary>
+      <future>Architecture supports Binance, Coinbase integration</future>
+    </exchange>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Python 3.11+ installed
+      - Node.js 18+ installed
+      - API keys: Kraken, OpenAI, Anthropic (Claude)
+      - SQLite (included with Python)
+    </environment_setup>
+  </prerequisites>
+
+  <feature_count>230</feature_count>
+
+  <architecture>
+    <pattern>Multi-Agent Architecture (built from start, modular for evolution)</pattern>
+    <agents>
+      <agent name="Market Analyst Agent">
+        <purpose>Monitors real-time price data, order books, indicators</purpose>
+        <responsibilities>
+          - Detect patterns, support/resistance levels
+          - Feed insights to main trading AI
+          - Continuous background monitoring
+        </responsibilities>
+      </agent>
+      <agent name="Strategy Optimizer Agent">
+        <purpose>Runs paper trade simulations and tunes parameters</purpose>
+        <responsibilities>
+          - Test strategies via paper trading
+          - Tune entry/exit thresholds, position sizing, stop-loss/take-profit
+          - Analyze strategy performance metrics
+          - Propose strategy improvements
+        </responsibilities>
+      </agent>
+      <agent name="Sentiment/News Agent">
+        <purpose>Monitors external data sources for market sentiment</purpose>
+        <responsibilities>
+          - Monitor Twitter/X, Reddit, news feeds
+          - Track on-chain data (whale movements, exchange flows)
+          - Summarize relevant market sentiment
+          - Flag unusual activity or breaking news
+        </responsibilities>
+      </agent>
+      <agent name="Risk Monitor Agent">
+        <purpose>Continuously calculates and monitors risk</purpose>
+        <responsibilities>
+          - Calculate overall risk score from multiple factors
+          - Watch for threshold breaches
+          - Trigger emergency actions (pause trading, alerts)
+          - Safety-critical, runs independently
+        </responsibilities>
+      </agent>
+      <agent name="Trade Executor Agent">
+        <purpose>Handles actual order placement</purpose>
+        <responsibilities>
+          - Place orders with Kraken API
+          - Manage order states and retries on failure
+          - Log all actions (distinguish AI trades vs manual)
+          - Reliable, isolated from other logic
+        </responsibilities>
+      </agent>
+      <agent name="Orchestrator / Main AI">
+        <purpose>Coordinates all agents and user interaction</purpose>
+        <responsibilities>
+          - Receive inputs from all specialized agents
+          - Make high-level trading decisions
+          - Handle user chat and collaboration
+          - Manage strategy lifecycle (paper to live)
+        </responsibilities>
+      </agent>
+    </agents>
+    <communication>
+      <method>Message queue (Redis) or database-based task queue</method>
+      <conflict_resolution>Priority system with main orchestrator having final say</conflict_resolution>
+    </communication>
+  </architecture>
+
+  <security_and_access_control>
+    <user_roles>
+      <role name="owner">
+        <description>Single user (personal use application)</description>
+        <permissions>
+          - Full access to all features
+          - Approve strategies for live trading
+          - Adjust risk parameters
+          - Configure AI models
+          - View all data and logs
+        </permissions>
+      </role>
+    </user_roles>
+    <authentication>
+      <method>Email/password with MFA (email-based)</method>
+      <session_timeout>Configurable session timeout with auto-logout</session_timeout>
+      <password_requirements>Strong password policy</password_requirements>
+    </authentication>
+    <sensitive_operations>
+      - Promoting strategy from paper to live requires confirmation
+      - Adjusting risk parameters requires confirmation
+      - Large position sizes may require extra confirmation
+    </sensitive_operations>
+  </security_and_access_control>
+
+  <core_features>
+    <authentication_security>
+      - User registration with email verification
+      - Login with email/password
+      - MFA setup and verification (email-based)
+      - Session management with configurable timeout
+      - Auto-logout after inactivity
+      - Secure password reset flow
+      - Protected route enforcement
+    </authentication_security>
+
+    <ai_strategy_lab_dashboard>
+      - View all strategies (paper trading, live, archived)
+      - Strategy creation via AI proposal based on market analysis
+      - GitHub repository import for strategies
+      - AI analyzes imported strategies and suggests modifications
+      - Paper trading simulation for all strategies
+      - Unlimited concurrent strategy testing
+      - Strategy performance metrics (win rate, ROI, drawdown)
+      - Data collection during paper trading:
+        - Entry/exit points and timing
+        - Market conditions at time of trade
+        - Indicators that triggered decisions
+        - Near-misses (what it almost did)
+      - Strategy optimization controls:
+        - Position sizing tuning
+        - Entry/exit threshold adjustment
+        - Stop-loss/take-profit optimization
+        - Timeframe adjustments
+        - Indicator parameter tuning
+      - Strategy comparison view
+      - Promote paper strategy to live (with approval)
+      - AI recommendations for promotion
+      - Strategy performance history
+    </ai_strategy_lab_dashboard>
+
+    <live_trading_dashboard>
+      - Real-time candlestick charts with indicators
+      - User-customizable indicators (RSI, MACD, Bollinger, etc.)
+      - AI-suggested indicators based on active strategy
+      - AI annotations on charts (toggleable via checkboxes):
+        - Support/resistance levels
+        - Pattern recognition markers
+        - Entry/exit zones
+        - Points of interest being monitored
+      - Current AI "thinking" / reasoning panel
+      - Active trades list with:
+        - Entry/exit points
+        - AI rationale for each trade
+        - Current P/L
+      - Position management controls:
+        - Manually close position
+        - Adjust stop-loss/take-profit
+        - Add to position
+        - Toggle AI management (default: AI manages)
+      - Manual trade detection log (trades AI recognizes as "not mine")
+      - Live price feeds from Kraken
+    </live_trading_dashboard>
+
+    <risk_management_system>
+      - Dynamic risk score calculation
+      - Individual risk factors:
+        - Max position size (% of portfolio)
+        - Max concurrent positions
+        - Daily loss limit
+        - Max drawdown threshold
+      - Configurable max risk score threshold
+      - AI can recommend parameter adjustments
+      - User approval required for AI-suggested changes
+      - Real-time risk monitoring
+      - Automatic trading pause when limits breached
+      - Risk alerts and notifications
+    </risk_management_system>
+
+    <ai_chat_collaboration_dashboard>
+      - Conversational interface with trading AI
+      - Adjustable communication style:
+        - Concise/data-driven
+        - Conversational/explanatory
+        - Context-adaptive
+      - Chat capabilities:
+        - "Why did you make that trade?"
+        - "What do you think about [coin]?"
+        - "Show me strategies for this market condition"
+        - "Let's brainstorm a new strategy"
+        - "Explain this pattern you detected"
+      - Alert-driven conversation flow (click alert to start chat)
+      - Full conversation history (searchable)
+      - AI learns user preferences over time
+      - AI references past discussions when relevant
+      - Strategy collaboration and ideation
+    </ai_chat_collaboration_dashboard>
+
+    <alerts_activity_log_dashboard>
+      - Alert types:
+        - Trade executed (entry/exit)
+        - Opportunity spotted
+        - Risk threshold approaching
+        - Strategy performance milestone
+        - Market anomaly / unusual activity
+        - Strategy promotion recommendation
+        - System issues (API errors, connection problems)
+      - In-app alert notifications
+      - Alert filtering:
+        - By alert type
+        - By strategy
+        - By coin/trading pair
+        - By date range
+        - By AI confidence level
+        - By action taken (executed/watched/skipped)
+      - Quick actions on alerts:
+        - Start chat about alert
+        - Approve/reject recommendations
+        - Snooze similar alerts
+        - Mark as reviewed
+        - Jump to relevant dashboard
+      - Complete activity log with all AI decisions
+      - Automatic action on qualifying alerts
+    </alerts_activity_log_dashboard>
+
+    <exchange_integration>
+      - Kraken API connection
+      - Real-time price data streaming
+      - Order placement (market, limit, stop)
+      - Order status tracking
+      - Trade history sync
+      - Balance and portfolio tracking
+      - Manual trade detection (log AI orders, recognize non-AI trades)
+      - API error handling with alerts
+      - Connection status monitoring
+    </exchange_integration>
+
+    <data_sources_monitoring>
+      - Price data (real-time from Kraken)
+      - Order book depth
+      - Social sentiment (Twitter/X, Reddit) - configurable
+      - News feeds - configurable
+      - On-chain data (whale movements, exchange flows) - configurable
+      - Fear & Greed index
+      - Other market indicators
+      - All data sources configurable (enable/disable)
+      - Data source status dashboard
+    </data_sources_monitoring>
+
+    <ai_model_management>
+      - OpenAI (GPT-4) integration
+      - Anthropic (Claude) integration
+      - Ollama local model support (future)
+      - Seamless model switching
+      - Per-agent model configuration
+      - Model performance comparison:
+        - Same strategy, different models paper trading
+        - Track win rate, ROI, decision quality per model
+        - Performance metrics dashboard
+      - Model selection for specific tasks
+    </ai_model_management>
+
+    <data_export>
+      - Export trade history (CSV for taxes)
+      - Export strategy performance reports
+      - Configurable data retention periods
+      - All AI trades logged forever (default)
+      - Recent market data retained (configurable)
+      - Database backup/restore
+    </data_export>
+
+    <error_handling_system_health>
+      - Kraken API failure handling with alerts
+      - AI confidence loss triggers alert
+      - Conflicting strategy signals resolution
+      - Network/connection issue handling
+      - Graceful degradation
+      - System status monitoring
+      - Error logging and diagnostics
+    </error_handling_system_health>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <users>
+        - id, email, password_hash, mfa_enabled, mfa_secret
+        - created_at, updated_at, last_login
+        - session_timeout_minutes, preferences_json
+      </users>
+      <sessions>
+        - id, user_id, token, expires_at, created_at
+      </sessions>
+      <strategies>
+        - id, name, description, rules_json, source (ai_generated/github/manual)
+        - status (paper/live/paused/archived), created_at, updated_at
+        - github_url (if imported), ai_modifications_json
+        - promoted_at, promoted_by_recommendation
+      </strategies>
+      <strategy_performance>
+        - id, strategy_id, period_start, period_end
+        - total_trades, winning_trades, losing_trades
+        - win_rate, total_pnl, max_drawdown, sharpe_ratio
+        - ai_model_used
+      </strategy_performance>
+      <trades>
+        - id, strategy_id, ai_model_used, is_paper, is_manual
+        - symbol, side (buy/sell), entry_price, exit_price
+        - quantity, pnl, fees
+        - entry_time, exit_time
+        - entry_reasoning_json, exit_reasoning_json
+        - market_conditions_json, indicators_json
+      </trades>
+      <orders>
+        - id, trade_id, exchange_order_id, status
+        - order_type, side, price, quantity, filled_quantity
+        - created_at, updated_at, error_message
+      </orders>
+      <ai_decisions>
+        - id, agent_name, decision_type, reasoning_json
+        - confidence_score, action_taken, timestamp
+        - related_strategy_id, related_trade_id
+        - near_miss (boolean), near_miss_reason
+      </ai_decisions>
+      <alerts>
+        - id, type, title, message, severity
+        - status (new/viewed/dismissed/actioned)
+        - related_strategy_id, related_trade_id
+        - created_at, actioned_at, action_taken
+        - ai_confidence
+      </alerts>
+      <chat_history>
+        - id, user_message, ai_response, timestamp
+        - related_alert_id, context_json
+        - learned_preferences_json
+      </chat_history>
+      <market_data>
+        - id, symbol, timestamp, open, high, low, close, volume
+        - source, timeframe
+      </market_data>
+      <sentiment_data>
+        - id, source (twitter/reddit/news/onchain)
+        - symbol, sentiment_score, summary, raw_data_json
+        - timestamp
+      </sentiment_data>
+      <risk_settings>
+        - id, max_position_size_pct, max_concurrent_positions
+        - daily_loss_limit, max_drawdown_pct
+        - max_risk_score, current_risk_score
+        - updated_at, last_ai_recommendation_json
+        - pending_ai_adjustment (boolean)
+      </risk_settings>
+      <model_performance>
+        - id, model_name, strategy_id, period_start, period_end
+        - total_decisions, correct_decisions, accuracy
+        - total_pnl, win_rate, avg_confidence
+      </model_performance>
+      <data_source_config>
+        - id, source_name, enabled, api_key_encrypted
+        - last_fetch, fetch_interval_seconds, config_json
+      </data_source_config>
+      <system_logs>
+        - id, level, source, message, details_json, timestamp
+      </system_logs>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <auth>
+      - POST /api/auth/register
+      - POST /api/auth/login
+      - POST /api/auth/logout
+      - POST /api/auth/mfa/setup
+      - POST /api/auth/mfa/verify
+      - POST /api/auth/password/reset
+      - GET /api/auth/session
+    </auth>
+    <strategies>
+      - GET /api/strategies
+      - GET /api/strategies/{id}
+      - POST /api/strategies (AI proposes)
+      - POST /api/strategies/import (GitHub import)
+      - PUT /api/strategies/{id}
+      - DELETE /api/strategies/{id}
+      - POST /api/strategies/{id}/promote (paper to live)
+      - GET /api/strategies/{id}/performance
+      - GET /api/strategies/{id}/trades
+    </strategies>
+    <trades>
+      - GET /api/trades
+      - GET /api/trades/{id}
+      - GET /api/trades/active
+      - POST /api/trades/{id}/close
+      - PUT /api/trades/{id}/adjust (stop-loss, take-profit)
+    </trades>
+    <ai>
+      - POST /api/ai/chat
+      - GET /api/ai/chat/history
+      - GET /api/ai/status (current thinking/state)
+      - GET /api/ai/models
+      - PUT /api/ai/models/active
+      - GET /api/ai/models/comparison
+      - GET /api/ai/decisions
+    </ai>
+    <alerts>
+      - GET /api/alerts
+      - GET /api/alerts/{id}
+      - PUT /api/alerts/{id}/status
+      - POST /api/alerts/{id}/action
+    </alerts>
+    <market>
+      - GET /api/market/prices
+      - GET /api/market/orderbook/{symbol}
+      - GET /api/market/candles/{symbol}
+      - WS /api/market/stream (WebSocket)
+    </market>
+    <risk>
+      - GET /api/risk/settings
+      - PUT /api/risk/settings
+      - GET /api/risk/score
+      - POST /api/risk/approve-adjustment
+    </risk>
+    <data_sources>
+      - GET /api/datasources
+      - PUT /api/datasources/{id}
+      - GET /api/datasources/{id}/status
+    </data_sources>
+    <export>
+      - GET /api/export/trades
+      - GET /api/export/strategies
+    </export>
+    <system>
+      - GET /api/system/health
+      - GET /api/system/logs
+    </system>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Sidebar navigation (collapsible)
+      - Main content area
+      - Top header with user info, alerts icon, AI status indicator
+    </main_structure>
+    <navigation>
+      - Dashboard selector (dropdown or tabs for 4 main dashboards)
+      - AI Strategy Lab
+      - Live Trading
+      - AI Chat
+      - Alerts & Activity Log
+      - Settings (risk, data sources, AI models, account)
+    </navigation>
+    <dashboard_layouts>
+      <strategy_lab>
+        - Strategy list panel (left or top)
+        - Strategy detail / editor (main area)
+        - Performance metrics panel
+        - Paper trading controls
+      </strategy_lab>
+      <live_trading>
+        - Price chart (main, large)
+        - AI annotations overlay (toggleable)
+        - Active positions panel
+        - AI reasoning panel
+        - Position controls
+      </live_trading>
+      <ai_chat>
+        - Chat message history
+        - Message input
+        - Context panel (related alerts, current market)
+      </ai_chat>
+      <alerts_log>
+        - Filter controls (top)
+        - Alert/activity list (main)
+        - Detail panel (on select)
+      </alerts_log>
+    </dashboard_layouts>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Dark theme primary (trading apps typically dark)
+      - Accent colors for buy (green) / sell (red)
+      - Neutral grays for UI elements
+      - Alert colors (yellow warning, red critical, blue info)
+    </color_palette>
+    <typography>
+      - Monospace for prices and numbers
+      - Clean sans-serif for UI text
+      - Clear hierarchy for data-dense displays
+    </typography>
+  </design_system>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Foundation & Infrastructure</title>
+      <tasks>
+        - FastAPI project setup with async support
+        - SQLite database setup with all tables
+        - React project setup
+        - Authentication system (login, MFA, sessions)
+        - Basic UI shell with navigation
+        - Agent infrastructure (message queue/task system)
+      </tasks>
+    </step>
+    <step number="2">
+      <title>Exchange Integration & Trade Executor Agent</title>
+      <tasks>
+        - Kraken API integration
+        - Real-time price data streaming
+        - Trade Executor Agent implementation
+        - Order management (place, track, cancel)
+        - Trade logging (AI vs manual detection)
+        - Portfolio and balance tracking
+      </tasks>
+    </step>
+    <step number="3">
+      <title>Market Analyst Agent & Data Infrastructure</title>
+      <tasks>
+        - Market Analyst Agent implementation
+        - Real-time chart component
+        - Technical indicators calculation
+        - Pattern detection algorithms
+        - Support/resistance identification
+        - Market data storage and retrieval
+      </tasks>
+    </step>
+    <step number="4">
+      <title>AI Strategy Lab Dashboard</title>
+      <tasks>
+        - Strategy CRUD operations
+        - AI strategy proposal system
+        - GitHub strategy import
+        - Paper trading engine
+        - Strategy Optimizer Agent implementation
+        - Performance tracking and metrics
+        - Strategy comparison views
+      </tasks>
+    </step>
+    <step number="5">
+      <title>Live Trading Dashboard</title>
+      <tasks>
+        - Interactive chart with AI annotations
+        - Annotation toggle controls (checkboxes)
+        - AI reasoning panel
+        - Position management controls
+        - Real-time updates via WebSocket
+        - Risk scoring integration
+      </tasks>
+    </step>
+    <step number="6">
+      <title>Risk Monitor Agent & Risk System</title>
+      <tasks>
+        - Risk Monitor Agent implementation
+        - Dynamic risk score calculation
+        - Risk parameter management
+        - AI adjustment recommendations
+        - Approval workflow for changes
+        - Emergency pause functionality
+      </tasks>
+    </step>
+    <step number="7">
+      <title>AI Chat Dashboard & Orchestrator</title>
+      <tasks>
+        - Chat UI implementation
+        - Main Orchestrator AI integration
+        - Conversation history and memory
+        - Preference learning system
+        - Alert-driven conversation flow
+        - Multi-model support
+      </tasks>
+    </step>
+    <step number="8">
+      <title>Alerts & Activity Log Dashboard</title>
+      <tasks>
+        - Alert generation from all agents
+        - Alert UI with filtering
+        - Quick actions on alerts
+        - Activity log with full history
+        - Alert-to-chat linking
+      </tasks>
+    </step>
+    <step number="9">
+      <title>Sentiment/News Agent & Data Sources</title>
+      <tasks>
+        - Sentiment/News Agent implementation
+        - Social media integration (Twitter/X, Reddit)
+        - News feed integration
+        - On-chain data integration
+        - Data source configuration UI
+        - Sentiment scoring and summarization
+      </tasks>
+    </step>
+    <step number="10">
+      <title>AI Model Management & Comparison</title>
+      <tasks>
+        - Multi-model integration (OpenAI, Claude, Ollama)
+        - Model switching functionality
+        - Performance comparison tracking
+        - Model selection per agent
+        - Comparison dashboard
+      </tasks>
+    </step>
+    <step number="11">
+      <title>Export, Polish & Error Handling</title>
+      <tasks>
+        - Trade history export (CSV)
+        - Strategy report export
+        - Data retention configuration
+        - Comprehensive error handling
+        - Connection failure recovery
+        - System health monitoring
+        - UI polish and optimization
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - AI can propose, paper trade, and optimize strategies autonomously
+      - User can approve strategies for live trading
+      - Live trading executes with proper risk management
+      - All agents communicate and coordinate effectively
+      - AI provides meaningful insights and explanations
+      - Alert system catches and acts on important events
+    </functionality>
+    <user_experience>
+      - Intuitive dashboard navigation
+      - Real-time data feels responsive
+      - AI communication is clear and helpful
+      - Risk controls are easy to understand and adjust
+      - Chat feels like talking to a knowledgeable trading partner
+    </user_experience>
+    <technical_quality>
+      - Reliable exchange API integration
+      - No data loss or corruption
+      - Graceful error handling
+      - Secure authentication and session management
+      - Agents run independently without blocking each other
+    </technical_quality>
+    <design_polish>
+      - Professional trading platform appearance
+      - Clear data visualization
+      - Consistent UI patterns
+      - Accessible and readable
+    </design_polish>
+  </success_criteria>
+</project_specification>

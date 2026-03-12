@@ -1,0 +1,50 @@
+{
+  "models": ["claude", "codex", "gemini"],
+  "lock_timeout_minutes": 30,
+  "heartbeat_interval_minutes": 5,
+  "stale_heartbeat_minutes": 10,
+  "stuck_task_claims_before_block": 3,
+  "stuck_task_idle_minutes": 30,
+  "review_assignment": "round_robin",
+  "auto_approve_when_solo": true,
+  "auto_approve_timeout_minutes": 15,
+  "usage_limits": {
+    "claude": {
+      "max_tokens_per_hour": 100000,
+      "max_tokens_per_day": 1000000,
+      "max_requests_per_hour": 60,
+      "max_requests_per_day": 500,
+      "alert_threshold_pct": 0.7,
+      "rotation_threshold_pct": 0.85
+    },
+    "codex": {
+      "max_tokens_per_hour": 100000,
+      "max_tokens_per_day": 1000000,
+      "max_requests_per_hour": 60,
+      "max_requests_per_day": 500,
+      "alert_threshold_pct": 0.7,
+      "rotation_threshold_pct": 0.85
+    },
+    "gemini": {
+      "max_tokens_per_hour": 100000,
+      "max_tokens_per_day": 1000000,
+      "max_requests_per_hour": 60,
+      "max_requests_per_day": 500,
+      "alert_threshold_pct": 0.7,
+      "rotation_threshold_pct": 0.85
+    }
+  },
+  "phase_dependencies": {
+    "1": [],
+    "2": ["1"],
+    "3": ["2"],
+    "4": ["3"],
+    "5": ["4"],
+    "6": ["1"],
+    "7": ["6"],
+    "8": ["7"],
+    "9": ["8"],
+    "10": ["9"],
+    "11": ["10"]
+  }
+}

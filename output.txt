@@ -1,0 +1,18 @@
+Creating: triad-control
+{"ok":false,"error":"name_taken"}
+Creating: triad-claude
+{"ok":false,"error":"name_taken"}
+Creating: triad-codex
+{"ok":false,"error":"name_taken"}
+Creating: triad-gemini
+{"ok":false,"error":"name_taken"}
+Creating: triad-alerts
+{"ok":false,"error":"name_taken"}
+Creating: triad-cryptotrader-control
+{"ok":false,"error":"name_taken"}
+Creating: triad-cryptotrader-claude
+{"ok":false,"error":"name_taken"}
+Creating: triad-cryptotrader-codex
+{"ok":false,"error":"name_taken"}
+Creating: triad-cryptotrader-gemini
+{"ok":false,"error":"name_taken"}

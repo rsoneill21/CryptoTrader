@@ -1,0 +1,850 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import api from '../services/api';
+import useAuth from '../hooks/useAuth';
+
+const CHAT_TONE_EVENT = 'cryptotrader:chatTonePreferenceChanged';
+const CHAT_TONE_STORAGE_KEY = 'cryptotrader.ai_chat_tone';
+const DEFAULT_CHAT_TONE = 'balanced';
+
+const CHAT_TONES = [
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    description: 'Friendly coverage with risk-aware context and a measured pace.',
+  },
+  {
+    value: 'concise',
+    label: 'Concise',
+    description: 'Short, bullet-style responses you can scan quickly.',
+  },
+  {
+    value: 'detailed',
+    label: 'Detailed',
+    description: 'Step-by-step rationale with supporting reasoning.',
+  },
+  {
+    value: 'data_driven',
+    label: 'Data-driven',
+    description: 'Focus on numbers, metrics, and evidence-backed signals.',
+  },
+  {
+    value: 'conversational',
+    label: 'Conversational',
+    description: 'Relaxed tone that feels like brainstorming with a teammate.',
+  },
+];
+
+const loadStoredChatTone = () => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_CHAT_TONE;
+  }
+  try {
+    return window.localStorage.getItem(CHAT_TONE_STORAGE_KEY) ?? DEFAULT_CHAT_TONE;
+  } catch (error) {
+    console.debug('Unable to read saved chat tone preference', error);
+    return DEFAULT_CHAT_TONE;
+  }
+};
+
+const DEFAULT_SOURCES = [
+  {
+    id: 'news',
+    name: 'News feeds',
+    description: 'Worldwide crypto, macro, and regulation headlines.',
+    enabled: true,
+    api_key: '',
+    last_fetch: '2026-01-30T01:00:00Z',
+    fetch_status: 'healthy',
+    fetch_message: 'Fetched 4 sources without error.',
+    fetch_interval_seconds: 60,
+  },
+  {
+    id: 'twitter',
+    name: 'Twitter / X streams',
+    description: 'Live social chatter and sentiment threads.',
+    enabled: true,
+    api_key: '',
+    last_fetch: '2026-01-30T00:53:00Z',
+    fetch_status: 'stale',
+    fetch_message: 'Delayed updates (rate limit).',
+    fetch_interval_seconds: 45,
+  },
+  {
+    id: 'onchain',
+    name: 'On-chain signals',
+    description: 'Whale flow, exchange net flows, and staking moves.',
+    enabled: false,
+    api_key: '',
+    last_fetch: '2026-01-29T23:40:00Z',
+    fetch_status: 'error',
+    fetch_message: 'Provider unreachable.',
+    fetch_interval_seconds: 90,
+  },
+];
+
+const STATUS_LABELS = {
+  healthy: 'Healthy',
+  stale: 'Stale',
+  error: 'Error',
+  pending: 'Pending',
+  unknown: 'Unknown',
+};
+
+const STATUS_STYLES = {
+  healthy: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200',
+  stale: 'border-amber-400/60 bg-amber-500/10 text-amber-100',
+  error: 'border-rose-500/60 bg-rose-500/10 text-rose-200',
+  pending: 'border-sky-500/60 bg-sky-500/10 text-sky-200',
+  unknown: 'border-gray-600 bg-gray-700/60 text-gray-300',
+};
+
+const formatTimestamp = (value) => {
+  if (!value) {
+    return 'Not yet fetched';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+const formatBytes = (value) => {
+  if (value == null || Number.isNaN(Number(value))) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = Number(value);
+  let exponent = 0;
+  while (size >= 1024 && exponent < units.length - 1) {
+    size /= 1024;
+    exponent += 1;
+  }
+  return `${size.toFixed(2)} ${units[exponent]}`;
+};
+
+const SettingsPage = () => {
+  const { user } = useAuth();
+  const [sources, setSources] = useState(
+    DEFAULT_SOURCES.map((item) => ({ ...item, dirty: false }))
+  );
+  const [loading, setLoading] = useState(true);
+  const [savingSourceId, setSavingSourceId] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [visibleKeyId, setVisibleKeyId] = useState(null);
+  const [tonePreference, setTonePreference] = useState(() => loadStoredChatTone());
+  const [toneFeedback, setToneFeedback] = useState({ type: '', text: '' });
+  const [backups, setBackups] = useState([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupListError, setBackupListError] = useState('');
+  const [backupMessage, setBackupMessage] = useState({ type: '', text: '' });
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(null);
+
+  const broadcastTonePreference = useCallback((value) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(CHAT_TONE_EVENT, { detail: value }));
+  }, []);
+
+  useEffect(() => {
+    broadcastTonePreference(tonePreference);
+  }, [broadcastTonePreference, tonePreference]);
+
+  const persistTonePreference = useCallback((value) => {
+    setToneFeedback({ type: '', text: '' });
+    setTonePreference(value);
+    if (typeof window === 'undefined') {
+      setToneFeedback({
+        type: 'error',
+        text: 'Chat tone preferences require a browser environment.',
+      });
+      return;
+    }
+    try {
+      window.localStorage.setItem(CHAT_TONE_STORAGE_KEY, value);
+      setToneFeedback({
+        type: 'success',
+        text: 'Chat tone saved — new replies will follow this style.',
+      });
+    } catch (error) {
+      console.error('Unable to persist chat tone preference:', error);
+      setToneFeedback({
+        type: 'error',
+        text: 'Unable to save chat tone. Please allow storage access to continue.',
+      });
+    }
+  }, []);
+
+  const handleToneSelect = useCallback(
+    (value) => {
+      if (value === tonePreference) {
+        setToneFeedback({ type: '', text: '' });
+        return;
+      }
+      persistTonePreference(value);
+    },
+    [persistTonePreference, tonePreference]
+  );
+
+  const currentToneDetails = useMemo(
+    () => CHAT_TONES.find((option) => option.value === tonePreference) ?? CHAT_TONES[0],
+    [tonePreference]
+  );
+
+  // MFA State
+  const [mfaSetupData, setMfaSetupData] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaVerifying, setMfaVerifying] = useState(false);
+  const [mfaMessage, setMfaMessage] = useState({ type: '', text: '' });
+
+  const handleMFASetup = async () => {
+    setMfaMessage({ type: '', text: '' });
+    try {
+      const response = await api.post('/api/auth/mfa/setup');
+      setMfaSetupData(response.data);
+    } catch (err) {
+      setMfaMessage({ type: 'error', text: err.message || 'Failed to initiate MFA setup' });
+    }
+  };
+
+  const handleMFAVerify = async (e) => {
+    e.preventDefault();
+    if (mfaCode.length !== 6) {
+      setMfaMessage({ type: 'error', text: 'Enter a valid 6-digit code' });
+      return;
+    }
+    setMfaVerifying(true);
+    setMfaMessage({ type: '', text: '' });
+    try {
+      await api.post('/api/auth/mfa/verify', { code: mfaCode });
+      setMfaMessage({ type: 'success', text: 'MFA enabled successfully!' });
+      setMfaSetupData(null);
+      setMfaCode('');
+      // User state will update on next session check or refresh
+    } catch (err) {
+      setMfaMessage({ type: 'error', text: err.message || 'MFA verification failed' });
+    } finally {
+      setMfaVerifying(false);
+    }
+  };
+
+  const loadSources = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const response = await api.get('/api/settings/data-sources');
+      const data = response.data?.data_sources ?? response.data?.sources ?? [];
+      if (!Array.isArray(data) || !data.length) {
+        setSources(DEFAULT_SOURCES.map((item) => ({ ...item, dirty: false })));
+        return;
+      }
+      const normalized = data.map((item) => ({
+        id: item.id ?? item.source_name ?? `${item.name ?? 'source'}-${Math.random()}`,
+        name: item.display_name ?? item.name ?? item.source_name ?? 'Data source',
+        description: item.description ?? 'Configured data source',
+        enabled: Boolean(item.enabled),
+        api_key: item.api_key ?? '',
+        last_fetch: item.last_fetch ?? item.last_run ?? null,
+        fetch_status: item.fetch_status ?? item.status ?? 'unknown',
+        fetch_message: item.fetch_message ?? item.last_error ?? '',
+        fetch_interval_seconds: item.fetch_interval_seconds ?? 60,
+        dirty: false,
+      }));
+      setSources(normalized);
+    } catch (err) {
+      console.error('Data source load failed:', err);
+      setErrorMessage(err.message || 'Unable to load data sources.');
+      setSources(DEFAULT_SOURCES.map((item) => ({ ...item, dirty: false })));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  const loadDatabaseBackups = useCallback(async () => {
+    setBackupsLoading(true);
+    setBackupListError('');
+    try {
+      const response = await api.get('/api/system/backups');
+      const data = Array.isArray(response.data?.backups) ? response.data.backups : [];
+      setBackups(data);
+    } catch (err) {
+      console.error('Database backup list failed:', err);
+      setBackups([]);
+      setBackupListError(err.message || 'Unable to load database backups.');
+    } finally {
+      setBackupsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDatabaseBackups();
+  }, [loadDatabaseBackups]);
+
+  const handleCreateBackup = useCallback(async () => {
+    if (creatingBackup) {
+      return;
+    }
+    setBackupMessage({ type: '', text: '' });
+    setCreatingBackup(true);
+    try {
+      await api.post('/api/system/backups');
+      setBackupMessage({
+        type: 'success',
+        text: 'Snapshot created successfully. The backup list has been refreshed.',
+      });
+      await loadDatabaseBackups();
+    } catch (err) {
+      console.error('Unable to create backup:', err);
+      setBackupMessage({
+        type: 'error',
+        text: err.message || 'Failed to create database backup.',
+      });
+    } finally {
+      setCreatingBackup(false);
+    }
+  }, [creatingBackup, loadDatabaseBackups]);
+
+  const handleRestoreBackup = useCallback(async (backup) => {
+    if (!backup?.file_name) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        'Restoring this backup will replace the active database. Continue?'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    setBackupMessage({ type: '', text: '' });
+    setRestoringBackup(backup.file_name);
+    try {
+      await api.post('/api/system/backups/restore', { file_name: backup.file_name });
+      setBackupMessage({
+        type: 'success',
+        text: `${backup.file_name} restored. Please refresh the app to pick up the restored data.`,
+      });
+    } catch (err) {
+      console.error('Database restore failed:', err);
+      setBackupMessage({
+        type: 'error',
+        text: err.message || 'Failed to restore the selected backup.',
+      });
+    } finally {
+      setRestoringBackup(null);
+    }
+  }, []);
+
+  const updateSource = useCallback((id, changes) => {
+    setSources((prev) =>
+      prev.map((source) =>
+        source.id === id
+          ? {
+              ...source,
+              ...changes,
+              dirty: true,
+            }
+          : source
+      )
+    );
+  }, []);
+
+  const handleToggle = useCallback(
+    (id) => {
+      setSources((prev) =>
+        prev.map((source) =>
+          source.id === id
+            ? {
+                ...source,
+                enabled: !source.enabled,
+                dirty: true,
+              }
+            : source
+        )
+      );
+    },
+    []
+  );
+
+  const handleApiKeyChange = useCallback((id, value) => {
+    updateSource(id, { api_key: value });
+  }, [updateSource]);
+
+  const handleVisibilityToggle = useCallback((id) => {
+    setVisibleKeyId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleSave = useCallback(
+    async (id) => {
+      const target = sources.find((source) => source.id === id);
+      if (!target) {
+        return;
+      }
+      setSavingSourceId(id);
+      setErrorMessage('');
+      setSuccessMessage('');
+      try {
+        await api.put(`/api/settings/data-sources/${id}`, {
+          enabled: target.enabled,
+          api_key: target.api_key || null,
+        });
+        setSuccessMessage(`${target.name} updated successfully.`);
+        setSources((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  dirty: false,
+                  last_fetch: item.last_fetch,
+                }
+              : item
+          )
+        );
+      } catch (err) {
+        console.error('Unable to update source:', err);
+        setErrorMessage(err.message || `Failed to save ${target.name}.`);
+      } finally {
+        setSavingSourceId(null);
+      }
+    },
+    [sources]
+  );
+
+  const statusSummary = useMemo(() => {
+    const counts = {
+      healthy: 0,
+      stale: 0,
+      error: 0,
+      pending: 0,
+      unknown: 0,
+    };
+    let latestFetch = null;
+    sources.forEach((source) => {
+      const key = counts[source.fetch_status] !== undefined ? source.fetch_status : 'unknown';
+      counts[key] += 1;
+      if (source.last_fetch) {
+        const parsed = Date.parse(source.last_fetch);
+        if (!Number.isNaN(parsed) && (!latestFetch || parsed > latestFetch)) {
+          latestFetch = parsed;
+        }
+      }
+    });
+    return {
+      counts,
+      refreshedAt: latestFetch
+        ? new Date(latestFetch).toLocaleString('en-US', {
+            hour12: true,
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
+        : 'No recent pulls',
+    };
+  }, [sources]);
+
+  const hasUnsavedChanges = useMemo(
+    () => sources.some((source) => source.dirty),
+    [sources]
+  );
+
+  const summaryChips = useMemo(() => {
+    return Object.entries(statusSummary.counts).map(([status, count]) => {
+      const label = STATUS_LABELS[status] || 'Unknown';
+      const style = STATUS_STYLES[status] || STATUS_STYLES.unknown;
+      return (
+        <div
+          key={status}
+          className={`rounded-2xl border px-4 py-2 text-sm font-semibold ${style}`}
+        >
+          {label}: {count}
+        </div>
+      );
+    });
+  }, [statusSummary.counts]);
+
+  const backupSummary = useMemo(
+    () => ({
+      total: backups.length,
+      latest: backups.length ? formatTimestamp(backups[0].timestamp) : 'No backups yet',
+    }),
+    [backups]
+  );
+
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      {/* MFA Configuration Section */}
+      <section className="rounded-2xl border border-gray-700/60 bg-gray-900/60 p-6 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-emerald-400">Security</p>
+            <h2 className="text-2xl font-semibold text-white">Multi-Factor Authentication</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Add an extra layer of security to your account using TOTP (Google Authenticator, Authy, etc).
+            </p>
+          </div>
+          <div>
+            {user?.mfa_enabled ? (
+              <span className="rounded-full bg-emerald-500/20 px-4 py-2 text-sm font-bold text-emerald-400 border border-emerald-500/50">
+                MFA ENABLED
+              </span>
+            ) : (
+              !mfaSetupData && (
+                <button
+                  onClick={handleMFASetup}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition"
+                >
+                  Setup MFA
+                </button>
+              )
+            )}
+          </div>
+        </div>
+
+        {mfaSetupData && (
+          <div className="mt-6 space-y-4 rounded-xl border border-blue-500/30 bg-blue-500/5 p-5">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-blue-200">1. Add to Authenticator App</p>
+              <p className="text-xs text-gray-400">
+                Enter the following secret key into your authenticator app (SHA1, 30s, 6 digits).
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="rounded bg-slate-800 px-3 py-1 text-lg font-mono text-cyan-300">
+                  {mfaSetupData.secret}
+                </code>
+              </div>
+            </div>
+
+            <form onSubmit={handleMFAVerify} className="space-y-3 pt-2 border-t border-blue-500/20">
+              <p className="text-sm font-semibold text-blue-200">2. Verify Code</p>
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  maxLength="6"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  className="w-32 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-center text-lg font-mono tracking-widest text-white focus:border-blue-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={mfaVerifying || mfaCode.length !== 6}
+                  className="rounded-lg bg-white px-6 py-2 text-sm font-bold text-slate-900 hover:bg-gray-100 disabled:opacity-50 transition"
+                >
+                  {mfaVerifying ? 'Verifying...' : 'Enable MFA'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMfaSetupData(null)}
+                  className="px-4 py-2 text-sm text-gray-400 hover:text-white transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {mfaMessage.text && (
+          <div className={`mt-4 rounded-lg p-3 text-sm ${
+            mfaMessage.type === 'error' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+          }`}>
+            {mfaMessage.text}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/40 p-6 shadow-xl shadow-black/60">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-slate-400">Data export</p>
+            <h2 className="text-2xl font-semibold text-white">Database backups</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Snapshot the SQLite database before sensitive updates or restore a prior state instantly.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleCreateBackup}
+              disabled={creatingBackup}
+              className="inline-flex items-center justify-center rounded-lg border border-emerald-400/80 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingBackup ? 'Creating snapshot...' : 'Create snapshot'}
+            </button>
+            <button
+              type="button"
+              onClick={loadDatabaseBackups}
+              disabled={backupsLoading}
+              className="inline-flex items-center justify-center rounded-lg border border-sky-500/80 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {backupsLoading ? 'Refreshing...' : 'Refresh list'}
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+          <span>Total snapshots: {backupSummary.total}</span>
+          <span>Latest: {backupSummary.latest}</span>
+        </div>
+        {backupMessage.text && (
+          <p className={`mt-4 text-sm ${backupMessage.type === 'error' ? 'text-rose-300' : 'text-emerald-300'}`}>
+            {backupMessage.text}
+          </p>
+        )}
+        {backupListError && (
+          <div className="mt-4 rounded-2xl border border-rose-400/70 bg-rose-400/10 p-3 text-xs text-rose-200">
+            {backupListError}
+          </div>
+        )}
+        {backupsLoading && !backups.length && (
+          <div className="mt-6 rounded-2xl border border-dashed border-gray-700/60 bg-gray-900/60 p-6 text-center text-sm text-gray-300">
+            Loading backups...
+          </div>
+        )}
+        {!backupsLoading && !backups.length && (
+          <div className="mt-6 rounded-2xl border border-dashed border-gray-700/60 bg-gray-900/60 p-6 text-center text-sm text-gray-300">
+            No backups yet. Use &quot;Create snapshot&quot; to capture the current data state.
+          </div>
+        )}
+        {backups.length > 0 && (
+          <div className="mt-6 grid gap-3">
+            {backups.map((backup) => (
+              <div
+                key={backup.file_name}
+                className="rounded-2xl border border-gray-700/50 bg-gray-900/80 p-4 shadow-sm shadow-black/30"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{backup.file_name}</p>
+                  <span className="text-xs uppercase tracking-wide text-gray-400">
+                    {formatTimestamp(backup.timestamp)}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 break-all">{backup.path}</p>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-400">
+                  <span>{formatBytes(backup.size_bytes)}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRestoreBackup(backup)}
+                    disabled={restoringBackup === backup.file_name}
+                    className="inline-flex items-center justify-center rounded-lg border border-rose-500/70 bg-rose-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {restoringBackup === backup.file_name ? 'Restoring...' : 'Restore backup'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/50 p-6 shadow-xl shadow-black/60">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-sky-400">AI chat</p>
+            <h2 className="text-2xl font-semibold text-white">Communication style</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Choose how the orchestrator frames explanations. The selected tone is retained until you update it again.
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Current style: <span className="font-semibold text-white">{currentToneDetails.label}</span>
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {CHAT_TONES.map((tone) => {
+            const isActive = tone.value === tonePreference;
+            return (
+              <button
+                key={tone.value}
+                type="button"
+                onClick={() => handleToneSelect(tone.value)}
+                aria-pressed={isActive}
+                className={`flex flex-col gap-2 rounded-2xl border px-4 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                  isActive
+                    ? 'border-emerald-500/70 bg-emerald-500/10 text-white'
+                    : 'border-gray-700/60 bg-gray-900/60 text-gray-200 hover:border-sky-500/60 hover:bg-gray-900/80'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{tone.label}</p>
+                  {isActive && (
+                    <span className="rounded-full border border-emerald-500/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                      Active
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">{tone.description}</p>
+              </button>
+            );
+          })}
+        </div>
+        {toneFeedback.text && (
+          <p
+            className={`mt-5 text-sm ${
+              toneFeedback.type === 'error' ? 'text-rose-300' : 'text-emerald-300'
+            }`}
+          >
+            {toneFeedback.text}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-gray-700/60 bg-gradient-to-br from-gray-900/80 to-gray-900/40 p-6 shadow-xl shadow-black/60">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-blue-300">System controls</p>
+            <h1 className="text-3xl font-semibold text-white">Data source configuration</h1>
+            <p className="mt-1 text-sm text-gray-400">
+              Enable or disable connectors, update API credentials, and monitor ingest status in one place.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={loadSources}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-500/80 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? 'Refreshing...' : 'Refresh statuses'}
+            </button>
+            <div className="text-right text-xs text-gray-400">
+              <p>Latest fetch: {statusSummary.refreshedAt}</p>
+              <p>{hasUnsavedChanges ? 'You have unsaved changes.' : 'All sources synced.'}</p>
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 grid auto-rows-min gap-3 text-xs sm:grid-cols-2 lg:grid-cols-5">
+          {summaryChips}
+        </div>
+      </section>
+
+      {errorMessage && (
+        <div className="rounded-2xl border border-rose-400/70 bg-rose-400/10 p-4 text-sm text-rose-200">
+          {errorMessage}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="rounded-2xl border border-emerald-400/70 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+          {successMessage}
+        </div>
+      )}
+
+      <section className="space-y-4">
+        {loading && sources.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-gray-700/60 bg-gray-800/60 p-8 text-center text-sm text-gray-300">
+            Loading data sources...
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {sources.map((source) => {
+              const status = source.fetch_status || 'unknown';
+              const badgeStyle = STATUS_STYLES[status] || STATUS_STYLES.unknown;
+              const statusLabel = STATUS_LABELS[status] || STATUS_LABELS.unknown;
+              return (
+                <div
+                  key={source.id}
+                  className="flex flex-col rounded-2xl border border-gray-700/60 bg-gray-900/60 p-5 shadow-sm shadow-black/40"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-white">{source.name}</h2>
+                      <p className="mt-1 text-sm text-gray-400">{source.description}</p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${badgeStyle}`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-gray-300">
+                      <span>Enabled</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggle(source.id)}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full border border-gray-600 transition ${
+                          source.enabled ? 'bg-emerald-500/80' : 'bg-gray-700'
+                        }`}
+                        aria-pressed={source.enabled}
+                      >
+                        <span
+                          className={`h-5 w-5 rounded-full bg-white transition ${
+                            source.enabled ? 'translate-x-5' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </label>
+                    <div className="text-xs text-gray-400">
+                      Last fetch: {formatTimestamp(source.last_fetch)}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 border-t border-gray-700/40 pt-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-widest text-gray-500">API key</p>
+                      <button
+                        type="button"
+                        onClick={() => handleVisibilityToggle(source.id)}
+                        className="text-xs font-semibold text-blue-300 hover:text-blue-200"
+                      >
+                        {visibleKeyId === source.id ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <input
+                      type={visibleKeyId === source.id ? 'text' : 'password'}
+                      value={source.api_key}
+                      onChange={(event) => handleApiKeyChange(source.id, event.target.value)}
+                      autoComplete="off"
+                      placeholder="Enter API key"
+                      className="mt-2 w-full rounded-xl border border-gray-700 bg-gray-900/80 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      Credentials are stored encrypted. Leave blank to keep the existing key.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-400">
+                    <span>Fetch every {source.fetch_interval_seconds ?? 60}s</span>
+                    {source.fetch_message && <span>Note: {source.fetch_message}</span>}
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-end gap-3">
+                    {source.dirty && (
+                      <span className="text-xs uppercase tracking-wide text-amber-300">
+                        Unsaved
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleSave(source.id)}
+                      disabled={savingSourceId === source.id}
+                      className="inline-flex items-center justify-center rounded-xl border border-blue-500/80 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingSourceId === source.id ? 'Saving...' : 'Save changes'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
+export default SettingsPage;
